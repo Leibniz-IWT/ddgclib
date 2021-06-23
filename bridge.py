@@ -41,7 +41,7 @@ abc = (a, b, c)
 #HC, bV, K_f, H_f, neck_verts, neck_sols = hyperboloid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibrium=True)
 HC, bV, K_f, H_f, neck_verts, neck_sols = catenoid_N(r, theta_p, gamma, abc, N=4,
     #refinement=2,
-    refinement=2,
+    refinement=4,
     #refinement=6,
     #refinement=1,
     cdist=1e-5, equilibrium=True)
@@ -94,7 +94,7 @@ if 1:
                 print(f"c_outd['NdA_i'] = {c_outd['NdA_i']}")
                 if 1:
                     #print(f"HNdA_i_Cij= {c_outd['HNdA_ij_Cij']}")
-                    sum_HNdA_ij_Cij =  np.sum(c_outd['HNdA_ij_Cij'], axis=0)
+                    sum_HNdA_ij_Cij = np.sum(c_outd['HNdA_ij_Cij'], axis=0)
                     print(f"np.sum(HNdA_i_Cij, axis=0)) = {sum_HNdA_ij_Cij }")
                     print(f"np.sum(HNdA_i_Cij) = {np.sum(c_outd['HNdA_ij_Cij'])}")
                     HNdA_ij_Cij_dot_NdA_i = np.dot(c_outd['NdA_i'], sum_HNdA_ij_Cij )
@@ -175,8 +175,19 @@ if 1:
                 elif 0: # Appears to be more accurate, sadly
                     hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
 
+                # Prev. converging working, changed on 2021-06-22:
                 elif 1:
                     hndA_ij_dot_hnda_i = 0.5 * np.sum(hnda_ij) / c_ijk
+
+                # Latest attempt 2021-06-22:
+                elif 0:
+                    print(f'hnda_ij = {hnda_ij}')
+                    print(f'c_ijk = {c_ijk}')
+                    sum_HNdA_ij_Cij = np.sum(hnda_ij, axis=0)
+                    print(f'sum_HNdA_ij_Cij = {sum_HNdA_ij_Cij}')
+                    hndA_ij_dot_hnda_i = 0.5 * np.linalg.norm(sum_HNdA_ij_Cij) / c_ijk
+
+                    #hndA_ij_dot_hnda_i = 0.5 * sum_HNdA_ij_Cij
                 HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
                 k_H_2 = (hndA_ij_dot_hnda_i/2.0) ** 2
                 K_H_2.append(k_H_2)
@@ -219,7 +230,7 @@ if 1:
 
             print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
 
-        HNdA_ij_dot_hnda_i = new_HNdA_ij_dot_hnda_i
+        #HNdA_ij_dot_hnda_i = new_HNdA_ij_dot_hnda_i
         return HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij
 
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
@@ -239,6 +250,22 @@ if 1:
          print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
          yr = HNdA_ij_dot_hnda_i - H_f
          plt.plot(xr, yr, 'x', label='HNdA_ij_dot_hnda_i - H_f')
+
+         l_hnda_i_cij = []
+         for hnda_i_cij in HNdA_i_Cij:
+             print(f'h = {hnda_i_cij}')
+
+             l_hnda_i_cij.append(np.sum(hnda_i_cij))
+
+             #h = np.sum(np.sum(hnda_i_cij), axis=0)
+             #l_hnda_i_cij.append(np.linalg.norm(h))
+
+             #h = np.sum(np.sum(hnda_i_cij), axis=0)
+             #l_hnda_i_cij.append(np.linalg.norm(h))
+
+         #print(f'HNdA_i_Cij = {HNdA_i_Cij}')
+         yr = l_hnda_i_cij - H_f
+         plt.plot(xr, yr, 'x', label='HNdA_i_Cij - H_f')
         # yr = HNdA_i_Cij
         # plt.plot(xr, yr, label='HNdA_i_Cij - H_f')
          plt.ylabel('Difference')

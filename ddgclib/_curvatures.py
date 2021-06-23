@@ -92,6 +92,8 @@ class Arrow3D(FancyArrowPatch):
         FancyArrowPatch.draw(self, renderer)
 
 
+#def complex_curvatures
+
 def vectorise_vnn(v):
     F = [v.x_a]
     nn = []
@@ -125,7 +127,6 @@ def vectorise_vnn(v):
 
     F = np.array(F)
     return F, nn
-
 
 def b_vectorise_vnn(v):
     F = [v.x_a]
@@ -178,6 +179,134 @@ def b_vectorise_vnn(v):
 
 # Curvature computations
 # Interior curvatures
+
+def HC_curvatures(HC, bV, r, theta_p, printout=False):
+    R = r / np.cos(theta_p)
+    K_f = (1 / R) ** 2
+    H_f = 2 / R  # 2 / R
+    HNdA_ij = []
+    HNdA_i = []
+    HNdA_ij_sum = []
+    HNdA_ij_dot = []
+    C_ijk = []
+    A_ijk = []
+    N_i = []
+    int_V = []
+    HNda_v_cache = {}
+    C_ijk_v_cache = {}
+    K_H_cache = {}
+    HNdA_i_Cij = []
+    Theta_i = []
+    for v in HC.V:
+        N_f0 = np.array(
+            [0.0, 0.0, R * np.sin(theta_p)]) - v.x_a  # First approximation
+        N_f0 = normalized(N_f0)[0]
+        N_i.append(N_f0)
+        F, nn = vectorise_vnn(v)
+        # Compute discrete curvatures
+        # c_outd = curvatures(F, nn, n_i=N_f0)
+        c_outd = b_curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+        # c_outd = curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+        HNda_v_cache[v.x] = c_outd['HNdA_ij']
+        HNdA_i.append(c_outd['HNdA_i'])
+        HNdA_ij.append(c_outd['HNdA_ij'])
+        # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
+        HNdA_ij_sum.append(np.sum(c_outd['HNdA_ij']))
+        HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
+
+        HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
+        C_ijk.append(np.sum(c_outd['C_ijk']))
+        C_ijk_v_cache[v.x] = np.sum(c_outd['C_ijk'])
+        A_ijk.append(np.sum(c_outd['A_ijk']))
+        int_V.append(v)
+        Theta_i.append(c_outd['theta_i'])
+        # New
+        h_disc = (1 / 2.0) * np.sum(
+            np.dot(c_outd['HNdA_ij'], c_outd['n_i'])) / np.sum(
+            c_outd['C_ijk'])
+        # h_disc = (1 / 2.0) * np.sum(np.dot(c_outd['HNdA_ij'], N_f0)) / np.sum(c_outd['C_ijk'])
+        K_H_cache[v.x] = (h_disc / 2.0) ** 2
+
+    H_disc = (1 / 2.0) * np.array(HNdA_ij_dot) / C_ijk
+    K_H = (H_disc / 2.0) ** 2
+    # Adjust HNdA_ij_sum and HNdA_ij_dot
+    # HNdA_ij_sum = 0.5 * np.array(HNdA_ij_sum) / C_ijk
+    HNdA_ij_sum = np.array(HNdA_ij_sum) / C_ijk
+    HNdA_ij_dot = 0.5 * np.array(HNdA_ij_dot) / C_ijk
+
+    # New normalized dot product odeas
+    HNdA_ij_dot_hnda_i = []
+    K_H_2 = []
+    HN_i = []
+    for hnda_ij, c_ijk, n_i in zip(HNdA_ij, C_ijk, N_i):
+        if 0:
+            hnda_i = np.sum(hnda_ij, axis=0)
+            # print(f'hnda_i = {hnda_i}')
+            n_hnda_i = normalized(hnda_i)[0]
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_hnda_i)) / c_ijk
+            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+
+        # COMMENTED OUT 2021-06-22:
+        elif 0:  # Appears to be more accurate, sadly
+            # hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
+            # TODO: CHECK THIS:
+            hndA_ij_dot_hnda_i = -HNdA_ij_sum
+            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+
+        elif 0:  # Appears to be more accurate, sadly
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
+
+        # Prev. converging working, changed on 2021-06-22:
+        elif 0:
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(hnda_ij) / c_ijk
+        elif 1:  # Appears to be more accurate, sadly
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / (c_ijk)
+            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+        elif 0:
+            hndA_ij_dot_hnda_i = -np.sum(np.dot(hnda_ij, n_i)) / c_ijk
+        k_H_2 = (hndA_ij_dot_hnda_i / 2.0) ** 2
+        K_H_2.append(k_H_2)
+
+        HN_i.append(0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk)
+        hnda_i_sum = 0.0
+        for hnda_ij_sum in HNdA_ij_sum:
+            hnda_i_sum += hnda_ij_sum
+
+    if printout:
+        print(f'H_disc = {H_disc}')
+        print(f'HNdA_i = {HNdA_i}')
+        print(f'HNdA_ij = {HNdA_ij}')
+        print(f'HNdA_ij_sum = {HNdA_ij_sum}')
+        print(f'HNdA_ij_dot = {HNdA_ij_dot}')
+
+        print(f'=' * len('Discrete (New):'))
+        print(f'Discrete (New):')
+        print(f'=' * len('Discrete (New):'))
+        print(f'K_H = {K_H}')
+        print('-')
+        print('New:')
+        print('-')
+        print(f'hnda_i_sum = {hnda_i_sum}')
+        print(f'K_H_2 = {K_H_2}')
+        print(f'C_ijk = {C_ijk}')
+        print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
+        print(f'A_ijk = {A_ijk}')
+        print(f'np.sum(A_ijk) = {np.sum(A_ijk)}')
+        print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(C_ijk)}')
+        print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(A_ijk)}')
+        print(f'np.sum(K_H_2) = {np.sum(K_H_2)}')
+        print(f'HNdA_ij_dot_hnda_i = {np.array(HNdA_ij_dot_hnda_i)}')
+        print(
+            f'np.sum(HNdA_ij_dot_hnda_i) = {np.sum(np.array(HNdA_ij_dot_hnda_i))}')
+
+        print(f'K_H_2 - K_f = {K_H_2 - K_f}')
+        print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+
+        print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
+
+    return (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,
+            HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij, Theta_i)
+
 def int_curvatures(HC, bV, r, theta_p, printout=False):
     """
     TODO: This is from _capillary_rise.py and the normals need to be updated!
@@ -257,8 +386,10 @@ def int_curvatures(HC, bV, r, theta_p, printout=False):
             hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_hnda_i)) / c_ijk
             HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
         else: # Appears to be more accurate, sadly
+            #print(f'hnda_ij, n_i = {hnda_ij, n_i}')
             hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
             HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+
         k_H_2 = (hndA_ij_dot_hnda_i/2.0) ** 2
         K_H_2.append(k_H_2)
 
@@ -299,7 +430,6 @@ def int_curvatures(HC, bV, r, theta_p, printout=False):
         print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
 
     return HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij
-
 
 def curvatures_hn_ij_c_ij(F, nn, n_i=None):
     """
@@ -484,7 +614,7 @@ def curvatures_hn_ij_c_ij(F, nn, n_i=None):
             HNdA_ij_Cij[j] = HNdA_ij[j] / (C_ij_l + C_ij_k)
 
         if 1:
-            HNdA_ij_Cij[j] = HNdA_ij[j] / (C_ijk[j]+ C_ijl[j])
+            HNdA_ij_Cij[j] = HNdA_ij[j] / (C_ijk[j] + C_ijl[j])
 
         #NOTE: THIS WAS ON IN LAST FORMULATION:
         if 0:
@@ -834,7 +964,6 @@ def curvatures(F, nn, n_i=None):
     # A_i  # A_i := abs(C_i) the area of the dual cell
     return dict(**locals())
 
-
 # Boundary curvatures
 def b_curvatures(HC, bV, r, theta_p, printout=False):
     R = r / np.cos(theta_p)
@@ -868,7 +997,8 @@ def b_curvatures(HC, bV, r, theta_p, printout=False):
             HNda_v_cache[v.x] = c_outd['HNdA_ij']
             HNdA_i.append(c_outd['HNdA_i'])
             HNdA_ij.append(c_outd['HNdA_ij'])
-            HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
+            #HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
+            HNdA_ij_sum.append(np.sum(c_outd['HNdA_ij']))
             HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
 
             HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
@@ -886,10 +1016,8 @@ def b_curvatures(HC, bV, r, theta_p, printout=False):
         else:
             continue
 
-
     H_disc = (1 / 2.0) * np.array(HNdA_ij_dot) / C_ijk
     K_H = (H_disc / 2.0)**2
-
     # Adjust HNdA_ij_sum and HNdA_ij_dot
     #HNdA_ij_sum = 0.5 * np.array(HNdA_ij_sum) / C_ijk
     HNdA_ij_sum = np.array(HNdA_ij_sum) / C_ijk
@@ -906,12 +1034,25 @@ def b_curvatures(HC, bV, r, theta_p, printout=False):
             n_hnda_i = normalized(hnda_i)[0]
             hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_hnda_i)) / c_ijk
             HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
-        else: # Appears to be more accurate, sadly
+        
+        # COMMENTED OUT 2021-06-22:
+        elif 0: # Appears to be more accurate, sadly
             #hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
             #TODO: CHECK THIS:
             hndA_ij_dot_hnda_i = -HNdA_ij_sum
-
             HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+
+        elif 0:  # Appears to be more accurate, sadly
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
+
+        # Prev. converging working, changed on 2021-06-22:
+        elif 0:
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(hnda_ij) / c_ijk
+        elif 1:  # Appears to be more accurate, sadly
+            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / (c_ijk)
+            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
+        elif 0:
+            hndA_ij_dot_hnda_i = -np.sum(np.dot(hnda_ij, n_i)) / c_ijk
         k_H_2 = (hndA_ij_dot_hnda_i/2.0) ** 2
         K_H_2.append(k_H_2)
 
@@ -955,193 +1096,6 @@ def b_curvatures(HC, bV, r, theta_p, printout=False):
     return (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,
             HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij, Theta_i)
 
-
-def b_curvatures_i(F, nn, b_F, b_nn, n_i=None):
-    """
-    Boundary curvatures
-    F: Array of vectors forming the star domain of v_i = F[0]
-    nn: Connections within each vertex in union with the star domain
-    n_i: Normal vector at vertex v_i
-    """
-
-    bE_ij = b_F - F[0]
-    # Discrete vector area (only two edges)
-    # Simplex areas of ijk and normals
-    wedge_ij_ik = np.cross(bE_ij[0], bE_ij[1])
-
-    # Compute k_g
-    theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik), np.dot(bE_ij[0], bE_ij[1]))
-    k_g = np.pi - theta_i_jk #- othjers
-
-    if 0:
-        if n_i is None:
-            n_i = normalized(F[0])[0]
-        #print(f'n_i = {n_i}')
-        # TODO: Later we can cache these containers to avoid extra computations
-        # Edges from i to j:
-        E_ij = F[1:] - F[0]
-        E_ij = np.vstack([np.zeros(3), E_ij])
-        E_jk = np.zeros_like(E_ij)
-        E_ik = np.zeros_like(E_ij)
-        #print(f'E_ij = {E_ij}')
-        hat_E_ij = normalized(E_ij)
-        # E_ij = e_ij
-        L_ij = np.linalg.norm(E_ij, axis=1)
-        #print(f'L_ij = {L_ij}')
-        Varphi_ij = np.zeros_like(L_ij)
-
-        # Edge midpoints
-        mdp_ij = 0.5 * E_ij + F[0]  # = 0.5*E_ik + v_i
-        mdp_ik = np.zeros_like(E_ij)
-
-        j_k = np.zeros_like(L_ij)  # Temporary index container for tests (usually not needed outside loop)
-        j_l = np.zeros_like(L_ij)  # Temporary index container for tests (usually not needed outside loop)
-
-        # Simplices ijk:
-        # Indexed by i=0, j and k is determined by "the neighbour of `i` and `j` that is not `l` "
-        Theta_i_jk = np.zeros_like(L_ij)
-        Wedge_ij_ik = np.zeros_like(E_ij)
-        A_ijk = np.zeros_like(L_ij)
-        N_ijk = np.zeros_like(E_ij)
-        N_ijl = np.zeros_like(E_ij)
-
-        # Define midpoints
-        C_ijk = np.zeros_like(A_ijk)
-
-        # Vector curvature containers
-        KNdA_ij = np.zeros_like(E_ij)  # Vector Gauss curvature normal sums
-        HNdA_ij = np.zeros_like(E_ij)  # Vector mean curvature normal sums
-        NdA_ij = np.zeros_like(E_ij)  # Area curvature normal sums
-
-        # Scalar curvature containers
-        H_ij = np.zeros_like(L_ij)  # Edge mean curvatures
-        A_ijk = A_ijk  # Area
-        C_ijk = np.zeros_like(A_ijk)  # Dual area
-        V_ijk = np.zeros_like(A_ijk)  # Volume
-        # A_ij = np.zeros_like(L_ij)   # Vector area ??
-
-        i = 0
-        # Note, every neighbour adds  precisely one simplex:
-        for j in nn[0]:
-            # Recover indices from nn (in code recover the vertex entry in the cache)
-            k = nn[j][0]  # - 1
-            l = nn[j][1]  # - 1
-
-            # Discrete vector area:
-            # Simplex areas of ijk and normals
-            wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
-            if np.dot(normalized(wedge_ij_ik)[0], n_i) < 0:
-                k, l = l, k
-                wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
-
-            # Save indexes (for testing)
-            j_k[j] = k
-            j_l[j] = l
-
-            Wedge_ij_ik[j] = wedge_ij_ik
-            # vector product of the parallelogram spanned by f_i and f_j is the triangle area
-            a_ijk = np.linalg.norm(wedge_ij_ik) / 2.0
-            A_ijk[j] = a_ijk
-            n_ijk = wedge_ij_ik / np.linalg.norm(wedge_ij_ik)
-            N_ijk[j] = n_ijk
-
-            # Simplex areas of ijl and normals (TODO: RECoVER FROM A MINI IJK CACHE)
-            wedge_ij_il = np.cross(E_ij[j], E_ij[l])
-            a_ijl = np.linalg.norm(wedge_ij_il) / 2.0
-            n_ijl = -wedge_ij_il / np.linalg.norm(wedge_ij_il)  # TODO: TEST THIS
-            N_ijl[j] = n_ijl
-
-            # Dihedral angle at oriented edge ij:
-            arg1 = np.dot(hat_E_ij[j], np.cross(n_ijk, n_ijl))
-            arg2 = np.dot(n_ijk, n_ijl)
-            varphi_ij = np.arctan2(arg1, arg2)
-            Varphi_ij[j] = varphi_ij  # NOTE: Signed value!
-
-            # Interior angles: # Law of Cosines
-            c = L_ij[j]  # l_ij
-            a = np.linalg.norm(F[k] - F[i], axis=0)  # l_ik  # Symmetric to b
-            #b = np.linalg.norm(F[k] - F[l], axis=0)  # l_lk
-            b = np.linalg.norm(F[k] - F[j], axis=0)  # l_lk
-            alpha_ij = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
-            #a = np.linalg.norm(F[k] - F[i], axis=0)  # l_il  # Symmetric to b
-            a = np.linalg.norm(F[l] - F[i], axis=0)  # l_
-            b = np.linalg.norm(F[l] - F[j], axis=0)  # l_lj
-            beta_ij = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
-
-            ## Curvatures
-            # Vector curvatures
-            # Guassian normal curvature
-            KNdA_ij[j] = (varphi_ij) / (L_ij[j]) * (F[j] - F[i])
-            # Mean normal curvatre
-            # Ratio of dual/primal length is given by cotan formula, yielding
-            # HNdA_ij[j] = (cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j])
-            HNdA_ij[j] = (cotan(alpha_ij) + cotan(beta_ij)) * (F[j] - F[i])
-            #print(f'(cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j]) = {(cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j])}')
-            # NdA_ij[j] = np.cross(F[i], F[j])
-            # (^ NOTE: The above vertices i, j MUST be consecutive for this formula to be valid (CHECK!))
-            NdA_ij[j] = np.cross(F[j], F[k])
-            # (^ NOTE: The above vertices j, k MUST be consecutive for this formula to be valid (CHECK!))
-            # Scalar component ijk
-            # Interior angle
-            theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik), np.dot(E_ij[j], E_ij[k]))
-            Theta_i_jk[j] = theta_i_jk
-            # Mean normal
-            H_ij[j] = L_ij[j] * varphi_ij
-
-            # Areas
-            E_jk[j] = F[k] - F[j]
-            E_ik[j] = F[k] - F[i]
-            # Solve the plane
-            mdp_ik[j] = 0.5 * E_ik[j] + F[0]
-            c = np.zeros(3)
-            A = np.zeros([3, 3])
-            A[0] = E_ij[j]
-            A[1] = E_ik[j]
-            A[2] = N_ijk[j]
-            c[0] = np.dot(E_ij[j], mdp_ij[j])
-            c[1] = np.dot(E_ik[j], mdp_ik[j])
-            c[2] = np.dot(N_ijk[j], F[0])
-            v_dual = np.linalg.solve(A, c)
-            h_ij = np.linalg.norm(0.5 * L_ij[j])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            b_ij = np.linalg.norm(v_dual - mdp_ij[j])  # wrong
-            C_ij = 0.5 * b_ij * h_ij
-            # h_ik = np.linalg.norm(0.5*L_ij[int(j_k[j])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            h_ik = np.linalg.norm(0.5 * L_ij[k])
-            b_ik = np.linalg.norm(v_dual - mdp_ik[j])
-            C_ik = 0.5 * b_ik * h_ik
-            C_ijk[j] = C_ij + C_ik  # the area dual to A_ijk (validated at 90deg/0 curvature)
-
-        pass
-        N_ijk = np.array(N_ijk)
-        N_ijl = np.array(N_ijl)
-        Wedge_ij_ik = np.array(Wedge_ij_ik)
-        KNdA_i = 0.5 * np.sum(KNdA_ij, axis=0)  # Vector Gauss curvature normal sums
-        # (^ The integrated area of the unit sphere)
-        HNdA_i = 0.5 * np.sum(HNdA_ij, axis=0)  # Vector mean curvature normal sums (multiplied by N?)
-        # HN_i = 0.5 * np.sum(HN_ij, axis=0)
-        NdA_i = (1 / 6.0) * np.sum(NdA_ij, axis=0)  # Vector normal  are sums
-        # (^ The integrated area of the original smooth surface (a Dual discrete differential 2-form))
-        # KN_i = 0.5 * np.sum(KN_ij, axis=0)  # Vector Gauss curvature normal sums ????
-
-        ## Scalar curvatures of vertex i:
-        # Gaussian curvature (angle defct)
-        Omega_i = 2 * np.pi - np.sum(Theta_i_jk)
-        K = Omega_i
-        # Mean curvature
-        H_i = (1 / 4.0) * np.sum(H_ij)
-        H_ij_sum = (1 / 2.0) * np.sum(H_ij)
-
-        # Area curvature:
-
-        # Volume curvature
-
-        ## Principle curvatures
-        # Smooth approximated curvatures:
-        # krms np.sqrt(H_i**2 - K)
-        # kappa_1 = H - krms
-        # kappa_2 = H - krms
-        # A_i  # A_i := abs(C_i) the area of the dual cell
-    return dict(**locals())
 
 
 def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
@@ -1350,33 +1304,36 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     pass
 
     # Compute angles between
-    c_wedge = np.cross(circle_wedge[0], circle_wedge[1])
-    # Interior angles: # Law of Cosines
-    c = np.linalg.norm(circle_wedge[0] - circle_wedge[1], axis=0) 
-    a = np.linalg.norm(circle_wedge[0], axis=0)  # l_ik  # Symmetric to b
-    b = np.linalg.norm(circle_wedge[1], axis=0)  # l_lk
-    theta_i = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
-    #print(f'theta_i = {theta_i * 180 / np.pi}')
+    try:
+        c_wedge = np.cross(circle_wedge[0], circle_wedge[1])
+        # Interior angles: # Law of Cosines
+        c = np.linalg.norm(circle_wedge[0] - circle_wedge[1], axis=0)
+        a = np.linalg.norm(circle_wedge[0], axis=0)  # l_ik  # Symmetric to b
+        b = np.linalg.norm(circle_wedge[1], axis=0)  # l_lk
+        theta_i = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
+        #print(f'theta_i = {theta_i * 180 / np.pi}')
 
-    #print(f'circle_fits = {circle_fits}')
-    #TODO: THIS IS WRONG!
-    # In 2D we have:
-    # (x - x_c)**2 + (y - y_c)**2 = r**2
-    # (x_1 - x_c)**2 + (y_1 - y_c)**2 = r**2
-    # (x_2 - x_c)**2 + (y_2 - y_c)**2 = r**2
-    # (x_3 - x_c)**2 + (y_3 - y_c)**2 = r**2
-    # Subtract the first from the second, and the first from the third to
-    # create two linear equations
-    # (x_1 - x_c)**2 - (x_2 - x_c)**2  + (y_1 - y_c)**2 - (y_2 - y_c)**2  = 0
+        #print(f'circle_fits = {circle_fits}')
+        #TODO: THIS IS WRONG!
+        # In 2D we have:
+        # (x - x_c)**2 + (y - y_c)**2 = r**2
+        # (x_1 - x_c)**2 + (y_1 - y_c)**2 = r**2
+        # (x_2 - x_c)**2 + (y_2 - y_c)**2 = r**2
+        # (x_3 - x_c)**2 + (y_3 - y_c)**2 = r**2
+        # Subtract the first from the second, and the first from the third to
+        # create two linear equations
+        # (x_1 - x_c)**2 - (x_2 - x_c)**2  + (y_1 - y_c)**2 - (y_2 - y_c)**2  = 0
 
-    #(x_3 - x_c) ** 2 + (y_3 - y_c) ** 2 = r ** 2
-    r_est = np.linalg.norm(circle_fits)
-    r_est = np.sqrt(circle_fits[0]**2 +  circle_fits[1]**2)
-    #print(f'r_est = {r_est}')
+        #(x_3 - x_c) ** 2 + (y_3 - y_c) ** 2 = r ** 2
+        r_est = np.linalg.norm(circle_fits)
+        r_est = np.sqrt(circle_fits[0]**2 +  circle_fits[1]**2)
+        #print(f'r_est = {r_est}')
 
-    # Arc length
-    ds = theta_i * r_est
-
+        # Arc length
+        ds = theta_i * r_est
+    except IndexError:  # Not a boundary
+        theta_i = 0.0
+        ds = 0.0
     # Normals
     N_ijk = np.array(N_ijk)
     N_ijl = np.array(N_ijl)
@@ -1463,6 +1420,194 @@ class Print_i(object):
         print(f'K = H_i**2 = Omega_i = {self.H_i ** 2}')
 
 # Gauss-Bonnet
+def old_b_curvatures_i(F, nn, b_F, b_nn, n_i=None):
+    """
+    Boundary curvatures
+    F: Array of vectors forming the star domain of v_i = F[0]
+    nn: Connections within each vertex in union with the star domain
+    n_i: Normal vector at vertex v_i
+    """
+
+    bE_ij = b_F - F[0]
+    # Discrete vector area (only two edges)
+    # Simplex areas of ijk and normals
+    wedge_ij_ik = np.cross(bE_ij[0], bE_ij[1])
+
+    # Compute k_g
+    theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik), np.dot(bE_ij[0], bE_ij[1]))
+    k_g = np.pi - theta_i_jk #- othjers
+
+    if 0:
+        if n_i is None:
+            n_i = normalized(F[0])[0]
+        #print(f'n_i = {n_i}')
+        # TODO: Later we can cache these containers to avoid extra computations
+        # Edges from i to j:
+        E_ij = F[1:] - F[0]
+        E_ij = np.vstack([np.zeros(3), E_ij])
+        E_jk = np.zeros_like(E_ij)
+        E_ik = np.zeros_like(E_ij)
+        #print(f'E_ij = {E_ij}')
+        hat_E_ij = normalized(E_ij)
+        # E_ij = e_ij
+        L_ij = np.linalg.norm(E_ij, axis=1)
+        #print(f'L_ij = {L_ij}')
+        Varphi_ij = np.zeros_like(L_ij)
+
+        # Edge midpoints
+        mdp_ij = 0.5 * E_ij + F[0]  # = 0.5*E_ik + v_i
+        mdp_ik = np.zeros_like(E_ij)
+
+        j_k = np.zeros_like(L_ij)  # Temporary index container for tests (usually not needed outside loop)
+        j_l = np.zeros_like(L_ij)  # Temporary index container for tests (usually not needed outside loop)
+
+        # Simplices ijk:
+        # Indexed by i=0, j and k is determined by "the neighbour of `i` and `j` that is not `l` "
+        Theta_i_jk = np.zeros_like(L_ij)
+        Wedge_ij_ik = np.zeros_like(E_ij)
+        A_ijk = np.zeros_like(L_ij)
+        N_ijk = np.zeros_like(E_ij)
+        N_ijl = np.zeros_like(E_ij)
+
+        # Define midpoints
+        C_ijk = np.zeros_like(A_ijk)
+
+        # Vector curvature containers
+        KNdA_ij = np.zeros_like(E_ij)  # Vector Gauss curvature normal sums
+        HNdA_ij = np.zeros_like(E_ij)  # Vector mean curvature normal sums
+        NdA_ij = np.zeros_like(E_ij)  # Area curvature normal sums
+
+        # Scalar curvature containers
+        H_ij = np.zeros_like(L_ij)  # Edge mean curvatures
+        A_ijk = A_ijk  # Area
+        C_ijk = np.zeros_like(A_ijk)  # Dual area
+        V_ijk = np.zeros_like(A_ijk)  # Volume
+        # A_ij = np.zeros_like(L_ij)   # Vector area ??
+
+        i = 0
+        # Note, every neighbour adds  precisely one simplex:
+        for j in nn[0]:
+            # Recover indices from nn (in code recover the vertex entry in the cache)
+            k = nn[j][0]  # - 1
+            l = nn[j][1]  # - 1
+
+            # Discrete vector area:
+            # Simplex areas of ijk and normals
+            wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
+            if np.dot(normalized(wedge_ij_ik)[0], n_i) < 0:
+                k, l = l, k
+                wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
+
+            # Save indexes (for testing)
+            j_k[j] = k
+            j_l[j] = l
+
+            Wedge_ij_ik[j] = wedge_ij_ik
+            # vector product of the parallelogram spanned by f_i and f_j is the triangle area
+            a_ijk = np.linalg.norm(wedge_ij_ik) / 2.0
+            A_ijk[j] = a_ijk
+            n_ijk = wedge_ij_ik / np.linalg.norm(wedge_ij_ik)
+            N_ijk[j] = n_ijk
+
+            # Simplex areas of ijl and normals (TODO: RECoVER FROM A MINI IJK CACHE)
+            wedge_ij_il = np.cross(E_ij[j], E_ij[l])
+            a_ijl = np.linalg.norm(wedge_ij_il) / 2.0
+            n_ijl = -wedge_ij_il / np.linalg.norm(wedge_ij_il)  # TODO: TEST THIS
+            N_ijl[j] = n_ijl
+
+            # Dihedral angle at oriented edge ij:
+            arg1 = np.dot(hat_E_ij[j], np.cross(n_ijk, n_ijl))
+            arg2 = np.dot(n_ijk, n_ijl)
+            varphi_ij = np.arctan2(arg1, arg2)
+            Varphi_ij[j] = varphi_ij  # NOTE: Signed value!
+
+            # Interior angles: # Law of Cosines
+            c = L_ij[j]  # l_ij
+            a = np.linalg.norm(F[k] - F[i], axis=0)  # l_ik  # Symmetric to b
+            #b = np.linalg.norm(F[k] - F[l], axis=0)  # l_lk
+            b = np.linalg.norm(F[k] - F[j], axis=0)  # l_lk
+            alpha_ij = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
+            #a = np.linalg.norm(F[k] - F[i], axis=0)  # l_il  # Symmetric to b
+            a = np.linalg.norm(F[l] - F[i], axis=0)  # l_
+            b = np.linalg.norm(F[l] - F[j], axis=0)  # l_lj
+            beta_ij = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
+
+            ## Curvatures
+            # Vector curvatures
+            # Guassian normal curvature
+            KNdA_ij[j] = (varphi_ij) / (L_ij[j]) * (F[j] - F[i])
+            # Mean normal curvatre
+            # Ratio of dual/primal length is given by cotan formula, yielding
+            # HNdA_ij[j] = (cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j])
+            HNdA_ij[j] = (cotan(alpha_ij) + cotan(beta_ij)) * (F[j] - F[i])
+            #print(f'(cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j]) = {(cotan(alpha_ij) + cotan(beta_ij)) * (F[i] - F[j])}')
+            # NdA_ij[j] = np.cross(F[i], F[j])
+            # (^ NOTE: The above vertices i, j MUST be consecutive for this formula to be valid (CHECK!))
+            NdA_ij[j] = np.cross(F[j], F[k])
+            # (^ NOTE: The above vertices j, k MUST be consecutive for this formula to be valid (CHECK!))
+            # Scalar component ijk
+            # Interior angle
+            theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik), np.dot(E_ij[j], E_ij[k]))
+            Theta_i_jk[j] = theta_i_jk
+            # Mean normal
+            H_ij[j] = L_ij[j] * varphi_ij
+
+            # Areas
+            E_jk[j] = F[k] - F[j]
+            E_ik[j] = F[k] - F[i]
+            # Solve the plane
+            mdp_ik[j] = 0.5 * E_ik[j] + F[0]
+            c = np.zeros(3)
+            A = np.zeros([3, 3])
+            A[0] = E_ij[j]
+            A[1] = E_ik[j]
+            A[2] = N_ijk[j]
+            c[0] = np.dot(E_ij[j], mdp_ij[j])
+            c[1] = np.dot(E_ik[j], mdp_ik[j])
+            c[2] = np.dot(N_ijk[j], F[0])
+            v_dual = np.linalg.solve(A, c)
+            h_ij = np.linalg.norm(0.5 * L_ij[j])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            b_ij = np.linalg.norm(v_dual - mdp_ij[j])  # wrong
+            C_ij = 0.5 * b_ij * h_ij
+            # h_ik = np.linalg.norm(0.5*L_ij[int(j_k[j])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            h_ik = np.linalg.norm(0.5 * L_ij[k])
+            b_ik = np.linalg.norm(v_dual - mdp_ik[j])
+            C_ik = 0.5 * b_ik * h_ik
+            C_ijk[j] = C_ij + C_ik  # the area dual to A_ijk (validated at 90deg/0 curvature)
+
+        pass
+        N_ijk = np.array(N_ijk)
+        N_ijl = np.array(N_ijl)
+        Wedge_ij_ik = np.array(Wedge_ij_ik)
+        KNdA_i = 0.5 * np.sum(KNdA_ij, axis=0)  # Vector Gauss curvature normal sums
+        # (^ The integrated area of the unit sphere)
+        HNdA_i = 0.5 * np.sum(HNdA_ij, axis=0)  # Vector mean curvature normal sums (multiplied by N?)
+        # HN_i = 0.5 * np.sum(HN_ij, axis=0)
+        NdA_i = (1 / 6.0) * np.sum(NdA_ij, axis=0)  # Vector normal  are sums
+        # (^ The integrated area of the original smooth surface (a Dual discrete differential 2-form))
+        # KN_i = 0.5 * np.sum(KN_ij, axis=0)  # Vector Gauss curvature normal sums ????
+
+        ## Scalar curvatures of vertex i:
+        # Gaussian curvature (angle defct)
+        Omega_i = 2 * np.pi - np.sum(Theta_i_jk)
+        K = Omega_i
+        # Mean curvature
+        H_i = (1 / 4.0) * np.sum(H_ij)
+        H_ij_sum = (1 / 2.0) * np.sum(H_ij)
+
+        # Area curvature:
+
+        # Volume curvature
+
+        ## Principle curvatures
+        # Smooth approximated curvatures:
+        # krms np.sqrt(H_i**2 - K)
+        # kappa_1 = H - krms
+        # kappa_2 = H - krms
+        # A_i  # A_i := abs(C_i) the area of the dual cell
+    return dict(**locals())
+
+
 def chi_H(HC, print_out=False):
     """
     Compute the 2D Euler Characterisitc
@@ -1491,7 +1636,6 @@ def chi_H(HC, print_out=False):
         print(f'$\chi = V - E + F$ = {chi}')
 
     return chi
-
 
 def K_t(HC, bV=set()):
     """
@@ -1556,7 +1700,6 @@ def Gauss_Bonnet(HC, bV=set(), print_out=False):
         print(f' LHS - RHS = {KdA + k_g - 2 * np.pi * chi}')
     return chi, KdA, k_g
 
-
 #Gauss_Bonnet(HC, bV, print_out=1)
 
 def Gauss_Bonnet_OLD(HC):
@@ -1590,75 +1733,6 @@ def Gauss_Bonnet_OLD(HC):
 
     return
 
-
-class Plot_complex_normals(object):
-    def __init__(self, c_outd, F, nn, xlim=1.5, ylim=1.5, zlim=1.0):
-        self.__dict__.update(c_outd)
-        color_l = [0, 'tab:blue', 'tab:green', "tab:red", 'tab:purple', 'tab:orange', 'tab:brown','tab:pink',
-                   'tab:gray', 'tab:olive', 'tab:cyan']
-        #print(f'F[ind = 1] = {F[1]}')
-        # Plot the surface compolex
-        fig, axes, HC = plot_surface(F, nn)
-        # Plot a list of normal vectors
-        axes = plot_n([self.n_i], axes, color="tab:gray")
-
-        # Define midpoints
-        # mdp_ij = E_ij*0.5  + F[0] # = 0.5*E_ik + v_i
-        # mdp_ik = 0.5*E_ik  + F[0]
-        # C_ijk = np.zeros_like(A_ijk)
-        for ind in range(1, len(nn[0]) + 1):  # ind := j
-            try:
-                colour = color_l[ind]
-            except IndexError:
-                cindex = ind % len(color_l)
-                colour = color_l[cindex]
-            # Plot the e_ij dual planes
-            # axes = plot_plane(hat_E_ij[ind], mdp_ij[ind], axes, dim=0.55, color='tab:blue', alpha=.3)
-            axes.scatter(*self.mdp_ij[ind], color=colour, alpha=0.5)
-            # Plot the e_ik dual planes
-
-            axes.scatter(*self.mdp_ik[ind], color=colour, alpha=0.5)
-            # axes = plot_plane(hat_E_ik[ind], mdp_ik[ind], axes, dim=0.55, color='tab:red', alpha=.3)
-            # Plot the T_ijk plane
-            # axes = plot_plane(N_ijk[ind], F[0], axes, dim=1, color=colour, alpha=.3)
-            c = np.zeros(3)
-            A = np.zeros([3, 3])
-            A[0] = self.E_ij[ind]
-            A[1] = self.E_ik[ind]
-            A[2] = self.N_ijk[ind]
-
-            c[0] = np.dot(self.E_ij[ind], self.mdp_ij[ind])
-            c[1] = np.dot(self.E_ik[ind], self.mdp_ik[ind])
-            c[2] = np.dot(self.N_ijk[ind], F[0])
-            v_dual = np.linalg.solve(A, c)
-
-            #print(f'np.linalg.norm(F[0] - mdp_ij[ind]) = {np.linalg.norm(F[0] - self.mdp_ij[ind])} = {np.linalg.norm(0.5 * self.L_ij[ind])}')
-            h_ij = np.linalg.norm(0.5 * self.L_ij[ind])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            b_ij = np.linalg.norm(v_dual - self.mdp_ij[ind])
-            C_ij = 0.5 * b_ij * h_ij
-            #print(f'C_ij  = {C_ij}')
-            #print(f'b_ij = {b_ij}')
-
-            h_ik = np.linalg.norm(
-                0.5 * self.L_ij[int(self.j_k[ind])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            b_ik = np.linalg.norm(v_dual - self.mdp_ik[ind])
-            C_ik = 0.5 * b_ik * h_ik
-            #print(f'C_ik  = {C_ik}')
-            #print(f'b_ik = {b_ik}')
-            self.C_ijk[ind] = C_ij + C_ik  # the area dual to A_ijk (validated at 90deg/0 curvature)
-            #print(f'C_ijk = {self.C_ijk}')
-            axes.scatter(*v_dual, color=colour, alpha=1.0)
-            axes = plot_n([self.N_ijk[ind]], axes=axes, v0=v_dual, color=colour)
-
-        axes.set_xlabel('$x_1$')
-        axes.set_ylabel('$x_2$')
-        axes.set_zlabel('$x_3$')
-        axes.set_xlim3d(-xlim, xlim)
-        axes.set_ylim3d(-ylim, ylim)
-        axes.set_zlim3d(-zlim, zlim)
-
-        fig.show()
-        return None
 
 def plot_variables(X, vdict, xlabel=r'Contact angle $\theta$', ylabel='-'):
     plot.figure()

@@ -48,11 +48,10 @@ r = 1.0  # Radius of the droplet sphere
 #r = 0.5e-5  # Radius of the droplet sphere
 theta_p = 45 * np.pi/180.0  # Three phase contact angle
 theta_p = 20 * np.pi/180.0  # Three phase contact angle
-#theta_p = 0 * np.pi/180.0  # Three phase contact angle
 #phi = 0.0
 N = 8
 N = 5
-#N = 7
+#N = 12
 refinement = 0
 #N = 20
 #cdist = 1e-10
@@ -115,6 +114,7 @@ if 1:
 
     # Compute the interior mean normal curvatures
     # (uses  curvatures_hn_i
+
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
      K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=1)
     print('-')
@@ -166,11 +166,14 @@ if 1:
     # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
 
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
-      K_H_2, HNdA_i_Cij, Theta_i) = b_curvatures(HC, bV, r, theta_p, printout=False)
+      K_H_2, HNdA_i_Cij, Theta_i) = HC_curvatures(HC, bV, r, theta_p, printout=False)
     
     print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
+    print(f'H_f = {H_f}')
     print(f'K_H_2 = {K_H_2}')
-    print(f'K_H_2 = {K_H_2}')
+    print(f'K_f = {K_f}')
+    print(f'K_H_2 - K_f = {K_H_2 - K_f}')
+    print(f'K_H_2/K_f = {K_H_2/K_f}')
     #print(f'HNda_v_cache = {HNda_v_cache}')
     print(f'K_H_cache = {K_H_cache}')
     print(f'C_ijk_v_cache = {C_ijk_v_cache}')

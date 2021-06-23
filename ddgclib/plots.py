@@ -20,6 +20,75 @@ points = numpy.array([[0.0, 0.0],
                      )
 
 
+class Plot_complex_normals(object):
+    def __init__(self, c_outd, F, nn, xlim=1.5, ylim=1.5, zlim=1.0):
+        self.__dict__.update(c_outd)
+        color_l = [0, 'tab:blue', 'tab:green', "tab:red", 'tab:purple', 'tab:orange', 'tab:brown','tab:pink',
+                   'tab:gray', 'tab:olive', 'tab:cyan']
+        #print(f'F[ind = 1] = {F[1]}')
+        # Plot the surface compolex
+        fig, axes, HC = plot_surface(F, nn)
+        # Plot a list of normal vectors
+        axes = plot_n([self.n_i], axes, color="tab:gray")
+
+        # Define midpoints
+        # mdp_ij = E_ij*0.5  + F[0] # = 0.5*E_ik + v_i
+        # mdp_ik = 0.5*E_ik  + F[0]
+        # C_ijk = np.zeros_like(A_ijk)
+        for ind in range(1, len(nn[0]) + 1):  # ind := j
+            try:
+                colour = color_l[ind]
+            except IndexError:
+                cindex = ind % len(color_l)
+                colour = color_l[cindex]
+            # Plot the e_ij dual planes
+            # axes = plot_plane(hat_E_ij[ind], mdp_ij[ind], axes, dim=0.55, color='tab:blue', alpha=.3)
+            axes.scatter(*self.mdp_ij[ind], color=colour, alpha=0.5)
+            # Plot the e_ik dual planes
+
+            axes.scatter(*self.mdp_ik[ind], color=colour, alpha=0.5)
+            # axes = plot_plane(hat_E_ik[ind], mdp_ik[ind], axes, dim=0.55, color='tab:red', alpha=.3)
+            # Plot the T_ijk plane
+            # axes = plot_plane(N_ijk[ind], F[0], axes, dim=1, color=colour, alpha=.3)
+            c = np.zeros(3)
+            A = np.zeros([3, 3])
+            A[0] = self.E_ij[ind]
+            A[1] = self.E_ik[ind]
+            A[2] = self.N_ijk[ind]
+
+            c[0] = np.dot(self.E_ij[ind], self.mdp_ij[ind])
+            c[1] = np.dot(self.E_ik[ind], self.mdp_ik[ind])
+            c[2] = np.dot(self.N_ijk[ind], F[0])
+            v_dual = np.linalg.solve(A, c)
+
+            #print(f'np.linalg.norm(F[0] - mdp_ij[ind]) = {np.linalg.norm(F[0] - self.mdp_ij[ind])} = {np.linalg.norm(0.5 * self.L_ij[ind])}')
+            h_ij = np.linalg.norm(0.5 * self.L_ij[ind])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            b_ij = np.linalg.norm(v_dual - self.mdp_ij[ind])
+            C_ij = 0.5 * b_ij * h_ij
+            #print(f'C_ij  = {C_ij}')
+            #print(f'b_ij = {b_ij}')
+
+            h_ik = np.linalg.norm(
+                0.5 * self.L_ij[int(self.j_k[ind])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            b_ik = np.linalg.norm(v_dual - self.mdp_ik[ind])
+            C_ik = 0.5 * b_ik * h_ik
+            #print(f'C_ik  = {C_ik}')
+            #print(f'b_ik = {b_ik}')
+            self.C_ijk[ind] = C_ij + C_ik  # the area dual to A_ijk (validated at 90deg/0 curvature)
+            #print(f'C_ijk = {self.C_ijk}')
+            axes.scatter(*v_dual, color=colour, alpha=1.0)
+            axes = plot_n([self.N_ijk[ind]], axes=axes, v0=v_dual, color=colour)
+
+        axes.set_xlabel('$x_1$')
+        axes.set_ylabel('$x_2$')
+        axes.set_zlabel('$x_3$')
+        axes.set_xlim3d(-xlim, xlim)
+        axes.set_ylim3d(-ylim, ylim)
+        axes.set_zlim3d(-zlim, zlim)
+
+        fig.show()
+        return None
+
 
 
 def g1(x):

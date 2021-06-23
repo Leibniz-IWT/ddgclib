@@ -319,11 +319,7 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
 
         # New particles
         if 0:
-            sum_HNdA_ij_Cij = np.sum(c_outd['HNdA_ij_Cij'], axis=0)
-            print(f"np.sum(HNdA_i_Cij, axis=0)) = {sum_HNdA_ij_Cij}")
-            print(f"np.sum(HNdA_i_Cij) = {np.sum(c_outd['HNdA_ij_Cij'])}")
-            HNdA_ij_Cij_dot_NdA_i = np.dot(c_outd['NdA_i'], sum_HNdA_ij_Cij)
-            HNdA_ij_sum.append(-HNdA_ij_Cij_dot_NdA_i)
+            new_out_plot_cap_rise
 
        # c_outd['HNdA_i']
 
@@ -377,7 +373,7 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
              '(1/2)*HNdA_ij_sum':  np.array(HNdA_ij_sum) / 2.0,
              # Exactly equal to  -(1 / 2.0) * HNdA_ij_dot/C_ijk
              'K_H': K_H ** 2,
-             'K_H 2': K_H ** 2
+             #'K_H 2': K_H ** 2
              # ' -(1 / 2.0) * HNdA_ij_dot/A_ijk': -(1 / 2.0) * np.array(HNdA_ij_dot)/A_ijk,
              # ' -(1 / 2.0) * HNdA_ij_dot/C_ijk / H_f': (-(1 / 2.0) * np.array(HNdA_ij_dot)/C_ijk)/np.array(H_f),
              # ' (-(1 / 2.0) * HNdA_ij_dot/C_ijk)/r**2': r* ((-(1 / 2.0) * np.array(HNdA_ij_dot)/C_ijk)/r**2),
