@@ -2,6 +2,10 @@ import numpy as np
 from ._curvatures import *
 from ._capillary_rise import *
 
+
+
+
+
 def kmean_flow(HC, bV, params, tau=0.5, print_out=True):
     """
     Compute a single iteration of mean curvature flow

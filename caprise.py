@@ -51,6 +51,9 @@ theta_p = 20 * np.pi/180.0  # Three phase contact angle
 #phi = 0.0
 N = 8
 N = 5
+N = 6
+N = 7
+N = 5
 #N = 12
 refinement = 0
 #N = 20
@@ -166,8 +169,9 @@ if 1:
     # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
 
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
-      K_H_2, HNdA_i_Cij, Theta_i) = HC_curvatures(HC, bV, r, theta_p, printout=False)
-    
+      K_H_2, HNdA_i_Cij, Theta_i) = HC_curvatures(HC, bV, r, theta_p, printout=1)
+    print('.')
+    print(f'HNda_v_cache = {HNda_v_cache}')
     print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
     print(f'H_f = {H_f}')
     print(f'K_H_2 = {K_H_2}')
@@ -175,8 +179,8 @@ if 1:
     print(f'K_H_2 - K_f = {K_H_2 - K_f}')
     print(f'K_H_2/K_f = {K_H_2/K_f}')
     #print(f'HNda_v_cache = {HNda_v_cache}')
-    print(f'K_H_cache = {K_H_cache}')
-    print(f'C_ijk_v_cache = {C_ijk_v_cache}')
+  #  print(f'K_H_cache = {K_H_cache}')
+  #  print(f'C_ijk_v_cache = {C_ijk_v_cache}')
     int_K_H_dA = 0 # Boundary integrated curvature
     for v in bV:
         K_H_dA = K_H_cache[v.x] * C_ijk_v_cache[v.x]
@@ -223,6 +227,7 @@ if 1:
 
     print(f'Theta_i = {Theta_i}')
     #ds =  Theta_i[0] * r  # Arc length
+    #TODO: This is NOT the correct arc length (wrong angle)
     ds = 2 * np.pi * r  # Arc length of whole spherical cap
     #ds = 2 * np.pi * r  # Arc length of whole spherical cap
     print(f'ds = {ds}')
