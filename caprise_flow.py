@@ -87,18 +87,20 @@ def mean_flow(HC, bV, params, tau, print_out=False):
     #(HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
     # K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=False)
 
-    (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
-      K_H_2, HNdA_i_Cij, Theta_i) = HC_curvatures(HC, bV, r, theta_p, printout=0)
+    (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+     Theta_i_cache) = HC_curvatures(HC, bV, r, theta_p, printout=0)
     print('.')
-    print(f'HNda_v_cache = {HNda_v_cache}')
-    print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
-    print(f'C_ijk_v_cache = {C_ijk_v_cache}')
+    if 0:
+        print(f'HNda_v_cache = {HNda_v_cache}')
+        print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
+        print(f'C_ijk_v_cache = {C_ijk_v_cache}')
 
-    print(f'H_f = {H_f}')
-    print(f'K_H_2 = {K_H_2}')
-    print(f'K_f = {K_f}')
-    print(f'K_H_2 - K_f = {K_H_2 - K_f}')
-    print(f'K_H_2/K_f = {K_H_2/K_f}')
+        print(f'H_f = {H_f}')
+        print(f'K_H_2 = {K_H_2}')
+        print(f'K_f = {K_f}')
+        print(f'K_H_2 - K_f = {K_H_2 - K_f}')
+        print(f'K_H_2/K_f = {K_H_2/K_f}')
 
     if 0:
         H = np.nan_to_num(HNdA_ij_dot_hnda_i)  # TODO: Future use HN_i
@@ -140,8 +142,8 @@ def mean_flow(HC, bV, params, tau, print_out=False):
     for v in HC.V:
         # Compute boundary movements
         if v in bV:
-            print(f'K_H_cache[v.x = {v.x}] = {K_H_cache[v.x]}')
-            print(f'HNda_v_cache[v.x = {v.x}] = {HNda_v_cache[v.x]}')
+            print(f'K_H_i_cache[v.x = {v.x}] = {K_H_i_cache[v.x]}')
+            print(f'HNdA_i_cache[v.x = {v.x}] = {HNdA_i_cache[v.x]}')
             rati = (np.pi - np.array(Theta_i) / 2 * np.pi)
             #TODO: THis is not the actual sector ration (wrong angle)
             # rati = np.array(Theta_i) / (2 * np.pi)
@@ -149,16 +151,22 @@ def mean_flow(HC, bV, params, tau, print_out=False):
             print(f' rati = {rati}')
             # rati =  (2 * np.pi  - np.array(Theta_i))/np.pi
             # print(f' rati = (2 * np.pi  - Theta_i)/np.pi = { rati}')
-            print(f'HNdA_i[1] * rati[1]  = {HNda_v_cache[v.x] * rati[1]}')
+            print(f'HNdA_i_cache[1] * rati[1]  = {HNdA_i_cache[v.x] * rati[1]}')
 
-            #TODO: len(bV) is sector fraction
-            H_K = HNda_v_cache[v.x] * np.array([0, 0, -1]) * len(bV)
-            print(f'K_H in bV = {H_K }')
-            K_H = ((np.sum(H_K) / 2.0) / C_ijk_v_cache[v.x] ) ** 2
-            K_H = ((np.sum(H_K) / 2.0)  ) ** 2
-            print(f'K_H in bV = {K_H}')
-            print(f'K_H - K_f in bV = {K_H - K_f}')
-            K_H_dA = K_H_cache[v.x] * C_ijk_v_cache[v.x]
+            print(f'K_H_i = {K_H_i}')
+            if 0:
+                #TODO: len(bV) is sector fraction
+                H_K = HNda_v_cache[v.x] * np.array([0, 0, -1]) * len(bV)
+                print(f'K_H in bV = {H_K }')
+
+                K_H = ((np.sum(H_K) / 2.0) / C_ijk_v_cache[v.x] ) ** 2
+                K_H = ((np.sum(H_K) / 2.0)  ) ** 2
+                print(f'K_H in bV = {K_H}')
+                print(f'K_H - K_f in bV = {K_H - K_f}')
+
+            print(f'K_f = {K_f}')
+            K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
+            print(f'K_H_i_cache[v.x] = {K_H_i_cache[v.x]}')
             print(f'K_H_dA= {K_H_dA}')
             l_a = 2 * np.pi * r / len(bV)  # arc length
             print(f'l_a= {l_a}')
@@ -167,44 +175,56 @@ def mean_flow(HC, bV, params, tau, print_out=False):
             # NOTE: Area should be height of spherical cap
             # h = R - r * 4np.tan(theta_p)
             # Approximate radius of the great shpere K = (1/R)**2:
-            R_approx = 1 / np.sqrt(K_f)
-            theta_p_approx = np.arccos(
-                r / R_approx)
+            #R_approx = 1 / np.sqrt(K_f)
+            R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
+            theta_p_approx = np.arccos(np.min([r / R_approx, 1]))
             h = R_approx - r * np.tan(theta_p_approx)
             A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
             print(f'R_approx = {R_approx}')
             print(f'theta_p_approx = {theta_p_approx * 180 / np.pi}')
-            print(f'A_approx = {A_approx}')
+            #print(f'A_approx = {A_approx}')
             # A_approx  # Approximate area of the spherical cap
-            kg_ds = 2 * np.pi * Xi - K_f * (A_approx)
+            #kg_ds = 2 * np.pi * Xi - K_f * (A_approx)
+            #kg_ds = 2 * np.pi * Xi - K_H_dA * (A_approx)
+            kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx)
 
             print(f'Theta_i = {Theta_i}')
             # TODO: This is NOT the correct arc length (wrong angle)
             ds = 2 * np.pi * r  # Arc length of whole spherical cap
-            print(f'ds = {ds}')
+            #print(f'ds = {ds}')
             k_g = kg_ds / ds  # / 2.0
-            print(f'k_g = {k_g}')
+            #print(f'k_g = {k_g}')
             phi_est = np.arctan(R_approx * k_g)
             print(f'phi_est  = {phi_est * 180 / np.pi}')
 
-            #ADD FORCE HERE:
+            # Compute boundary forces
+            # N m-1
+            gamma_bt = gamma * (np.cos(phi_est)
+                                - np.cos(theta_p)) * np.array([0, 0, 1.0])
+            F_bt = gamma_bt * l_a  # N
 
-
-            HC.V.move(HC.V[tuple(v_a)], tuple(dK[i]))
-            bV_new.add(HC.V[tuple(dK[i])])
+            new_vx = v.x + F_bt
+            new_vx = tuple(new_vx)
+            HC.V.move(v, new_vx)
+            bV_new.add(HC.V[new_vx])
             if print_out:
                 print(f'dK[i] = {dK[i]}')
         else:
-            print(f'HNda_v_cache[{v.x}] = {HNda_v_cache[v.x]}')
-            H = np.dot(HNda_v_cache[v.x], np.array([0, 0, 1]))
+            print(f'HNdA_i_cache[{v.x}] = {HNdA_i_cache[v.x]}')
+            print(f'HN_i_cache[{v.x}] = {HN_i_cache[v.x]}')
+            H = np.dot(HNdA_i_cache[v.x], np.array([0, 0, 1]))
+            #
+            print(f'H = {H}')
             height = np.max([v.x_a[2], 0.0])
             df = gamma * H  # Hydrostatic pressure
             df = df - (rho * g * height)
-            f_k = f + tau * df
+            #f_k = f + tau * df
+            f_k = v.x_a + tau * df
+            new_vx = tuple(f_k)
             print(f'f_k = {f_k}')
-            VA.append(v.x_a)
+            #VA.append(v.x_a)
             # Move interior complex
-            # HC.V.move(HC.V[tuple(v_a)], tuple(f_k[i]))
+            HC.V.move(v, new_vx)
 
     if print_out:
         print(f'bV_new = {bV_new}')
@@ -214,7 +234,7 @@ def mean_flow(HC, bV, params, tau, print_out=False):
 
     return HC, bV
 
-def incr(HC, bV, params, tau=1e-5):
+def incr(HC, bV, params, tau=1e-5, plot=False):
     HC.dim = 3  # Rest in case visualization has changed
 
     # Update the progress
@@ -224,7 +244,13 @@ def incr(HC, bV, params, tau=1e-5):
     current_Jurin_err(HC)
 
     # Plot in Polyscope:
-    ps_inc(surface, HC)
+    if plot:
+        pass
+        #ps_inc(surface, HC)
+        #HC.plot_complex()
+        #plt.close
+
+    return HC, bV
 
 def current_Jurin_err(HC):
     h_final = 0.0
@@ -261,7 +287,7 @@ def ps_inc(surface, HC):
     newPositions = verts
     surface.update_vertex_positions(newPositions)
     try:
-        with timeout(0.3, exception=RuntimeError):
+        with timeout(0.1, exception=RuntimeError):
             # perform a potentially very slow operation
             ps.show()
     except RuntimeError:
@@ -278,7 +304,7 @@ if 1:
     # Prepare film and move it to 0.0
     F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
                                               refinement=refinement,
-                                              equilibrium=1
+                                              equilibrium=0
                                               )
     h = 0.0
     params = (gamma, rho, g, r, theta_p, K_f, h)
@@ -287,9 +313,6 @@ if 1:
 
 
     # HC, bV = kmean_flow(HC, bV, params, tau=tau, print_out=0)
-
-
-
 
 # Matplotlib and plotly
 if 0:
@@ -327,7 +350,49 @@ if 0:
         plt.show()
 
 # Polyscope
-if 1:
+def plot_polyscope(HC):
+    # Initialize polyscope
+    ps.init()
+    ps.set_up_dir("z_up")
+
+    do = coldict['db']
+    lo = coldict['lb']
+    HC.dim = 2  # The dimension has changed to 2 (boundary surface)
+    HC.vertex_face_mesh()
+    points = np.array(HC.vertices_fm)
+    triangles = np.array(HC.simplices_fm_i)
+    ### Register a point cloud
+    # `my_points` is a Nx3 numpy array
+    my_points = points
+    ps_cloud = ps.register_point_cloud("my points", my_points)
+    ps_cloud.set_color(tuple(do))
+    #ps_cloud.set_color((0.0, 0.0, 0.0))
+    verts = my_points
+    faces = triangles
+    ### Register a mesh
+    # `verts` is a Nx3 numpy array of vertex positions
+    # `faces` is a Fx3 array of indices, or a nested list
+    surface = ps.register_surface_mesh("my mesh", verts, faces,
+                             color=do,
+                             edge_width=1.0,
+                             edge_color=(0.0, 0.0, 0.0),
+                             smooth_shade=False)
+
+    # Add a scalar function and a vector function defined on the mesh
+    # vertex_scalar is a length V numpy array of values
+    # face_vectors is an Fx3 array of vectors per face
+    if 0:
+        ps.get_surface_mesh("my mesh").add_scalar_quantity("my_scalar",
+                vertex_scalar, defined_on='vertices', cmap='blues')
+        ps.get_surface_mesh("my mesh").add_vector_quantity("my_vector",
+                face_vectors, defined_on='faces', color=(0.2, 0.5, 0.5))
+
+    # View the point cloud and mesh we just registered in the 3D UI
+    #ps.show()
+    ps.show()
+
+
+if 0:
 
     # Initialize polyscope
     ps.init()
@@ -376,4 +441,13 @@ if 1:
 
 #
 if 1:
-    incr(HC, bV, params)
+    for i in range(10):
+        HC, bV = incr(HC, bV, params, plot=1)
+
+    HC.dim = 3
+    HC.plot_complex()
+    plt.show()
+
+    #ps_inc(surface, HC)
+
+    plot_polyscope(HC)

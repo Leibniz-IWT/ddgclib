@@ -280,8 +280,13 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
     HNdA_ij_sum = []
     HNdA_ij_dot = []
     HdotNdA_ij_sum = []
-    N_f0 = np.array([0.0, 0.0, -1])
+    N_f0 = np.array([0.0, 0.0, 1])
     c_outd_list = []
+    HN_i_l = []
+    K_H_i_l = []
+
+    K_fl = []
+    H_fl = []
 
     for theta_p in Theta_p:
         # Contruct the simplicial complex, plot the initial construction:
@@ -294,91 +299,45 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
 
         F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N, refinement=refinement)
 
-        R = r / np.cos(theta_p)  # = R at theta = 0
         v = HC.V[(0.0, 0.0, R * np.sin(theta_p) - R)]
         F, nn = vectorise_vnn(v)
 
         # Compute discrete curvatures (centre vertex)
-        c_outd = curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+        # Old
+        if 0:
+            c_outd = curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+        if 1: # New
+            c_outd = b_curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
 
       #  HNdA_ij_Cij
         # Save results
         # c_outd = curvatures(F, nn)
         c_outd['K_f'] = K_f
         c_outd['H_f'] = H_f
-        if 1:
-         #   H_i.append(c_outd['H_i'])
-          #  H_ij_sum.append(c_outd['H_ij_sum'])
-            #HNdA_ij_sum.append(np.sum(c_outd['HNdA_ij_Cij']))
-         #   HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
-            HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
-           # HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
-           # KNdA_ij_sum.append(np.sum(c_outd['KNdA_ij']))
-           # KNdA_ij_dot.append(np.sum(np.dot(c_outd['KNdA_ij'], c_outd['n_i'])))
-            # HNdA_i.append()
-
-        # New particles
-        if 0:
-            new_out_plot_cap_rise
-
-       # c_outd['HNdA_i']
-
-        # print(f"HNdA_ij = {c_outd['HNdA_ij']}")
-        # print(f" (np.dot(c_outd['HNdA_ij'], N_f0) = {np.dot(c_outd['HNdA_ij'], N_f0)}")
-     #   HdotNdA_ij_sum.append(np.dot(c_outd['HNdA_ij'], N_f0))
-        #K.append(c_outd['K'])
-        K.append(K_f)
+        HNdA_i = c_outd['HNdA_i']
+        HN_i = c_outd['HN_i']
+        K_H_i = c_outd['K_H_i']
+        #print(f'H_f = {H_f}')
+        #print(f'HNdA_i = {HNdA_i}')
+        HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
+        HN_i_l.append(HN_i)
+        K_H_i_l.append(K_H_i)
+        #K.append(K_f)
+        K_fl.append(K_f)
+        H_fl.append(H_f)
         c_outd_list.append(c_outd)
 
     A_ijk = []
     C_ijk = []
     z = []
-
-    for c_outd in c_outd_list:
-        A_ijk.append(np.sum(c_outd['A_ijk']))
-        C_ijk.append(np.sum(c_outd['C_ijk']))
-        # Compute z:
-        if 0:
-            theta = 0.0
-            r = R / np.cos(theta)  # = R at theta = 0
-            y = r - r * np.sin(theta)
-            theta_z = np.arctan(y / R)
-            z_phi = y / np.sin(theta_z)
-            z.append(z_phi)
-
-    A_ijk = np.array(A_ijk)
-    C_ijk = np.array(C_ijk)
-    K_f = []
-    H_f = []
-
-    for c_outd in c_outd_list:
-        K_f.append(np.sum(c_outd['K_f']))
-        H_f.append(np.sum(c_outd['H_f']))
-        # HN_i.append(np.sum(c_outd['HN_i']))
-
     #H_disc = (1 / 2.0) * np.array(HNdA_ij_sum) / C_ijk
-    H_disc = (1 / 2.0) * np.array(HNdA_ij_sum) / C_ijk
-    #K_H = (H_disc / 2.0)
-    K_H = 2*(H_disc / 2.0)
-    vdict = {'K_f': K_f,
-             # 'K': K,
-             'K/C_ijk': K / C_ijk,
-           #  ' 0.5 * KNdA_ij_sum / C_ijk': (1 / 2.0) * np.array(KNdA_ij_sum) / C_ijk,
-           #  '- 0.5 * KNdA_ij_dot / C_ijk': -(1 / 2.0) * np.array(KNdA_ij_dot) / C_ijk,
-             '((K/C_ijk)^0.5 + (K/C_ijk)^0.5)': (np.sqrt(K / C_ijk) + np.sqrt(K / C_ijk)),  # /2.0,
-             'H_f': H_f,
-           #  '2 * H_i/C_ijk = H_ij_sum/C_ijk': H_ij_sum / C_ijk,
-            # ' -(1 / 2.0) * HNdA_ij_dot/C_ijk': -(1 / 2.0) * np.array(HNdA_ij_dot) / C_ijk,
-             '(1/2)*HNdA_ij_sum/C_ijk':  np.array(HNdA_ij_sum)/ C_ijk,
-             '(1/2)*HNdA_ij_sum':  np.array(HNdA_ij_sum) / 2.0,
-             # Exactly equal to  -(1 / 2.0) * HNdA_ij_dot/C_ijk
-             'K_H': K_H ** 2,
-             #'K_H 2': K_H ** 2
-             # ' -(1 / 2.0) * HNdA_ij_dot/A_ijk': -(1 / 2.0) * np.array(HNdA_ij_dot)/A_ijk,
-             # ' -(1 / 2.0) * HNdA_ij_dot/C_ijk / H_f': (-(1 / 2.0) * np.array(HNdA_ij_dot)/C_ijk)/np.array(H_f),
-             # ' (-(1 / 2.0) * HNdA_ij_dot/C_ijk)/r**2': r* ((-(1 / 2.0) * np.array(HNdA_ij_dot)/C_ijk)/r**2),
-             # ' (-(1 / 2.0) * HNdA_ij_dot/C_ijk)/r**2/H_f': ((-(1 / 2.0) * np.array(HNdA_ij_dot)/C_ijk)/r**2)/np.array(H_f)
+    #K_H = 2*(H_disc / 2.0)
+    vdict = {'K_f': K_fl,
+             'K_H_i': K_H_i_l,
+             'H_f': H_fl,
+             'HN_i': HN_i_l,
              }
+
     X = Theta_p * 180 / np.pi
 
     return c_outd_list, c_outd, vdict, X

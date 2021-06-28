@@ -185,18 +185,21 @@ def HC_curvatures(HC, bV, r, theta_p, printout=False):
     K_f = (1 / R) ** 2
     H_f = 2 / R  # 2 / R
     HNdA_ij = []
-    HNdA_i = []
-    HNdA_ij_sum = []
-    HNdA_ij_dot = []
-    C_ijk = []
-    A_ijk = []
-    N_i = []
-    int_V = []
-    HNda_v_cache = {}
-    C_ijk_v_cache = {}
-    K_H_cache = {}
+    HN_i = []
+    C_ij = []
+    K_H_i = []
     HNdA_i_Cij = []
     Theta_i = []
+
+    N_i = []  # Temp cap rise normal
+
+    HNdA_i_cache = {}
+    HN_i_cache = {}
+    C_ij_cache = {}
+    K_H_i_cache = {}
+    HNdA_i_Cij_cache = {}
+    Theta_i_cache = {}
+
     for v in HC.V:
         N_f0 = np.array(
             [0.0, 0.0, R * np.sin(theta_p)]) - v.x_a  # First approximation
@@ -204,90 +207,32 @@ def HC_curvatures(HC, bV, r, theta_p, printout=False):
         N_i.append(N_f0)
         F, nn = vectorise_vnn(v)
         # Compute discrete curvatures
-        # c_outd = curvatures(F, nn, n_i=N_f0)
         c_outd = b_curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
-        # c_outd = curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
-        #HNda_v_cache[v.x] = c_outd['HNdA_ij']
-        HNda_v_cache[v.x] = c_outd['HNdA_i']
-        HNdA_i.append(c_outd['HNdA_i'])
-        HNdA_ij.append(c_outd['HNdA_ij'])
-        # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
-        HNdA_ij_sum.append(np.sum(c_outd['HNdA_ij']))
-        HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
-
-        print(f" HNdA_i /  C_ijk'= {c_outd['HNdA_i'] / np.sum(c_outd['C_ijk'])}")
+        # Append lists
+        HNdA_ij.append(c_outd['HNdA_i'])
+        #HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
+        HN_i.append(c_outd['HN_i'])
+        C_ij.append(c_outd['C_ij'])
+        K_H_i.append(c_outd['K_H_i'])
         HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
-        C_ijk.append(np.sum(c_outd['C_ijk']))
-        C_ijk_v_cache[v.x] = np.sum(c_outd['C_ijk'])
-        A_ijk.append(np.sum(c_outd['A_ijk']))
-        int_V.append(v)
         Theta_i.append(c_outd['theta_i'])
-        # New
-        h_disc = (1 / 2.0) * np.sum(
-            np.dot(c_outd['HNdA_ij'], c_outd['n_i'])) / np.sum(
-            c_outd['C_ijk'])
-        # h_disc = (1 / 2.0) * np.sum(np.dot(c_outd['HNdA_ij'], N_f0)) / np.sum(c_outd['C_ijk'])
-        K_H_cache[v.x] = (h_disc / 2.0) ** 2
 
-    H_disc = (1 / 2.0) * np.array(HNdA_ij_dot) / C_ijk
-    K_H = (H_disc / 2.0) ** 2
-    # Adjust HNdA_ij_sum and HNdA_ij_dot
-    # HNdA_ij_sum = 0.5 * np.array(HNdA_ij_sum) / C_ijk
-    HNdA_ij_sum = np.array(HNdA_ij_sum) / C_ijk
-    HNdA_ij_dot = 0.5 * np.array(HNdA_ij_dot) / C_ijk
+        # Append chace
+        HNdA_i_cache[v.x] = c_outd['HNdA_i']
+        HN_i_cache[v.x] = c_outd['HN_i']
+        C_ij_cache[v.x] = c_outd['C_ij']
+        K_H_i_cache[v.x] = c_outd['K_H_i']
+        HNdA_i_Cij_cache[v.x] = c_outd['HNdA_ij_Cij']
+        Theta_i_cache[v.x] = c_outd['theta_i']
 
-    # New normalized dot product odeas
-    HNdA_ij_dot_hnda_i = []
-    K_H_2 = []
-    HN_i = []
-    for hnda_ij, c_ijk, n_i in zip(HNdA_ij, C_ijk, N_i):
-        if 0:
-            hnda_i = np.sum(hnda_ij, axis=0)
-            # print(f'hnda_i = {hnda_i}')
-            n_hnda_i = normalized(hnda_i)[0]
-            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_hnda_i)) / c_ijk
-            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
-
-        # COMMENTED OUT 2021-06-22:
-        elif 0:  # Appears to be more accurate, sadly
-            # hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
-            # TODO: CHECK THIS:
-            hndA_ij_dot_hnda_i = -HNdA_ij_sum
-            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
-
-        elif 0:  # Appears to be more accurate, sadly
-            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
-
-        # Prev. converging working, changed on 2021-06-22:
-        elif 0:
-            hndA_ij_dot_hnda_i = 0.5 * np.sum(hnda_ij) / c_ijk
-        elif 1:  # Appears to be more accurate, sadly
-            hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / (c_ijk)
-            HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
-        elif 0:
-            hndA_ij_dot_hnda_i = -np.sum(np.dot(hnda_ij, n_i)) / c_ijk
-        
-        #print(f'hnda_ij = {hnda_ij}')
-        #print(f'hndA_ij_dot_hnda_i = {hndA_ij_dot_hnda_i}')
-        k_H_2 = (hndA_ij_dot_hnda_i / 2.0) ** 2
-        K_H_2.append(k_H_2)
-
-        HN_i.append(0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk)
-        hnda_i_sum = 0.0
-        for hnda_ij_sum in HNdA_ij_sum:
-            hnda_i_sum += hnda_ij_sum
-
-    HNdA_ij = np.array(HNdA_ij)
     if printout:
-
-        print(f'H_disc = {H_disc}')
-        print(f'HNdA_i = {HNdA_i}')
+        print('.')
         print(f'HNdA_ij = {HNdA_ij}')
-        print(f'HNdA_ij.shape = {HNdA_ij.shape}')
-        #print(f'0.5 * np.sum(HNdA_ij, axis=0) = {0.5 * np.sum(HNdA_ij, axis=1)}')
-        print(f'HNdA_i  = {np.array(HNdA_i)}')
-
-        print(f'np.array(Theta_i)= {np.array(Theta_i)}')
+        print(f'HN_i = {HN_i}')
+        print(f'C_ij = {C_ij}')
+        print(f'K_H_i = {K_H_i}')
+        print(f'HNdA_i_Cij = {HNdA_i_Cij}')
+        print(f'Theta_i= {Theta_i}')
         print(f'np.array(Theta_i) in deg = {np.array(Theta_i) *180/np.pi}')
         print(f'np.array(Theta_i)/np.pi= {np.array(Theta_i) / np.pi}')
         # s = r * theta
@@ -302,42 +247,43 @@ def HC_curvatures(HC, bV, r, theta_p, printout=False):
         print(f' rati = { rati}')
        # rati =  (2 * np.pi  - np.array(Theta_i))/np.pi
         #print(f' rati = (2 * np.pi  - Theta_i)/np.pi = { rati}')
-        print(f'HNdA_i[1] * rati[1]  = {HNdA_i[1] * rati[1] }')
-        print(f'C_ijk   = {C_ijk }')
-        print(f'np.sum(C_ijk)   = {np.sum(C_ijk) }')
+        print(f'HNdA_i[1] * rati[1]  = {HNdA_ij[1] * rati[1] }')
+        print(f'C_ij   = {C_ij }')
+        #print(f'np.sum(C_ij)   = {np.sum(C_ij) }')
        # print(f'HNdA_i / np.array(C_ijk)  = {HNdA_i  / np.array(C_ijk)}')
-        print(f'HNdA_ij_sum = {HNdA_ij_sum}')
-        print(f'HNdA_ij_dot = {HNdA_ij_dot}')
+
         print('.')
         print(f'HNdA_i_Cij = {HNdA_i_Cij}')
 
-        print(f'=' * len('Discrete (New):'))
-        print(f'Discrete (New):')
-        print(f'=' * len('Discrete (New):'))
-        print(f'K_H = {K_H}')
+        #print(f'K_H = {K_H}')
         print('-')
-        print('New:')
+        print('Errors:')
         print('-')
-        print(f'hnda_i_sum = {hnda_i_sum}')
-        print(f'K_H_2 = {K_H_2}')
-        print(f'C_ijk = {C_ijk}')
-        print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
-        print(f'A_ijk = {A_ijk}')
-        print(f'np.sum(A_ijk) = {np.sum(A_ijk)}')
-        print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(C_ijk)}')
-        print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(A_ijk)}')
-        print(f'np.sum(K_H_2) = {np.sum(K_H_2)}')
-        print(f'HNdA_ij_dot_hnda_i = {np.array(HNdA_ij_dot_hnda_i)}')
-        print(
-            f'np.sum(HNdA_ij_dot_hnda_i) = {np.sum(np.array(HNdA_ij_dot_hnda_i))}')
+       # print(f'hnda_i_sum = {hnda_i_sum}')
+       # print(f'K_H_2 = {K_H_2}')
+       # print(f'C_ijk = {C_ijk}')
+      #  print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
+      #  print(f'A_ijk = {A_ijk}')
+     #   print(f'np.sum(A_ijk) = {np.sum(A_ijk)}')
+      #  print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(C_ijk)}')
+      #  print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(A_ijk)}')
+      #  print(f'np.sum(K_H_2) = {np.sum(K_H_2)}')
+      #  print(f'HNdA_ij_dot_hnda_i = {np.array(HNdA_ij_dot_hnda_i)}')
+     #   print(
+    #        f'np.sum(HNdA_ij_dot_hnda_i) = {np.sum(np.array(HNdA_ij_dot_hnda_i))}')
 
-        print(f'K_H_2 - K_f = {K_H_2 - K_f}')
-        print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        print(f'K_H_i - K_f = {np.array(K_H_i) - K_f}')
+        #print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        #print(f'HHN_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        print(f'HN_i  - H_f = {HN_i - H_f}')
+        print(f'HNdA_i_Cij  - H_f = {HNdA_i_Cij - H_f}')
 
-        print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
+        #print(f'np.sum(C_ij) = {np.sum(C_ij)}')
 
-    return (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,
-            HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij, Theta_i)
+    return (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+            HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+            Theta_i_cache)
+
 
 def int_curvatures(HC, bV, r, theta_p, printout=False):
     """
@@ -1128,8 +1074,6 @@ def b_curvatures(HC, bV, r, theta_p, printout=False):
     return (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,
             HNdA_ij_dot_hnda_i, K_H_2, HNdA_i_Cij, Theta_i)
 
-
-
 def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     """
     F: Array of vectors forming the star domain of v_i = F[0]
@@ -1180,6 +1124,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     HNdA_ij = np.zeros_like(E_ij)  # Vector mean curvature normal sums
     HNdA_ij_Cij = np.zeros([len(E_ij), 3])  # Vector mean curvature normal sums divided by dual ara
     NdA_ij = np.zeros_like(E_ij)  # Area curvature normal sums
+    C_ij = np.zeros_like(A_ijk)  # Dual area around an edge e_ij
     C_ijk = np.zeros_like(A_ijk)  # Dual area
     C_ijl = np.zeros_like(A_ijk)  # Dual area
 
@@ -1204,10 +1149,29 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
 
             # Compute dual area on edge
             k = nn[j][0]  # - 1
-
+            wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
             E_jk[j] = F[k] - F[j]
             E_ik[j] = F[k] - F[i]
-            # Solve the plane
+            if np.dot(normalized(wedge_ij_ik)[0], n_i) < 0:
+                #print(f'WARNING: Wrong direction in boundary curvature')
+                #k, l = l, k
+                wedge_ij_ik = np.cross(E_ij[k], E_ij[j])  # Maybe?
+
+                E_jk[j] = F[j] - F[k] 
+                E_ik[j] = F[k] - F[i]
+                if np.dot(normalized(wedge_ij_ik)[0], n_i) < 0:
+                    print(f'WARNING: STILL THE WRONG DIRECTION')
+
+            Wedge_ij_ik[j] = wedge_ij_ik
+            # vector product of the parallelogram spanned by f_i and f_j is the triangle area
+            a_ijk = np.linalg.norm(wedge_ij_ik) / 2.0
+            A_ijk[j] = a_ijk
+            n_ijk = wedge_ij_ik / np.linalg.norm(wedge_ij_ik)
+            N_ijk[j] = n_ijk
+
+           # E_jk[j] = F[k] - F[j]
+            #E_ik[j] = F[k] - F[i]
+            # Solve the plane (F[0] = F[i] =current vertex i)
             mdp_ik[j] = 0.5 * E_ik[j] + F[0]
             c = np.zeros(3)
             A = np.zeros([3, 3])
@@ -1218,18 +1182,25 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
             c[1] = np.dot(E_ik[j], mdp_ik[j])
             c[2] = np.dot(N_ijk[j], F[0])
             v_dual = np.linalg.solve(A, c)  # v_dual in the ijk triangle?
-            h_ij = np.linalg.norm(0.5 * L_ij[
-                j])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            h_ij = np.linalg.norm(0.5 * L_ij[j])
+            # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
             b_ij = np.linalg.norm(v_dual - mdp_ij[j])  # wrong?
-            C_ij = 0.5 * b_ij * h_ij
-            C_ij_k = C_ij
-            # h_ik = np.linalg.norm(0.5*L_ij[int(j_k[j])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            h_ik = np.linalg.norm(0.5 * L_ij[k])
-            b_ik = np.linalg.norm(v_dual - mdp_ik[j])
-            C_ik = 0.5 * b_ik * h_ik
-            C_ijk[j] = C_ij + C_ik
+            c_ijk = 0.5 * b_ij * h_ij
+            #C_ij[k] = c_ijk
+            C_ij[j] = c_ijk
+
+            # Try adding "half-cotan"
+            if 1:
+                c = L_ij[j]  # l_ij
+                a = np.linalg.norm(F[k] - F[i],
+                                   axis=0)  # l_ik  # Symmetric to b
+                # b = np.linalg.norm(F[k] - F[l], axis=0)  # l_lk
+                b = np.linalg.norm(F[k] - F[j], axis=0)  # l_lk
+                alpha_ij = np.arccos((a ** 2 + b ** 2 - c ** 2) / (2.0 * a * b))
+                HNdA_ij[j] = (cotan(alpha_ij)) * (F[j] - F[i])
 
             continue
+
         k = nn[j][0]  # - 1
         l = nn[j][1]  # - 1
 
@@ -1282,15 +1253,17 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
         # (^ NOTE: The above vertices i, j MUST be consecutive for this formula to be valid (CHECK!))
 
         NdA_ij[j] = np.cross(F[j], F[k])
-        # (^ NOTE: The above vertices j, k MUST be consecutive for this formula to be valid (CHECK!))
+        # (^ NOTE: The above vertices j, k MUST be consecutive for this formula
+        # to be valid (CHECK!))
         # Scalar component ijk
         # Interior angle
-        theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik), np.dot(E_ij[j], E_ij[k]))
+        theta_i_jk = np.arctan2(np.linalg.norm(wedge_ij_ik),
+                                np.dot(E_ij[j], E_ij[k]))
         Theta_i_jk[j] = theta_i_jk
 
         # Areas
-        # ijk Areas
         if 1:
+            # ijk Areas
             E_jk[j] = F[k] - F[j]
             E_ik[j] = F[k] - F[i]
             # Solve the plane
@@ -1303,21 +1276,12 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
             c[0] = np.dot(E_ij[j], mdp_ij[j])
             c[1] = np.dot(E_ik[j], mdp_ik[j])
             c[2] = np.dot(N_ijk[j], F[0])
-            v_dual = np.linalg.solve(A, c)  # v_dual in the ijk triangle?
-            h_ij = np.linalg.norm(0.5 * L_ij[j])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            b_ij = np.linalg.norm(v_dual - mdp_ij[j])  # wrong?
-            C_ij = 0.5 * b_ij * h_ij
-            C_ij_k = C_ij
-            # h_ik = np.linalg.norm(0.5*L_ij[int(j_k[j])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            h_ik = np.linalg.norm(0.5 * L_ij[k])
-            b_ik = np.linalg.norm(v_dual - mdp_ik[j])
-            C_ik = 0.5 * b_ik * h_ik
-            C_ijk[j] = C_ij + C_ik  # the area dual to A_ijk (validated at 90deg/0 curvature)
-
-            #print(f'C_ij = {C_ij}')
-            #print(f'C_ik = {C_ik}')
-        # ijl Areas
-        if 1:
+            v_dual_ijk = np.linalg.solve(A, c)  # v_dual in the ijk triangle?
+            h_ij = np.linalg.norm(0.5 * L_ij[j])
+            # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
+            b_ij = np.linalg.norm(v_dual_ijk - mdp_ij[j])  # wrong?
+            c_ijk = 0.5 * b_ij * h_ij
+            # ijl Areas
             #  k --> l
             E_jl[j] = F[l] - F[j]
             E_il[j] = F[l] - F[i]
@@ -1331,39 +1295,25 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
             c[0] = np.dot(E_ij[j], mdp_ij[j])
             c[1] = np.dot(E_il[j], mdp_il[j])
             c[2] = np.dot(N_ijl[j], F[0])
-            v_dual = np.linalg.solve(A, c)  # v_dual in the ijl triangle?
+            v_dual_ijl = np.linalg.solve(A, c)  # v_dual in the ijl triangle?
             h_ij = np.linalg.norm(0.5 * L_ij[j])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            b_ij = np.linalg.norm(v_dual - mdp_ij[j])  # wrong?
-            C_ij = 0.5 * b_ij * h_ij
-            C_ij_l = C_ij
-            # h_ik = np.linalg.norm(0.5*L_ij[int(j_k[j])])  # = 0.5*E_ik  + F[0] ?   = F[0] -(0.5*E_ik  + F[0]) = 0.5
-            h_il = np.linalg.norm(0.5 * L_ij[l])
-            b_il = np.linalg.norm(v_dual - mdp_il[j])
-            C_il = 0.5 * b_il * h_il
-            C_ijl[j] = C_ij + C_il  # the area dual to A_ijk (validated at 90deg/0 curvature)
+            b_ij = np.linalg.norm(v_dual_ijl - mdp_ij[j])
+            c_ijl = 0.5 * b_ij * h_ij
+    
+            # Add full areas
+            C_ij[j] = c_ijk + c_ijl  # the area dual to A_ij
+        
+        # Compute the Mean normal curvature integral around e_ij
+        #print(f'HNdA_ij[j] = {HNdA_ij[j]}')
+        #print(f'C_ij[j] = {C_ij[j]}')
+        HNdA_ij_Cij[j] = HNdA_ij[j] / C_ij[j]
 
+        #print(f'HNdA_ij_Cij[j] = {HNdA_ij_Cij[j]}')
+        #HNdA_ij_Cij[j] = np.dot(HNdA_ij[j], n_i) / (C_ij[j])
+        #HNdA_ij_Cij[j] = np.sum(np.dot(HNdA_ij[j], n_i) / (C_ij[j]), axis=0)
+        #HNdA_ij_Cij[j] = np.sum(HNdA_ij_Cij[j])
 
-            #print(f'-')
-            #print(f'C_ij = {C_ij}')
-            #print(f'C_il = {C_il}')
-
-        if 0:
-            HNdA_ij_Cij[j] = HNdA_ij[j] / (np.array(C_ij, dtype=np.longdouble)
-                                           + np.array(C_ik, dtype=np.longdouble))
-
-        if 0:
-            HNdA_ij_Cij[j] = HNdA_ij[j] / (C_ij_l + C_ij_k)
-
-        if 0:
-            HNdA_ij_Cij[j] = HNdA_ij[j] / (C_ijk[j]+ C_ijl[j])
-
-        if 1:
-            HNdA_ij_Cij[j] = HNdA_ij[j] * (C_ijk[j] + C_ijl[j])
-        #print(f'HNdA_ij_Cij = {HNdA_ij_Cij}')
-        #print(f'np.sum(HNdA_ij_Cij) = {np.sum(HNdA_ij_Cij)}')
-    pass
-
-    # Compute angles between
+    # Compute angles between boundary edges
     try:
         c_wedge = np.cross(circle_wedge[0], circle_wedge[1])
         # Interior angles: # Law of Cosines
@@ -1394,23 +1344,34 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     except IndexError:  # Not a boundary
         theta_i = 0.0
         ds = 0.0
+
     # Normals
     N_ijk = np.array(N_ijk)
     N_ijl = np.array(N_ijl)
     Wedge_ij_ik = np.array(Wedge_ij_ik)
     # (^ The integrated area of the unit sphere)
+
+    # Integrated curvatures
     HNdA_i = 0.5 * np.sum(HNdA_ij, axis=0)  # Vector mean curvature normal sums (multiplied by N?)
     # HN_i = 0.5 * np.sum(HN_ij, axis=0)
     NdA_i = (1 / 6.0) * np.sum(NdA_ij, axis=0)  # Vector normal  are sums
     # (^ The integrated area of the original smooth surface (a Dual discrete differential 2-form))
-    # KN_i = 0.5 * np.sum(KN_ij, axis=0)  # Vector Gauss curvature normal sums ????
 
+    # Point-wise estimates
+    HN_i = np.sum(HNdA_i) / np.sum(C_ij)
+    # TODO: Need to replace with dot n_i
 
-
-
-
-    #r_approx =
-
+    HN_i = np.sum(np.dot(HNdA_i, n_i))/np.sum(C_ij)
+    K_H_i = (HN_i/ 2.0)**2
+    if 0:
+        print(f'HNdA_i= {HNdA_i}')
+        print(f'n_i = {n_i}')
+        print(f'normalized(HNdA_i) = {normalized(HNdA_i)[0]}')
+        print(f'normalized(HNdA_ij_Cij) = {normalized(np.sum(HNdA_ij_Cij, axis=0))[0]}')
+        print(f'normalized(NdA_i ) = {normalized(NdA_i)[0]}')
+        print(f'HNdA_ij_Cij = {HNdA_ij_Cij}')
+    HNdA_ij_Cij = np.sum( np.sum(HNdA_ij_Cij, axis=0))
+    
     return dict(**locals())
 
 def construct_HC(F, nn):

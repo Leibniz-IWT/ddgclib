@@ -51,9 +51,9 @@ theta_p = 20 * np.pi/180.0  # Three phase contact angle
 #phi = 0.0
 N = 8
 N = 5
-N = 6
-N = 7
-N = 5
+#N = 6
+#N = 7
+#N = 5
 #N = 12
 refinement = 0
 #N = 20
@@ -117,127 +117,149 @@ if 1:
 
     # Compute the interior mean normal curvatures
     # (uses  curvatures_hn_i
-
-    (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
-     K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=1)
-    print('-')
-    print(f'=' * len('Discrete (New):'))
-    print(f'K_H_2 - K_f = {K_H_2 - K_f}')
-    plt.figure()
-    yr = K_H_2 - K_f
-    xr = list(range(len(yr)))
-    plt.plot(xr, yr, label='K_H_2 - K_f')
-    print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
-    yr = HNdA_ij_dot_hnda_i - H_f
-    plt.plot(xr, yr, label='HNdA_ij_dot_hnda_i - H_f')
-    plt.ylabel('Difference')
-    plt.xlabel('Vertex No.')
-    plt.legend()
+    # Old, deprecated 2021.06.27
+    if 0:
+    
+        (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
+         K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=1)
+        print('-')
+        print(f'=' * len('Discrete (New):'))
+        print(f'K_H_2 - K_f = {K_H_2 - K_f}')
+        plt.figure()
+        yr = K_H_2 - K_f
+        xr = list(range(len(yr)))
+        plt.plot(xr, yr, label='K_H_2 - K_f')
+        print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        yr = HNdA_ij_dot_hnda_i - H_f
+        plt.plot(xr, yr, label='HNdA_ij_dot_hnda_i - H_f')
+        plt.ylabel('Difference')
+        plt.xlabel('Vertex No.')
+        plt.legend()
 
     # Compute the old discrete Gauss_Bonnet values
-    print(f'=' * len('Discrete (Angle defect):'))
-    print(f'Discrete (Angle defect):')
-    print(f'='*len('Discrete (Angle defect)::'))
-    chi, KdA, k_g = Gauss_Bonnet(HC, bV, print_out=True)
+    if 0:
+        print(f'=' * len('Discrete (Angle defect):'))
+        print(f'Discrete (Angle defect):')
+        print(f'='*len('Discrete (Angle defect)::'))
+        chi, KdA, k_g = Gauss_Bonnet(HC, bV, print_out=True)
 
-    print(f'=' * len('Analytical:'))
-    print(f'Analytical:')
-    print(f'='*len('Analytical:'))
-    H_f, K_f, dA, k_g_f, dC = analytical_cap(r, theta_p)
-    print(f'Area of spherical cap = {dA}')
-    print(f'H_f  = {H_f }')    # int K_f dA
-    print(f'K_f  = {K_f }')    # int K_f dA
-    print(f'K_f dA = {K_f * dA}')    # int K_f dA
-    # Values for r =1
-    #k_g_f = np.cos(theta_p) / np.sin(theta_p)  # The geodisic curvature at a point
-    #b_S_length = 2 * np.pi * np.sin(theta_p)  # The length of a boundary of a spherical cap
+        print(f'=' * len('Analytical:'))
+        print(f'Analytical:')
+        print(f'='*len('Analytical:'))
+        H_f, K_f, dA, k_g_f, dC = analytical_cap(r, theta_p)
+        print(f'Area of spherical cap = {dA}')
+        print(f'H_f  = {H_f }')    # int K_f dA
+        print(f'K_f  = {K_f }')    # int K_f dA
+        print(f'K_f dA = {K_f * dA}')    # int K_f dA
+        # Values for r =1
+        #k_g_f = np.cos(theta_p) / np.sin(theta_p)  # The geodisic curvature at a point
+        #b_S_length = 2 * np.pi * np.sin(theta_p)  # The length of a boundary of a spherical cap
 
-    print(f'k_g  = {k_g_f }')  # int
-    print(f'k_g * dC = {k_g_f * dC  }')  # int
-    print(f'K_f dA + int k_g_f dC = { K_f * dA + k_g_f  * dC }')
-    print(f'LHS - RHS = { K_f * dA + k_g_f  * dC   - 2 * np.pi * np.array(chi)  }')
+        print(f'k_g  = {k_g_f }')  # int
+        print(f'k_g * dC = {k_g_f * dC  }')  # int
+        print(f'K_f dA + int k_g_f dC = { K_f * dA + k_g_f  * dC }')
+        print(f'LHS - RHS = { K_f * dA + k_g_f  * dC   - 2 * np.pi * np.array(chi)  }')
 
-    print(f'k_g_f/K_f = {k_g_f/K_f}')
-    print(f'k_g_f * dC/K_f dA = {(k_g_f * dC )/(K_f * dA)}')
-    print(f'Total vertices: {HC.V.size()}')
+        print(f'k_g_f/K_f = {k_g_f/K_f}')
+        print(f'k_g_f * dC/K_f dA = {(k_g_f * dC )/(K_f * dA)}')
+        print(f'Total vertices: {HC.V.size()}')
 
-    # NEW Compute new boundary formulation
-    print(f'=' * len('New boundary formulation:'))
-    print(f'New boundary formulation:')
-    print(f'=' * len('New boundary formulation:'))
+    if 1:
+        # NEW Compute new boundary formulation
+        print(f'=' * len('New boundary formulation:'))
+        print(f'New boundary formulation:')
+        print(f'=' * len('New boundary formulation:'))
 
-    # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
+            # HNdA_ij_sum.append(-np.sum(np.dot(c_outd['HNdA_i'], c_outd['n_i'])))
 
-    (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
-      K_H_2, HNdA_i_Cij, Theta_i) = HC_curvatures(HC, bV, r, theta_p, printout=1)
-    print('.')
-    print(f'HNda_v_cache = {HNda_v_cache}')
-    print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
-    print(f'H_f = {H_f}')
-    print(f'K_H_2 = {K_H_2}')
-    print(f'K_f = {K_f}')
-    print(f'K_H_2 - K_f = {K_H_2 - K_f}')
-    print(f'K_H_2/K_f = {K_H_2/K_f}')
-    #print(f'HNda_v_cache = {HNda_v_cache}')
-  #  print(f'K_H_cache = {K_H_cache}')
-  #  print(f'C_ijk_v_cache = {C_ijk_v_cache}')
-    int_K_H_dA = 0 # Boundary integrated curvature
-    for v in bV:
-        K_H_dA = K_H_cache[v.x] * C_ijk_v_cache[v.x]
-        int_K_H_dA += K_H_dA
+        H_f, K_f, dA, k_g_f, dC = analytical_cap(r, theta_p)
+        (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+         HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+         Theta_i_cache) = HC_curvatures(HC, bV, r, theta_p, printout=1)
+
+        # Plot all points
+        if 1:
+            plt.figure()
+            yr = K_H_i - K_f
+            xr = list(range(len(yr)))
+            plt.plot(xr, yr, 'o', label=' K_H_i - K_f')
+            yr = HN_i - H_f
+            plt.plot(xr, yr, 'x', label='HN_i - H_f')
+            yr = HNdA_i_Cij  - H_f
+           # plt.plot(xr, yr, 'x', label='HNdA_i_Cij - H_f')
+            plt.ylabel('Difference')
+            plt.xlabel('Vertex No.')
+            plt.legend()
+        # Tested before refactoring 2021.06.27:
+        if 0:
+            print('.')
+            print(f'HNda_v_cache = {HNda_v_cache}')
+            print(f'HNdA_ij_dot_hnda_i = {HNdA_ij_dot_hnda_i}')
+            print(f'H_f = {H_f}')
+            print(f'K_H_2 = {K_H_2}')
+            print(f'K_f = {K_f}')
+            print(f'K_H_2 - K_f = {K_H_2 - K_f}')
+            print(f'K_H_2/K_f = {K_H_2/K_f}')
+            #print(f'HNda_v_cache = {HNda_v_cache}')
+          #  print(f'K_H_cache = {K_H_cache}')
+          #  print(f'C_ijk_v_cache = {C_ijk_v_cache}')
+            int_K_H_dA = 0 # Boundary integrated curvature
+            for v in bV:
+                K_H_dA = K_H_cache[v.x] * C_ijk_v_cache[v.x]
+                int_K_H_dA += K_H_dA
 
 
-    print(f'K_H_dA = {K_H_dA}')
-    print(f'int_K_H_dA= {int_K_H_dA}')
-    print('-')
-    print('Analytical:')
-   # k_g_a = 1/r * np.tan(theta_p)
-    k_g_a = 1/R * np.tan(theta_p)
-    print(f'k_g_a = {k_g_a}')
-    l_a = 2 * np.pi * r / len(bV)     # arc length
-    print(f'l_a= {l_a}')
+            print(f'K_H_dA = {K_H_dA}')
+            print(f'int_K_H_dA= {int_K_H_dA}')
+            print('-')
+            print('Analytical:')
+           # k_g_a = 1/r * np.tan(theta_p)
+            k_g_a = 1/R * np.tan(theta_p)
+            print(f'k_g_a = {k_g_a}')
+            l_a = 2 * np.pi * r / len(bV)     # arc length
+            print(f'l_a= {l_a}')
 
-    Xi = 1
-    # Gauss-Bonnet
-    # int_M K dA + int_dM kg ds = 2 pi Xi
-    print('-')
-    print('Numerical:')
-    print(f'K_H_dA - 2 pi Xi  = {K_H_dA - 2 * np.pi * Xi}')
-    #kg_ds = K_H_cache[v.x]  * (2 * np.pi * r**2) - 2 * np.pi * Xi
-    #kg_ds = K_f  * (2 * np.pi * r**2) - 2 * np.pi * Xi
-    #NOTE: Area should be height of spherical cap
-    #h = R - r * np.tan(theta_p)
-    # Approximate radius of the great shpere K = (1/R)**2:
-    R_approx = 1/np.sqrt(K_f)
-    theta_p_approx = np.arccos(r / R_approx)  #From R = r / np.cos(theta_p)
-   # theta_p_approx = np.arctan(r / R_approx)  #From R = r / np.cos(theta_p)
-   # A_approx = 2 * np.pi * r**2 * (1 - np.cos(theta_p_approx))
-    #A_approx = 2 * np.pi * R_approx**2 * (1 - np.cos(theta_p_approx))
-    h = R_approx - r * np.tan(theta_p_approx)
-    #A_approx = 2 * np.pi * (r**2  + h**2)
-    A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
-    print(f'R_approx = {R_approx}')
-    print(f'theta_p_approx = {theta_p_approx *180/np.pi}')
-    print(f'A_approx = {A_approx}')
-    #A_approx  # Approximate area of the spherical cap
-    kg_ds = 2 * np.pi * Xi -  K_f  * (A_approx)
-    #kg_ds = K_H_cache[v.x] - 2 * np.pi * Xi
-    print(f'kg_ds =  2 pi Xi -  K_H_cache[v.x]  * np.pi * r**2  '
-          f' = {kg_ds}')
+            Xi = 1
+            # Gauss-Bonnet
+            # int_M K dA + int_dM kg ds = 2 pi Xi
+            print('-')
+            print('Numerical:')
+            print(f'K_H_dA - 2 pi Xi  = {K_H_dA - 2 * np.pi * Xi}')
+            #kg_ds = K_H_cache[v.x]  * (2 * np.pi * r**2) - 2 * np.pi * Xi
+            #kg_ds = K_f  * (2 * np.pi * r**2) - 2 * np.pi * Xi
+            #NOTE: Area should be height of spherical cap
+            #h = R - r * np.tan(theta_p)
+            # Approximate radius of the great shpere K = (1/R)**2:
+            R_approx = 1/np.sqrt(K_f)
+            theta_p_approx = np.arccos(r / R_approx)  #From R = r / np.cos(theta_p)
+           # theta_p_approx = np.arctan(r / R_approx)  #From R = r / np.cos(theta_p)
+           # A_approx = 2 * np.pi * r**2 * (1 - np.cos(theta_p_approx))
+            #A_approx = 2 * np.pi * R_approx**2 * (1 - np.cos(theta_p_approx))
+            h = R_approx - r * np.tan(theta_p_approx)
+            #A_approx = 2 * np.pi * (r**2  + h**2)
+            A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
+            print(f'R_approx = {R_approx}')
+            print(f'theta_p_approx = {theta_p_approx *180/np.pi}')
+            print(f'A_approx = {A_approx}')
+            #A_approx  # Approximate area of the spherical cap
+            kg_ds = 2 * np.pi * Xi -  K_f  * (A_approx)
+            #kg_ds = K_H_cache[v.x] - 2 * np.pi * Xi
+            print(f'kg_ds =  2 pi Xi -  K_H_cache[v.x]  * np.pi * r**2  '
+                  f' = {kg_ds}')
 
-    print(f'Theta_i = {Theta_i}')
-    #ds =  Theta_i[0] * r  # Arc length
-    #TODO: This is NOT the correct arc length (wrong angle)
-    ds = 2 * np.pi * r  # Arc length of whole spherical cap
-    #ds = 2 * np.pi * r  # Arc length of whole spherical cap
-    print(f'ds = {ds}')
-    k_g = kg_ds / ds #/ 2.0
-    print(f'k_g = {k_g}')
-    #phi_est = cotan(r * k_g)
-   # phi_est = np.arctan(r * k_g)
-    phi_est = np.arctan(R * k_g)
-    print(f'phi_est  = {phi_est * 180 / np.pi}')
-    print(f'phi_est  = {phi_est * 180 / np.pi}')
+            print(f'Theta_i = {Theta_i}')
+            #ds =  Theta_i[0] * r  # Arc length
+            #TODO: This is NOT the correct arc length (wrong angle)
+            ds = 2 * np.pi * r  # Arc length of whole spherical cap
+            #ds = 2 * np.pi * r  # Arc length of whole spherical cap
+            print(f'ds = {ds}')
+            k_g = kg_ds / ds #/ 2.0
+            print(f'k_g = {k_g}')
+            #phi_est = cotan(r * k_g)
+           # phi_est = np.arctan(r * k_g)
+            phi_est = np.arctan(R * k_g)
+            print(f'phi_est  = {phi_est * 180 / np.pi}')
+            print(f'phi_est  = {phi_est * 180 / np.pi}')
 
     #for v in HC.V:
     #    if v in bV:
