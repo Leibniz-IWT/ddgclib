@@ -240,6 +240,8 @@ class VertexCacheBase(object):
         :param v:  Vertex object to remove
         :return:
         """
+        #if not (v in self.cache):
+        #    return
         ind = v.index
 
         vn = copy.copy(v.nn)

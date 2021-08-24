@@ -19,7 +19,8 @@ def analytical_cap(r, theta_p):
     k_g_f = np.sqrt(R ** 2 - a ** 2) / (R * a)
     return H_f, K_f, dA, k_g_f, dC
 
-def cap_rise_init_N(r, theta_p, gamma, N=4, refinement=0, cdist=1e-10, equilibrium=True):
+def cap_rise_init_N(r, theta_p, gamma, N=4, refinement=0, cdist=1e-10,
+                    equilibrium=True):
     Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
     R = r / np.cos(theta_p)  # = R at theta = 0
     # Exact values:
@@ -269,7 +270,7 @@ def out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
 
 def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
     #Theta_p = np.linspace(0.0, np.pi, 100)  # range of theta
-    Theta_p = np.linspace(0.0, 0.5*np.pi, 100)  # range of theta
+    Theta_p = np.linspace(0.0, 0.5*np.pi, 10)  # range of theta
 
     # Containers
     H_i = []
@@ -297,7 +298,8 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
         H_f = 1 / R + 1 / R  # 2 / R
         # dp_exact = gamma * H_f
 
-        F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N, refinement=refinement)
+        F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
+                                                  refinement=refinement)
 
         v = HC.V[(0.0, 0.0, R * np.sin(theta_p) - R)]
         F, nn = vectorise_vnn(v)
@@ -340,10 +342,13 @@ def new_out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
 
     X = Theta_p * 180 / np.pi
 
+
+
     return c_outd_list, c_outd, vdict, X
 
 
-def plot_c_outd(c_outd_list, c_outd, vdict, X, ylabel=r'$m$ or $m^{-1}$'):
+def plot_c_outd(c_outd_list, c_outd, vdict, X, ylabel=r'$m$ or $m^{-1}$',
+                keyslabel=None):
     fig = plt.figure()
     # ax = fig.add_subplot(2, 1, 1)
     ax = fig.add_subplot(1, 1, 1)
@@ -354,7 +359,17 @@ def plot_c_outd(c_outd_list, c_outd, vdict, X, ylabel=r'$m$ or $m^{-1}$'):
     Lines = {}
     fig.legend()
     for key, value in vdict.items():
-        line, = ax.plot(X, value, linestyle=lstyles[ind], label=key, alpha=0.7)
+        if keyslabel is None:
+            line, = ax.plot(X, value,
+                            linestyle=lstyles[ind],
+                            label=key, alpha=0.7)
+
+        else:
+            line, = ax.plot(X, value,
+                            marker=keyslabel[key]['marker'],
+                            linestyle=keyslabel[key]['linestyle'],
+                            label=keyslabel[key]['label'], alpha=0.7)
+
         Lines[key] = line
         # plot.plot(X, value, linestyle=lstyles[ind], label=key, alpha=0.7)
         ind += 1

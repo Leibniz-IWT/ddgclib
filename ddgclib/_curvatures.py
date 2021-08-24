@@ -179,7 +179,6 @@ def b_vectorise_vnn(v):
 
 # Curvature computations
 # Interior curvatures
-
 def HC_curvatures(HC, bV, r, theta_p, printout=False):
     R = r / np.cos(theta_p)
     K_f = (1 / R) ** 2
@@ -201,6 +200,10 @@ def HC_curvatures(HC, bV, r, theta_p, printout=False):
     Theta_i_cache = {}
 
     for v in HC.V:
+        #TODO: REMOVE UNDER NORMAL CONDITIONS:
+        if 0:
+            if v in bV:
+                continue
         N_f0 = np.array(
             [0.0, 0.0, R * np.sin(theta_p)]) - v.x_a  # First approximation
         N_f0 = normalized(N_f0)[0]
@@ -1082,6 +1085,11 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     """
     # NOTE: We need a better solution to ensure signed quantities retain their structure.
     #      The mesh must be ordered to ensure we obtain the correct normal face directions
+   # print(f'.')
+    #print(f'.')
+    #print(f'n_i = {n_i}')
+    #print(f'F = {F}')
+    #print(f'nn = {nn}')
     if n_i is None:
         n_i = normalized(F[0])[0]
     #print(f'n_i = {n_i}')
@@ -1124,6 +1132,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     HNdA_ij = np.zeros_like(E_ij)  # Vector mean curvature normal sums
     HNdA_ij_Cij = np.zeros([len(E_ij), 3])  # Vector mean curvature normal sums divided by dual ara
     NdA_ij = np.zeros_like(E_ij)  # Area curvature normal sums
+    NdA_ij_Cij = np.zeros_like(E_ij)  # Area curvature normal sums, weighted
     C_ij = np.zeros_like(A_ijk)  # Dual area around an edge e_ij
     C_ijk = np.zeros_like(A_ijk)  # Dual area
     C_ijl = np.zeros_like(A_ijk)  # Dual area
@@ -1253,6 +1262,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
         # (^ NOTE: The above vertices i, j MUST be consecutive for this formula to be valid (CHECK!))
 
         NdA_ij[j] = np.cross(F[j], F[k])
+        # NdA_ij[j] = np.cross(F[i], F[j])  #TODO: Check again
         # (^ NOTE: The above vertices j, k MUST be consecutive for this formula
         # to be valid (CHECK!))
         # Scalar component ijk
@@ -1307,6 +1317,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
         #print(f'HNdA_ij[j] = {HNdA_ij[j]}')
         #print(f'C_ij[j] = {C_ij[j]}')
         HNdA_ij_Cij[j] = HNdA_ij[j] / C_ij[j]
+        NdA_ij_Cij[j] = NdA_ij[j] / C_ij[j]
 
         #print(f'HNdA_ij_Cij[j] = {HNdA_ij_Cij[j]}')
         #HNdA_ij_Cij[j] = np.dot(HNdA_ij[j], n_i) / (C_ij[j])
@@ -1355,21 +1366,59 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     HNdA_i = 0.5 * np.sum(HNdA_ij, axis=0)  # Vector mean curvature normal sums (multiplied by N?)
     # HN_i = 0.5 * np.sum(HN_ij, axis=0)
     NdA_i = (1 / 6.0) * np.sum(NdA_ij, axis=0)  # Vector normal  are sums
+    #NdA_ij_Cij = np.sum(NdA_ij_Cij, axis=0)
     # (^ The integrated area of the original smooth surface (a Dual discrete differential 2-form))
+
 
     # Point-wise estimates
     HN_i = np.sum(HNdA_i) / np.sum(C_ij)
     # TODO: Need to replace with dot n_i
 
     HN_i = np.sum(np.dot(HNdA_i, n_i))/np.sum(C_ij)
-    K_H_i = (HN_i/ 2.0)**2
+    #TURN THIS OFF IN NORMAL RUNS:
     if 0:
-        print(f'HNdA_i= {HNdA_i}')
+        HN_i = np.sum(np.dot(HNdA_i, normalized(np.sum(NdA_ij_Cij, axis=0))[0])) / np.sum(C_ij)
+    if 0:
+        HNdA_i = np.sum(HNdA_ij_Cij, axis=0)
+        HN_i = np.sum(
+            np.dot(HNdA_i, normalized(np.sum(NdA_ij_Cij, axis=0))[0])) / np.sum(
+            C_ij)
+    if 1:
+        #print(f'C_ij = {C_ij}')
+        C_i = np.sum(C_ij, axis=0)
+
+    K_H_i = (HN_i/ 2.0)**2
+
+    # nt development:
+    if 0:
+        print('-')
+        #print(f'HNdA_i= {HNdA_i}')
+
         print(f'n_i = {n_i}')
-        print(f'normalized(HNdA_i) = {normalized(HNdA_i)[0]}')
-        print(f'normalized(HNdA_ij_Cij) = {normalized(np.sum(HNdA_ij_Cij, axis=0))[0]}')
+        print(f'C_i = {C_i}')
+     #   print(f'normalized(C_i) = {normalized(C_i)[0]}')
+        nt = []
+        for nda, a_ijk in zip(NdA_ij, A_ijk):
+            #print(f'nda = {nda}')
+            #print(f'a_ijk = {a_ijk}')
+            nt.append(nda/a_ijk)
+
+        nt = np.array(nt)
+        nt = np.nan_to_num(nt)
+        print(f'nt = {nt}')
+        nt = np.sum(nt, axis=0)
+        print(f'nt = {nt}')
+        print(f'normalized(np.sum(NdA_ij/A_ijk, axis=0)) = {normalized(nt)[0]}')
         print(f'normalized(NdA_i ) = {normalized(NdA_i)[0]}')
-        print(f'HNdA_ij_Cij = {HNdA_ij_Cij}')
+        print(f'normalized(np.sum(NdA_ij_Cij, axis=0)) '
+              f'= {normalized(np.sum(NdA_ij_Cij, axis=0))[0]}')
+        print(' ')
+        print(f'NdA_i = {NdA_i}')
+        print(f'NdA_ij_Cij = {NdA_ij_Cij}')
+        #print(f'normalized(HNdA_i) = {normalized(HNdA_i)[0]}')
+        #print(f'normalized(HNdA_ij_Cij) = {normalized(np.sum(HNdA_ij_Cij, axis=0))[0]}')
+        #print(f'normalized(NdA_i ) = {normalized(NdA_i)[0]}')
+        #print(f'HNdA_ij_Cij = {HNdA_ij_Cij}')
     HNdA_ij_Cij = np.sum( np.sum(HNdA_ij_Cij, axis=0))
     
     return dict(**locals())

@@ -109,7 +109,7 @@ for N in range(5, Nmax + 1):
                     print(f'numpy.linalg.norm(a - b) = {numpy.linalg.norm(a - b)}')
                     continue
                 break
-        ern = numpy.linalg.norm(a - b)
+        ern = 2*numpy.linalg.norm(a - b)
         max_int_e = ern
         break
 
@@ -123,12 +123,12 @@ geo_error = erange
 
 plot.figure()
 # plt.plot(N, lp_error, 'x', label='$\Delta p \frac{\Delta p - \Delta p}{\Delta p}$')
-if 0:
+if 1:
     plt.plot(Nlist, lp_error, 'x')
     plt.plot(Nlist, lp_error, 'x', label='Young-Laplace error: $(\Delta p - \Delta\hat{ p})/\Delta p $')
     plt.plot(Nlist, geo_error, 'X', label='Integration error (Trapezoidal rule $O(h^3)$)')
 
-if 1:
+if 0:
     plt.semilogy(Nlist, lp_error, 'x')
     plt.semilogy(Nlist, lp_error, 'x', label='Young-Laplace error: $(\Delta p - \Delta\hat{ p})/\Delta p $')
     plt.semilogy(Nlist, geo_error, 'X', label='Integration error (Trapezoidal rule $O(h^3)$)')#

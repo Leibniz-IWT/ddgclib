@@ -2192,84 +2192,41 @@ class Complex:
         if V is None:
             V = self.V
 
+        from itertools import combinations
+        dV = set()  # Known boundary vertices
+        iV = set()  # Known inner vertices
         for v in V:
-            print(f'====')
-            print(f'v = {v.x}')
-            v_nn = copy.copy(v.nn)
-            for v2 in v_nn:
-                if v in v_nn:
-                    pass
+            #    print(f'-')
+            #    print(f'v.x = {v.x}')
+            s_pool = []
+            s_it = combinations(v.nn, self.dim)
+            valid_s = []
+            for s in s_it:
+                snn = set()
+                s_it_valid = True
+                for v2 in s:
+                    for v3 in s:
+                        if v3 is not v2:
+                            if v2 in v3.nn:
+                                pass
+                            else:
+                                s_it_valid = False
+                if s_it_valid:
+                    valid_s.append(s)
 
+            # Now parse through
+            for s in valid_s:
+                snn = set(s[0].nn)
+                for v2 in s[1:]:
+                    snn = snn.intersection(v2.nn)
 
-            if 0:
-                comb_iter = itertools.combinations(v_nn, self.dim)
-                for s in comb_iter:
-                    print('=')
-                    print(f's = {s}')
-                    ss = set(s)
+                snn = snn - set(s) - set([v])
+                # print(f'snn = {snn}')
+                if len(snn) == 0:
                     for v2 in s:
-                        print(f'v2.x = {v2.x}')
-                    continue
-                    print('-')
-                    for v2 in s:
-                        print('--')
-                        print(f'v2.x = {v2.x}')
-                        print(f'v2.nn = {v2.nn}')
-                        v2_nn = copy.copy(v2.nn - ss - set((v,)))
-                        #for v3 in v2.nn:
-                        for v3 in v2_nn:
-                            print(f'v3.x = {v3.x}')
-                        print(f's.issubset(v2.nn) = {set(s).issubset(v2.nn) }')
-                        #if set(s).issubset(v2.nn):
-                        if set(s).issubset(v2_nn):
-                            print('!!!!!')
+                        dV.add(v2)
 
-            #for v2 in v_nn:
-            #    v2_nn = copy.copy(v.nn)
-           #     comb_iter = itertools.combinations(v2_nn, self.dim)
-            #    for s in comb_iter:
-            #        print(f's = {s}')
-
-                #for v3 in v2_nn:
-                #    print(f'')
-               #     if v3 in v_nn:
-               #         print(f'v3 = {v3.x}')
-               #         print(f'v3 = {v3}')
-               #         print(f'v_nn = {v_nn}')
-                        # v.disconnect(v3)
-               #         v2.disconnect(v3)
-
-        if 0:
-            dV = set()
-            if V is None:
-                V = self.V
-
-            V_nn = {}
-
-            #TODO: Make copies of lists
-            for v in V:
-                print(f'v.x = {v.x}')
-                V_nn[v.x] = copy.copy(v.nn)
-
-            print(f'V_nn = {V_nn}')
-            for v in V:
-                print(f'-')
-                print(f'v = {v.x}')
-                v_nn = V_nn[v.x]#copy.copy(v.nn)
-                for v2 in v_nn:
-                    v2_nn = V_nn[v2.x]#copy.copy(v.nn)
-                    for v3 in v2_nn:
-                        print(f'')
-                        if v3 in v_nn:
-                            print(f'v3 = {v3.x}')
-                            print(f'v3 = {v3}')
-                            print(f'v_nn = {v_nn}')
-                            #v.disconnect(v3)
-                            v2.disconnect(v3)
-
-            for v in V:
-                if len(v.nn) == 0:
-                    pass#self.V.remove(v)
+        return dV
 
     def boundary_d_old(self, V=None):
         """

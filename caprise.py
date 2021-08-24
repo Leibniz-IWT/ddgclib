@@ -40,22 +40,22 @@ r = 1.4e-5  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 1e-3  # Radius of the tube (20 mm)
 r = 2e-3  # Radius of the tube (20 mm)
-#r = 1.0  # Radius of the droplet sphere
-#r = 10.0  # Radius of the droplet sphere
 r = 1.0  # Radius of the droplet sphere
+#r = 10.0  # Radius of the droplet sphere
+#r = 1.0  # Radius of the droplet sphere
 #r = 0.1  # Radius of the droplet sphere
 
 #r = 0.5e-5  # Radius of the droplet sphere
-theta_p = 45 * np.pi/180.0  # Three phase contact angle
+#theta_p = 45 * np.pi/180.0  # Three phase contact angle
 theta_p = 20 * np.pi/180.0  # Three phase contact angle
 #phi = 0.0
 N = 8
 N = 5
 #N = 6
-#N = 7
+N = 7
 #N = 5
 #N = 12
-refinement = 0
+refinement = 1
 #N = 20
 #cdist = 1e-10
 cdist = 1e-10
@@ -69,18 +69,201 @@ theta_p = np.array(theta_p, dtype=np.longdouble)
 
 ##################################################
 # Cap rise plot with surrounding cylinder
-if 0:
-    fig, axes, HC = cape_rise_plot(r, theta_p, gamma, N=N, refinement=1)
+if 1:
+    fig, axes, HC = cape_rise_plot(r, theta_p, gamma, N=N,
+                                   refinement=refinement)
+    # Add Spherical cap
+    if 1:
+        def add_sphere_cap(axes, a):
+            def capRatio(r, a, h):
+                '''cap to sphere ratio'''
+                surface_cap = np.pi * (a ** 2 + h ** 2)
+                surface_sphere = 4.0 * np.pi * r ** 2
+                return surface_cap / surface_sphere
+
+            def findRadius(a, h):
+                "find radius if you have cap base radius a and height"
+                r = (a ** 2 + h ** 2) / (2 * h)
+                return r
+
+            # choose a and h
+            a = a
+            #a = r / np.cos(theta_p)
+            h = a*np.cos(theta_p) #TODO
+            R = a / np.cos(theta_p)
+            h = R - R * np.sin(theta_p)
+            #r = findRadius(a, h)
+            r =R
+            p = capRatio(r, a,
+                         h)  # Ratio of sphere to be plotted, could also be a function of a.
+            u = np.linspace(0, 2 * np.pi, 100)
+            #v = np.linspace(0, 2*p * np.pi, 100)
+            #v = np.linspace(0, 2 * np.pi, 100)
+            v = np.linspace(0, theta_p, 100)
+
+
+            x = r * np.outer(np.cos(u), np.sin(v))
+            y = r * np.outer(np.sin(u), np.sin(v))
+            z = -r * np.outer(np.ones(np.size(u)), np.cos(v))
+            z = z #+  r / np.cos(theta_p)  # shift to zero on bottom of cap
+            z = z #+ 2* (R - R * np.sin(theta_p))
+            z = z + R - h #+ h # heuristic
+            #z = z + 0.5*R
+
+            fig = plt.figure()
+            #ax = fig.add_subplot(111, projection='3d')
+            axes.plot_surface(x, y, z, rstride=4, cstride=4, alpha=0.3,
+                              #cmap=cm.winter
+                                )
+            return axes
+
+        axes = add_sphere_cap(axes, r)
+
+        fig, ax = plt.subplots()
+        x = np.linspace(0, 1.0, 1000)
+        #u = np.linspace(0, 2 * np.pi, 100)
+        #v = np.linspace(0, theta_p, 100)
+        #z = -r * np.outer(np.ones(np.size(u)), np.cos(v))
+        if 1:
+            h = r * np.cos(theta_p)  # TODO
+            R = r / np.cos(theta_p)
+            h = R - R * np.sin(theta_p)
+            theta_z  = np.arctan(h/r)
+        #y = h - x * np.sin(theta_z)
+        #y = h - x * np.tan(theta_z)
+        #y = h - h * np.sin(x)
+       # y = np.sqrt(2 * r * x - x**2)
+        #x = np.linspace(0, np.sqrt(2 * r * h - h**2), 1000)
+
+        #x = np.linspace(0, np.sqrt(2 * r * h - h**2), 1000)
+        x = np.linspace(0, 1.0, 1000)
+
+        #y = r - np.sqrt(r**2 - x**2)
+        y = (h - np.sqrt(h**2 - x**2))/2
+        y = np.sqrt(r**2 + x**2) - 1.0
+        ymax = np.max(y)
+        y = y - ymax
+
+        #np.sqrt(r ** 2 + x ** 2) - 1.0
+        plt.plot(x, y, alpha=0.5, color='tab:blue',
+                 linewidth=2)
+        for v in HC.V:
+            print(f'v = {v.x_a}')
+        x2 = 0.63809867
+        #y2 = [0, np.sqrt(2 * r * x2 - x2**2)]
+
+        #y2 = [0, r - np.sqrt(r**2 - x2**2), r - np.sqrt(r**2 - 1.0**2)]
+        y2 = [- ymax, np.sqrt(r ** 2 + x2 ** 2) - 1.0 - ymax,
+                 np.sqrt(r ** 2 + 1.0 ** 2) - 1.0 - ymax]
+        plt.plot([0.0, 0.6380986, 1.0], y2, alpha=1.0,
+                 linestyle='-',
+                 marker='o',
+                 linewidth=2,
+                 color='tab:blue')
+
+        x2 = [0.0, 0.6380986, 1.0]
+        ax.fill_between(x2[0:2], y2[0:2], 0, alpha=0.3, color='tab:blue')
+        ax.fill_between(x2[1:], y2[1:], 0, alpha=0.3, color='tab:blue')
+        #plt.show()
 ##################################################
 # PLot theta rise
 if 0:
     c_outd_list, c_outd, vdict, X = out_plot_cap_rise(N=N, r=r, gamma=gamma, refinement=refinement)
     plot_c_outd(c_outd_list, c_outd, vdict, X)
 
-# New fomulation
-if 1:
-    c_outd_list, c_outd, vdict, X = new_out_plot_cap_rise(N=N, r=r, gamma=gamma, refinement=refinement)
-    plot_c_outd(c_outd_list, c_outd, vdict, X)
+# PLot theta rise with New fomulation over Phi_C (2021-07)
+# NOTE: THIS IS CURRENTLY USED IN THE MANUSCRIPT:
+if 0:
+    c_outd_list, c_outd, vdict, X = new_out_plot_cap_rise(N=N, r=r,
+        gamma=gamma, refinement=refinement)
+    keyslabel = {'K_f': {'label': '$K$',
+                         'linestyle':  '-',
+                         'marker': None},
+                'K_H_i': {'label': '$\widehat{K_i}$',
+                         'linestyle':  'None',
+                          'marker': 'o'},
+                'H_f': {'label': '$H$',
+                        'linestyle':  '--',
+                        'marker': None},
+                'HN_i': {'label': '$\widehat{H_i}$',
+                         'linestyle': 'None',
+                         'marker': 'D'},
+    }
+
+    plot_c_outd(c_outd_list, c_outd, vdict, X, keyslabel=keyslabel)
+
+    # Plot the values from new_out_plot_cap_rise
+    if 1:
+        fig = plt.figure()
+        # ax = fig.add_subplot(2, 1, 1)
+        ax = fig.add_subplot(1, 1, 1)
+
+        ind = 0
+        Lines = {}
+        fig.legend()
+
+        K_fl = []
+        H_fl = []
+        Theta_p = np.linspace(0.0, 0.5 * np.pi, 100)
+        for theta_p in Theta_p:
+            # Contruct the simplicial complex, plot the initial construction:
+            # F, nn = droplet_half_init(R, N, phi)
+            R = r / np.cos(theta_p)  # = R at theta = 0
+            # Exact values:
+            K_f = (1 / R) ** 2
+            H_f = 1 / R + 1 / R  # 2 / R
+            # dp_exact = gamma * H_f
+
+            F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
+                                                      refinement=refinement)
+            K_fl.append(K_f)
+            H_fl.append(H_f)
+
+        key = 'K_f'
+        value = K_fl
+        ax.plot(Theta_p* 180 / np.pi, value,
+                marker=keyslabel[key]['marker'],
+                linestyle=keyslabel[key]['linestyle'],
+                label=keyslabel[key]['label'], alpha=0.7)
+
+        key = 'K_H_i'
+        value = vdict[key]
+        ax.plot(X, value,
+                marker=keyslabel[key]['marker'],
+                linestyle=keyslabel[key]['linestyle'],
+                markerfacecolor='None',
+                label=keyslabel[key]['label'], alpha=0.7)
+
+        key = 'H_f'
+        value = H_fl
+        ax.plot(Theta_p* 180 / np.pi, value,
+                marker=keyslabel[key]['marker'],
+                linestyle=keyslabel[key]['linestyle'],
+                label=keyslabel[key]['label'], alpha=0.7)
+
+        key = 'HN_i'
+        value = vdict[key]
+        ax.plot(X, value,
+                marker=keyslabel[key]['marker'],
+                linestyle=keyslabel[key]['linestyle'],
+                markerfacecolor='None',
+                label=keyslabel[key]['label'], alpha=0.7)
+
+        if 1:
+            plot.xlabel(r'Contact angle $\Theta_{C}$')
+            plot.ylabel(r'Gaussian curvature ($m^{-1}$)')
+            ax2 = ax.twinx()
+            plt.ylabel('Mean normal curvature ($m^{-1}$)')
+        else:
+            plot.xlabel(r'Contact angle $\Theta_{C}$')
+            plot.ylabel(r'$K$ ($m^{-1}$)')
+            ax2 = ax.twinx()
+            plt.ylabel('$H$ ($m^{-1}$)')
+
+        plt.ylim((0, 2))
+        ax.legend(bbox_to_anchor=(0.15, 0.15), loc="lower left",
+                  bbox_transform=fig.transFigure, ncol=2)
+        # interact(update);
 
 ##################################################
 ##################################################
@@ -164,8 +347,8 @@ if 1:
         print(f'k_g_f * dC/K_f dA = {(k_g_f * dC )/(K_f * dA)}')
         print(f'Total vertices: {HC.V.size()}')
 
+    # NEW Compute new boundary formulation (2021.06 to 07)
     if 1:
-        # NEW Compute new boundary formulation
         print(f'=' * len('New boundary formulation:'))
         print(f'New boundary formulation:')
         print(f'=' * len('New boundary formulation:'))
@@ -175,17 +358,38 @@ if 1:
         H_f, K_f, dA, k_g_f, dC = analytical_cap(r, theta_p)
         (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
          HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
-         Theta_i_cache) = HC_curvatures(HC, bV, r, theta_p, printout=1)
+         Theta_i_cache) = HC_curvatures(HC, bV, r, theta_p, printout=0)
 
+        # Areas print:
+        if 1:
+            print(f'dA  = {dA}')
+            int_C = 0
+            for cij in C_ij_cache:
+                # print(f'cij = {cij}')
+                # print(f'C_ij_cache[cij] = {C_ij_cache[cij] }')
+                int_C += np.sum(C_ij_cache[cij])
+                pass
+            print(f'int_C = {int_C}')
+
+            int_A = 0.0
+            Chi = 1
+            #A_K = 0.0
+            for K_i, cij in zip(K_H_i, C_ij):
+                pass
+                # Gauss-Bonnet in local disc:
+                print(f'K_i = {K_i}')
+                print(f'cij = {np.sum(cij)}')
+                int_A += 2 * np.pi * Chi / (K_i*np.sum(cij))
+            print(f'int_A = {int_A}')
         # Plot all points
         if 1:
             plt.figure()
-            yr = K_H_i - K_f
+            yr = np.array(K_H_i) - K_f
             xr = list(range(len(yr)))
             plt.plot(xr, yr, 'o', label=' K_H_i - K_f')
-            yr = HN_i - H_f
+            yr = np.array(HN_i) - H_f
             plt.plot(xr, yr, 'x', label='HN_i - H_f')
-            yr = HNdA_i_Cij  - H_f
+            yr = np.array(HNdA_i_Cij)  - H_f
            # plt.plot(xr, yr, 'x', label='HNdA_i_Cij - H_f')
             plt.ylabel('Difference')
             plt.xlabel('Vertex No.')

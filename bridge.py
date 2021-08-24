@@ -10,6 +10,8 @@ from ipywidgets import *
 from matplotlib.widgets import Slider
 
 # ddg imports
+
+from ddgclib._complex import Complex
 from ddgclib import *
 from ddgclib._complex import *
 from ddgclib._curvatures import * #plot_surface#, curvature
@@ -20,7 +22,6 @@ from ddgclib._ellipsoid import *
 from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
-
 
 # Parameters for a water droplet in air at standard laboratory conditions
 gamma = 0.0728  # N/m, surface tension of water at 20 deg C
@@ -40,11 +41,12 @@ a, b, c = 1, 0.0, 1
 abc = (a, b, c)
 #HC, bV, K_f, H_f, neck_verts, neck_sols = hyperboloid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibrium=True)
 HC, bV, K_f, H_f, neck_verts, neck_sols = catenoid_N(r, theta_p, gamma, abc, N=4,
-    #refinement=2,
-    refinement=4,
+    refinement=2,
+    # refinement=4,
     #refinement=6,
     #refinement=1,
     cdist=1e-5, equilibrium=True)
+
 
 if 0:
     cdist = 0.8
@@ -88,6 +90,7 @@ if 1:
                 # c_outd = curvatures(F, nn, n_i=N_f0)
                 #c_outd = curvatures_hn_i(F, nn, n_i=N_f0)
                 c_outd = curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+
 
                 print(f"---")
                 print(f"c_outd['n_i'] = {c_outd['n_i']}")
@@ -167,7 +170,7 @@ if 1:
         if 1:
             for hnda_ij, c_ijk, n_i in zip(HNdA_ij, C_ijk, N_i):
            # for hnda_ij, c_ijk, n_i in zip(HNdA_ij, C_ijk, c_N_i):
-                if 0:
+                if 1:
                     hnda_i = np.sum(hnda_ij, axis=0)
                     # print(f'hnda_i = {hnda_i}')
                     n_hnda_i = normalized(hnda_i)[0]
@@ -176,17 +179,20 @@ if 1:
                     hndA_ij_dot_hnda_i = 0.5 * np.sum(np.dot(hnda_ij, n_i)) / c_ijk
 
                 # Prev. converging working, changed on 2021-06-22:
-                elif 1:
+                elif 0:
                     hndA_ij_dot_hnda_i = 0.5 * np.sum(hnda_ij) / c_ijk
 
                 # Latest attempt 2021-06-22:
-                elif 0:
+                elif 1:
                     print(f'hnda_ij = {hnda_ij}')
                     print(f'c_ijk = {c_ijk}')
                     sum_HNdA_ij_Cij = np.sum(hnda_ij, axis=0)
                     print(f'sum_HNdA_ij_Cij = {sum_HNdA_ij_Cij}')
                     hndA_ij_dot_hnda_i = 0.5 * np.linalg.norm(sum_HNdA_ij_Cij) / c_ijk
 
+                # Latest formulation
+                elif 0:
+                    pass
                     #hndA_ij_dot_hnda_i = 0.5 * sum_HNdA_ij_Cij
                 HNdA_ij_dot_hnda_i.append(hndA_ij_dot_hnda_i)
                 k_H_2 = (hndA_ij_dot_hnda_i/2.0) ** 2
@@ -236,6 +242,26 @@ if 1:
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
          K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=0)
 
+
+    # Method, new test 2021-07-02
+    if 1:
+        c_outd2 = []
+        HN_i_2 = []
+        for v in HC.V:
+            if v in bV:
+                continue
+            nullp = np.zeros(3)
+            nullp[2] = v.x_a[2]
+            N_f0 = v.x_a - nullp  # First approximation
+            # N_f0 = v.x_a #- nullp # First approximation
+
+            N_f0 = normalized(N_f0)[0]
+            #N_i.append(N_f0)
+            F, nn = vectorise_vnn(v)
+
+            c_outd2 = b_curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+            HN_i_2.append(c_outd2['HN_i'])
+
     # plot results
     if 1:
          print('-')
@@ -246,10 +272,15 @@ if 1:
          plt.figure()
          yr = K_H_2 - K_f
          xr = list(range(len(yr)))
-         plt.plot(xr, yr, 'o', label='K_H_2 - K_f')
+         plt.plot(xr, yr, 'o', label='$\hat{K}_i(u, v) - K(u, v)$')
          print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
          yr = HNdA_ij_dot_hnda_i - H_f
-         plt.plot(xr, yr, 'x', label='HNdA_ij_dot_hnda_i - H_f')
+         # yr = HNdA_ij_Cij_dot_NdA_i - H_f
+         plt.plot(xr, yr, 'x', label='$\hat{H}N_i(u, v)  - H(u, v)$')
+
+
+         yr = HN_i_2  - H_f
+       #  plt.plot(xr, yr, 'x', label='$\hat{H}N_i_2(u, v)  - H(u, v)$')
 
          l_hnda_i_cij = []
          for hnda_i_cij in HNdA_i_Cij:
@@ -265,7 +296,7 @@ if 1:
 
          #print(f'HNdA_i_Cij = {HNdA_i_Cij}')
          yr = l_hnda_i_cij - H_f
-         plt.plot(xr, yr, 'x', label='HNdA_i_Cij - H_f')
+         #plt.plot(xr, yr, 'x', label='HNdA_i_Cij - $H$')
         # yr = HNdA_i_Cij
         # plt.plot(xr, yr, label='HNdA_i_Cij - H_f')
          plt.ylabel('Difference')
@@ -326,7 +357,8 @@ geo_error = [a/(2**2+1), a/(2**3+1), a/(2**4+1), a/(2**5+1)]  # area based
 if 1:
     plt.plot(Nlist, lp_error, 'x')
     #plt.plot(Nlist, lp_error, 'x', label='Young-Laplace error: $(\Delta p - \Delta\hat{ p})/\Delta p $')
-    plt.plot(Nlist, lp_error, 'x', label='Capillary force error: $(F_{cap} - \hat{F_{cap}}) / F_{cap} $')
+    plt.plot(Nlist, lp_error, 'x',
+             label='Capillary force error: $(F_{cap} - \hat{F_{cap}}) / F_{cap} $')
     plt.plot(Nlist, geo_error, 'X', label='Integration error (p-normed trapezoidal rule $O(h^3)$)')
 
 plt.legend()
@@ -335,3 +367,5 @@ plt.ylabel(r'Error (%)')
 plt.tick_params(axis='y', which='minor')
 
 plt.show()
+
+plot_polyscope(HC)
