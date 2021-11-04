@@ -179,6 +179,116 @@ def b_vectorise_vnn(v):
 
 # Curvature computations
 # Interior curvatures
+def HC_curvatures_sessile(HC, bV, r, theta_p, printout=False):
+    R = r / np.cos(theta_p)
+    K_f = (1 / R) ** 2
+    H_f = 2 / R  # 2 / R
+    HNdA_ij = []
+    HN_i = []
+    C_ij = []
+    K_H_i = []
+    HNdA_i_Cij = []
+    Theta_i = []
+
+    N_i = []  # Temp cap rise normal
+
+    HNdA_i_cache = {}
+    HN_i_cache = {}
+    C_ij_cache = {}
+    K_H_i_cache = {}
+    HNdA_i_Cij_cache = {}
+    Theta_i_cache = {}
+
+    for v in HC.V:
+        #TODO: REMOVE UNDER NORMAL CONDITIONS:
+        if 0:
+            if v in bV:
+                continue
+        N_f0 = v.x_a - np.array([0.0, 0.0, -R * np.sin(theta_p)])  # First approximation
+        #N_f0 = v.x_a - np.array([0.0, 0.0, R-R * np.sin(theta_p)])  # First approximation
+        N_f0 = normalized(N_f0)[0]
+        N_i.append(N_f0)
+        F, nn = vectorise_vnn(v)
+        # Compute discrete curvatures
+        c_outd = b_curvatures_hn_ij_c_ij(F, nn, n_i=N_f0)
+        # Append lists
+        HNdA_ij.append(c_outd['HNdA_i'])
+        #HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
+        HN_i.append(c_outd['HN_i'])
+        C_ij.append(c_outd['C_ij'])
+        K_H_i.append(c_outd['K_H_i'])
+        HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
+        Theta_i.append(c_outd['theta_i'])
+
+        # Append chace
+        HNdA_i_cache[v.x] = c_outd['HNdA_i']
+        HN_i_cache[v.x] = c_outd['HN_i']
+        C_ij_cache[v.x] = c_outd['C_ij']
+        K_H_i_cache[v.x] = c_outd['K_H_i']
+        HNdA_i_Cij_cache[v.x] = c_outd['HNdA_ij_Cij']
+        Theta_i_cache[v.x] = c_outd['theta_i']
+
+    if printout:
+        print('.')
+        print(f'HNdA_ij = {HNdA_ij}')
+        print(f'HN_i = {HN_i}')
+        print(f'C_ij = {C_ij}')
+        print(f'K_H_i = {K_H_i}')
+        print(f'HNdA_i_Cij = {HNdA_i_Cij}')
+        print(f'Theta_i= {Theta_i}')
+        print(f'np.array(Theta_i) in deg = {np.array(Theta_i) *180/np.pi}')
+        print(f'np.array(Theta_i)/np.pi= {np.array(Theta_i) / np.pi}')
+        # s = r * theta
+        # circ = 2 pi r
+        # circ / s = 2 pi / theta
+        rati = 2 * np.pi /np.array(Theta_i)
+        rati = 2 * np.pi / (2 * np.pi - np.array(Theta_i))
+        rati =  2 * np.pi / (2 * np.pi - np.array(Theta_i))
+        rati =  (np.pi - np.array(Theta_i)/ 2 * np.pi )
+        #rati = np.array(Theta_i) / (2 * np.pi)
+        #print(f' rati = 2 * np.pi /np.array(Theta_i)= { rati}')
+        print(f' rati = { rati}')
+       # rati =  (2 * np.pi  - np.array(Theta_i))/np.pi
+        #print(f' rati = (2 * np.pi  - Theta_i)/np.pi = { rati}')
+        print(f'HNdA_i[1] * rati[1]  = {HNdA_ij[1] * rati[1] }')
+        print(f'C_ij   = {C_ij }')
+        #print(f'np.sum(C_ij)   = {np.sum(C_ij) }')
+       # print(f'HNdA_i / np.array(C_ijk)  = {HNdA_i  / np.array(C_ijk)}')
+
+        print('.')
+        print(f'HNdA_i_Cij = {HNdA_i_Cij}')
+
+        #print(f'K_H = {K_H}')
+        print('-')
+        print('Errors:')
+        print('-')
+       # print(f'hnda_i_sum = {hnda_i_sum}')
+       # print(f'K_H_2 = {K_H_2}')
+       # print(f'C_ijk = {C_ijk}')
+      #  print(f'np.sum(C_ijk) = {np.sum(C_ijk)}')
+      #  print(f'A_ijk = {A_ijk}')
+     #   print(f'np.sum(A_ijk) = {np.sum(A_ijk)}')
+      #  print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(C_ijk)}')
+      #  print(f'K_H_2 dA = {np.sum(K_H_2) * np.sum(A_ijk)}')
+      #  print(f'np.sum(K_H_2) = {np.sum(K_H_2)}')
+      #  print(f'HNdA_ij_dot_hnda_i = {np.array(HNdA_ij_dot_hnda_i)}')
+     #   print(
+    #        f'np.sum(HNdA_ij_dot_hnda_i) = {np.sum(np.array(HNdA_ij_dot_hnda_i))}')
+
+        print(f'K_H_i - K_f = {np.array(K_H_i) - K_f}')
+        #print(f'HNdA_ij_dot_hnda_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        #print(f'HHN_i  - H_f = {HNdA_ij_dot_hnda_i - H_f}')
+        print(f'HN_i  - H_f = {HN_i - H_f}')
+        print(f'HNdA_i_Cij  - H_f = {HNdA_i_Cij - H_f}')
+
+        #print(f'np.sum(C_ij) = {np.sum(C_ij)}')
+
+    return (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+            HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+            Theta_i_cache)
+
+
+
 def HC_curvatures(HC, bV, r, theta_p, printout=False):
     R = r / np.cos(theta_p)
     K_f = (1 / R) ** 2

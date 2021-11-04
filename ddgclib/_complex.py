@@ -45,6 +45,7 @@ import collections
 import logging
 import os
 import itertools
+from itertools import combinations
 import json
 import decimal
 
@@ -2161,6 +2162,8 @@ class Complex:
 
         ind = -1
         for v, vnn in zip(V0l, V0nn):
+            #if v in exclude:
+            #    continue
             ind += 1
             d_v0v1_set = set()
             # d_v1v2_set = set()  # Only used to track new vertices
@@ -2192,12 +2195,10 @@ class Complex:
         if V is None:
             V = self.V
 
-        from itertools import combinations
+
         dV = set()  # Known boundary vertices
         iV = set()  # Known inner vertices
         for v in V:
-            #    print(f'-')
-            #    print(f'v.x = {v.x}')
             s_pool = []
             s_it = combinations(v.nn, self.dim)
             valid_s = []
@@ -3221,9 +3222,22 @@ class Complex:
         self.simplices_fm = []  # Faces
         self.simplices_fm_i = []
 
+        # NOTE: THIS IS A NEW METHOD 2021.09.29 TO TEST SOMETHING:
+        if 1:
+            import numpy as np
+            print(f'np.zeros([self.V.size(), self.dim]) = '
+                  f'{np.zeros([self.V.size(), self.dim])}')
+            self.vertices_fm = np.zeros([self.V.size(), self.dim + 1])
+            self.vertices_fm
+            for v in self.V:
+                self.vertices_fm[v.index] = v.x_a
+
         # TODO: Add in field
         for v in self.V.cache:  # Note that cache is an OrderedDict
-            self.vertices_fm.append(v)
+            #NOTE: THIS WAS COMMENTED OUT 2021.09.29 TO TEST SOMETHING:
+            print(f'self.V[v].index = {self.V[v].index}')
+            if 0:
+                self.vertices_fm.append(v)
 
             #TODO: Should this not be outside the initial loop?
             simplex = (self.dim + 1) * [None]  # Predetermined simplex sizes

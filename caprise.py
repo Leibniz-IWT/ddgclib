@@ -38,9 +38,11 @@ r = 2.0e-6  # Radius of the tube
 r = 0.5e-6  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
-r = 1e-3  # Radius of the tube (20 mm)
-r = 2e-3  # Radius of the tube (20 mm)
-r = 1.0  # Radius of the droplet sphere
+r = 0.5e-3  # Radius of the tube (20 mm)
+r = 0.5  # Radius of the tube (20 mm)
+r = 1 # Radius of the tube (20 mm)
+#r = 2e-3  # Radius of the tube (20 mm)
+#r = 1.0  # Radius of the droplet sphere
 #r = 10.0  # Radius of the droplet sphere
 #r = 1.0  # Radius of the droplet sphere
 #r = 0.1  # Radius of the droplet sphere
@@ -72,7 +74,9 @@ theta_p = np.array(theta_p, dtype=np.longdouble)
 if 1:
     fig, axes, HC = cape_rise_plot(r, theta_p, gamma, N=N,
                                    refinement=refinement)
-    # Add Spherical cap
+   # r_temp = r  # normalize the radius
+    #r = 0.5  # Radius of the droplet sphere
+    # Add Spherical cap plust integration (Figure 12)
     if 1:
         def add_sphere_cap(axes, a):
             def capRatio(r, a, h):
@@ -93,7 +97,7 @@ if 1:
             R = a / np.cos(theta_p)
             h = R - R * np.sin(theta_p)
             #r = findRadius(a, h)
-            r =R
+            r = R
             p = capRatio(r, a,
                          h)  # Ratio of sphere to be plotted, could also be a function of a.
             u = np.linspace(0, 2 * np.pi, 100)
@@ -118,6 +122,9 @@ if 1:
             return axes
 
         axes = add_sphere_cap(axes, r)
+        axes.set_xlabel(r'mm')
+        axes.set_ylabel(r'mm')
+        axes.set_zlabel(r'mm')
 
         fig, ax = plt.subplots()
         x = np.linspace(0, 1.0, 1000)
@@ -128,7 +135,7 @@ if 1:
             h = r * np.cos(theta_p)  # TODO
             R = r / np.cos(theta_p)
             h = R - R * np.sin(theta_p)
-            theta_z  = np.arctan(h/r)
+            theta_z = np.arctan(h/r)
         #y = h - x * np.sin(theta_z)
         #y = h - x * np.tan(theta_z)
         #y = h - h * np.sin(x)
@@ -147,6 +154,7 @@ if 1:
         #np.sqrt(r ** 2 + x ** 2) - 1.0
         plt.plot(x, y, alpha=0.5, color='tab:blue',
                  linewidth=2)
+
         for v in HC.V:
             print(f'v = {v.x_a}')
         x2 = 0.63809867
@@ -164,7 +172,11 @@ if 1:
         x2 = [0.0, 0.6380986, 1.0]
         ax.fill_between(x2[0:2], y2[0:2], 0, alpha=0.3, color='tab:blue')
         ax.fill_between(x2[1:], y2[1:], 0, alpha=0.3, color='tab:blue')
+        ax.set_xlabel(r'mm')
+        ax.set_ylabel(r'mm')
         #plt.show()
+
+    #r = r_temp
 ##################################################
 # PLot theta rise
 if 0:
@@ -173,7 +185,9 @@ if 0:
 
 # PLot theta rise with New fomulation over Phi_C (2021-07)
 # NOTE: THIS IS CURRENTLY USED IN THE MANUSCRIPT:
-if 0:
+if 1:
+    #TODO: Check out the N_f0 vectors here! They are NOT the same as the ones
+    #      used in the default HC_curvatures function
     c_outd_list, c_outd, vdict, X = new_out_plot_cap_rise(N=N, r=r,
         gamma=gamma, refinement=refinement)
     keyslabel = {'K_f': {'label': '$K$',
@@ -221,37 +235,69 @@ if 0:
 
         key = 'K_f'
         value = K_fl
-        ax.plot(Theta_p* 180 / np.pi, value,
-                marker=keyslabel[key]['marker'],
-                linestyle=keyslabel[key]['linestyle'],
-                label=keyslabel[key]['label'], alpha=0.7)
 
-        key = 'K_H_i'
-        value = vdict[key]
-        ax.plot(X, value,
-                marker=keyslabel[key]['marker'],
-                linestyle=keyslabel[key]['linestyle'],
-                markerfacecolor='None',
-                label=keyslabel[key]['label'], alpha=0.7)
+        # Normal good for K = 1 vs. loglog plots
+        if 1:
+            ax.plot(Theta_p* 180 / np.pi, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    label=keyslabel[key]['label'], alpha=0.7)
 
-        key = 'H_f'
-        value = H_fl
-        ax.plot(Theta_p* 180 / np.pi, value,
-                marker=keyslabel[key]['marker'],
-                linestyle=keyslabel[key]['linestyle'],
-                label=keyslabel[key]['label'], alpha=0.7)
+            key = 'K_H_i'
+            value = vdict[key]
+            ax.plot(X, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    markerfacecolor='None',
+                    label=keyslabel[key]['label'], alpha=0.7)
 
-        key = 'HN_i'
-        value = vdict[key]
-        ax.plot(X, value,
-                marker=keyslabel[key]['marker'],
-                linestyle=keyslabel[key]['linestyle'],
-                markerfacecolor='None',
-                label=keyslabel[key]['label'], alpha=0.7)
+            key = 'H_f'
+            value = H_fl
+            ax.plot(Theta_p* 180 / np.pi, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    label=keyslabel[key]['label'], alpha=0.7)
+
+            key = 'HN_i'
+            value = vdict[key]
+            ax.plot(X, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    markerfacecolor='None',
+                    label=keyslabel[key]['label'], alpha=0.7)
+
+        else:
+            ax.semilogy(Theta_p * 180 / np.pi, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    label=keyslabel[key]['label'], alpha=0.7)
+
+            key = 'K_H_i'
+            value = vdict[key]
+            ax.semilogy(X, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    markerfacecolor='None',
+                    label=keyslabel[key]['label'], alpha=0.7)
+
+            key = 'H_f'
+            value = H_fl
+            ax.semilogy(Theta_p * 180 / np.pi, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    label=keyslabel[key]['label'], alpha=0.7)
+
+            key = 'HN_i'
+            value = vdict[key]
+            ax.semilogy(X, value,
+                    marker=keyslabel[key]['marker'],
+                    linestyle=keyslabel[key]['linestyle'],
+                    markerfacecolor='None',
+                    label=keyslabel[key]['label'], alpha=0.7)
 
         if 1:
-            plot.xlabel(r'Contact angle $\Theta_{C}$')
-            plot.ylabel(r'Gaussian curvature ($m^{-1}$)')
+            plot.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
+            plot.ylabel(r'Gaussian curvature ($m^{-2}$)')
             ax2 = ax.twinx()
             plt.ylabel('Mean normal curvature ($m^{-1}$)')
         else:
@@ -260,7 +306,7 @@ if 0:
             ax2 = ax.twinx()
             plt.ylabel('$H$ ($m^{-1}$)')
 
-        plt.ylim((0, 2))
+        plt.ylim((0, max(max( vdict['K_H_i']), max( vdict['HN_i']))))
         ax.legend(bbox_to_anchor=(0.15, 0.15), loc="lower left",
                   bbox_transform=fig.transFigure, ncol=2)
         # interact(update);
@@ -280,6 +326,8 @@ if 1:
 
     fig, axes, fig_s, axes_s = HC.plot_complex(point_color=db, line_color=lb)
 
+
+    axes
     if 0:
         R = r / np.cos(theta_p)  # = R at theta = 0
         K_f = (1 / R) ** 2
@@ -302,7 +350,6 @@ if 1:
     # (uses  curvatures_hn_i
     # Old, deprecated 2021.06.27
     if 0:
-    
         (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
          K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=1)
         print('-')

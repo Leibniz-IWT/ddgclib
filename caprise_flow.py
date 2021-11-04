@@ -44,6 +44,7 @@ r = 0.5e-6  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 1e-3  # Radius of the tube (1 mm)
+r = 2
 #r = 2e-3  # Radius of the tube (2 mm)
 #r = 20e-3  # Radius of the tube (20 mm)
 #r = 1.0  # Radius of the droplet sphere
@@ -62,12 +63,13 @@ theta_p = 20 * np.pi/180.0  # Three phase contact angle
 N = 8
 N = 5
 #N = 6
-N = 7
+#N = 7
 #N = 5
 #N = 12
 #refinement = 2#2
 refinement = 0#2
-equilibrium = 0#$False
+#refinement = 2
+equilibrium = 1#$False
 #N = 20
 #cdist = 1e-10
 cdist = 1e-10
@@ -321,7 +323,7 @@ if 1:
             HC.V.move(v, tuple(new_vx))
 
     # Escaping saddle points midway, test for equilibria:
-    if 1:
+    if 0:
         for v in HC.V:
             abv = False
             if v in bV:
@@ -381,6 +383,8 @@ def plot_polyscope(HC):
     HC.vertex_face_mesh()
     points = np.array(HC.vertices_fm)
     triangles = np.array(HC.simplices_fm_i)
+    print(f'points = {points}')
+    print(f'triangles = {triangles}')
     ### Register a point cloud
     # `my_points` is a Nx3 numpy array
     my_points = points
@@ -460,8 +464,9 @@ if 0:
         pass
 
 #
-if 1:
+if 0:
     steps = 800 # Still stable
+   # steps = 800 # Still stable
     #steps = 200 # Unstable, but can escape local equilibria
     #steps = 2 # Unstable, but can escape local equilibria
     #steps = 20000 # Unstable, but can escape local equilibria
@@ -470,10 +475,13 @@ if 1:
         #HC, bV = incr(HC, bV, params, tau=0.1, plot=0)
         #, bV = incr(HC, bV, params, tau=0.000001, plot=0)
         #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
-        HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        HC, bV = incr(HC, bV, params, tau=0.1, plot=0)
 
-    HC.dim = 3
-    HC.plot_complex()
+
+    if 0:
+        HC.dim = 3
+        HC.plot_complex()
     #plt.show()
 
     #ps_inc(surface, HC)
@@ -482,5 +490,15 @@ if 1:
     plt.show()
 
 
-if 0:
+if 1:
+    (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
+     K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=0)
+    # Laplacian error
+    print(f'H_f - HN_i = {H_f - np.array(HN_i)}')
+    #print(f'HN_i = {}')
+
+if 1:
+    #NOTE: Does NOT work after running through incr at all, only works at
+    #      equilibrium
     plot_polyscope(HC)
+

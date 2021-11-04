@@ -5,7 +5,7 @@ import skimage.viewer
 import skimage
 
 # NOTE: CP is an API for the NIST database used for the water Equation of State:
-#from CoolProp.CoolProp import PropsSI
+from CoolProp.CoolProp import PropsSI
 
 # Imports and physical parameters
 import copy
@@ -42,9 +42,282 @@ def IAPWS(T=298.15):
     T_C = 647.096  # K, critical temperature
     return 235.8e-3 * (1 -(T/T_C))**1.256 * (1 - 0.625*(1 - (T/T_C)))  # N/m
 
+# Local compression (approx. Hooke's law)
+def local_compressive_forces(v, r):
+    # Compute the distance of vertex from great sphere centre:
+    gsc = -R * np.sin(theta_p) # great sphere centre
+    gsc = -R * np.sin(theta_p) # great sphere centre
+   # gsc = +2.3830646612262073e-05 -R * np.sin(theta_p) # great sphere centre
+   # gsc = +3e-05 -R * np.sin(theta_p) # great sphere centre
+   # gsc = +3.5e-05 -R * np.sin(theta_p) # great sphere centre
+   # gsc = +4.5e-05 -R * np.sin(theta_p) # great sphere centre
+    if 0:
+        N_f0 = np.array(
+            #[0.0, 0.0, R * np.sin(theta_p)]) - v.x_a  # First approximation
+            [0.0, 0.0, gsc]) - v.x_a  # First approximation
+    if 1:
+       N_f0 = v.x_a - np.array([0.0, 0.0, gsc])
+       #N_f0 = v.x_a - np.array([0.0, 0.0, -(R-R * np.sin(theta_p))])
+    print(f' N_f0 = {N_f0}')
+    print(f' np.linalg.norm(N_f0) = {np.linalg.norm(N_f0)}')
+    # Compute the norm:
+    d = np.linalg.norm(N_f0)
+    print(f' d = {d}')
+    print(f' R = {R}')
+    #@print(f' r = {r}')
+    if d < R:
+        N_f0 = normalized(N_f0)[0]
+        #return N_f0 * (r - d)
+        #return N_f0 * (R - d)
+        return N_f0 * (R - d)
+    else:
+        return np.array([0.0, 0.0, 0.0])
+
+def mean_flow(HC, bV, params, tau, print_out=False):
+    (gamma, rho, g, r, theta_p, K_f, h) = params
+    print('.')
+    # Compute interior curvatures
+    #(HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i, HNdA_ij_dot_hnda_i,
+    # K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=False)
+    (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+            HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+            Theta_i_cache) = HC_curvatures_sessile(HC, bV, r, theta_p, printout=0)
+
+    # if bV is None:
+    #bV = HC.boundary()  #TODO: Check it again it is not working properly
+    # Move boundary vertices:
+    bV_new = set()
+    for v in HC.V:
+        print(f'.')
+        print(f'v.x = {v.x}')
+        if v.x[0] == 0.0 and v.x[1] == 0.0:
+            print(f'='*10)
+
+        # Compute boundary movements
+        # Note: boundaries is fixed for now, this is legacy:
+        if v in bV:
+            rati = (np.pi - np.array(Theta_i) / 2 * np.pi)
+            #TODO: THis is not the actual sector ration (wrong angle)
+            # rati = np.array(Theta_i) / (2 * np.pi)
+            # print(f' rati = 2 * np.pi /np.array(Theta_i)= { rati}')
+
+            if 0:
+                #TODO: len(bV) is sector fraction
+                H_K = HNda_v_cache[v.x] * np.array([0, 0, -1]) * len(bV)
+                print(f'K_H in bV = {H_K }')
+
+                K_H = ((np.sum(H_K) / 2.0) / C_ijk_v_cache[v.x] ) ** 2
+                K_H = ((np.sum(H_K) / 2.0)  ) ** 2
+                print(f'K_H in bV = {K_H}')
+                print(f'K_H - K_f in bV = {K_H - K_f}')
+
+            K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
+
+            #TODO: Adjust for other geometric approximations:
+            l_a = 2 * np.pi * r / len(bV)  # arc length
+
+            Xi = 1
+            # Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
+            # NOTE: Area should be height of spherical cap
+            # h = R - r * 4np.tan(theta_p)
+            # Approximate radius of the great shpere K = (1/R)**2:
+            #R_approx = 1 / np.sqrt(K_f)
+            R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
+            theta_p_approx = np.arccos(np.min([r / R_approx, 1]))
+            h = R_approx - r * np.tan(theta_p_approx)
+            A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
+
+            #print(f'A_approx = {A_approx}')
+            # A_approx  # Approximate area of the spherical cap
+            #kg_ds = 2 * np.pi * Xi - K_f * (A_approx)
+            #kg_ds = 2 * np.pi * Xi - K_H_dA * (A_approx)
+            kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx)
+
+            # TODO: This is NOT the correct arc length (wrong angle)
+            ds = 2 * np.pi * r  # Arc length of whole spherical cap
+            #print(f'ds = {ds}')
+            k_g = kg_ds / ds  # / 2.0
+            #print(f'k_g = {k_g}')
+            print(f' R_approx * k_g = {R_approx * k_g}')
+            phi_est = np.arctan(R_approx * k_g)
+
+
+            # Compute boundary forces
+            # N m-1
+            print(f' phi_est = { phi_est}')
+            print(f' theta_p = {theta_p}')
+            gamma_bt = gamma * (np.cos(phi_est)
+                                - np.cos(theta_p)) * np.array([0, 0, 1.0])
+
+            print(f' phi_est = {phi_est * 180/np.pi}')
+            F_bt = gamma_bt * l_a  # N
+            print(f' F_bt = {F_bt}')
+            F_bt = np.zeros_like(F_bt) # Fix boundaries for now
+            print(f' F_bt = {F_bt}')
+            #new_vx = v.x + tau * F_bt
+           # new_vx = v.x + 1e-1 * F_bt
+            # New: 2021.09.29
+            if 1:
+                dc = local_compressive_forces(v, r)
+                #  Weak compressibility and gravity for solver stability
+                if 1:
+                    #dc = 1e-1 * dc  #
+                    dc = dc  #
+                    #dg = 1e-3 * dg  #
+                print(f' dc = {dc}')
+
+            new_vx = v.x + F_bt + dc
+            new_vx = tuple(new_vx)
+
+            if print_out:
+                print('.')
+                print(f'K_H_i_cache[v.x = {v.x}] = {K_H_i_cache[v.x]}')
+                print(f'HNdA_i_cache[v.x = {v.x}] = {HNdA_i_cache[v.x]}')
+                print(f' rati = {rati}')
+                # rati =  (2 * np.pi  - np.array(Theta_i))/np.pi
+                # print(f' rati = (2 * np.pi  - Theta_i)/np.pi = { rati}')
+                print(
+                    f'HNdA_i_cache[1] * rati[1]  = {HNdA_i_cache[v.x] * rati[1]}')
+
+                print(f'K_H_i = {K_H_i}')
+                print(f'K_f = {K_f}')
+                print(f'K_H_i_cache[v.x] = {K_H_i_cache[v.x]}')
+
+            # TEST; UNDO:
+            if 0:
+                HC.V.move(v, new_vx)
+            bV_new.add(HC.V[new_vx])
+
+            if print_out:
+                print(f'K_H_dA= {K_H_dA}')
+                print(f'l_a= {l_a}')
+                print(f'R_approx = {R_approx}')
+                print(f'theta_p_approx = {theta_p_approx * 180 / np.pi}')
+                print(f'Theta_i = {Theta_i}')
+                print(f'phi_est  = {phi_est * 180 / np.pi}')
+                #print(f'dK[i] = {dK[i]}')
+        # Current main code:
+        else:
+            #H = np.dot(HNdA_i_cache[v.x], np.array([0, 0, 1]))
+            H = HN_i_cache[v.x] #TODO: Why is this sometimes negative? Should never be
+            #H = np.abs(H)
+            print(f' H = {H}')
+            #print(f' np.dot(HN_i_cache[v.x], np.array([0, 0, 1])) = {np.dot(HN_i_cache[v.x], np.array([0, 0, 1]))}')
+            #print(f' HN_i_cache[v.x] = {HN_i_cache[v.x]}')
+            #print(f' H = {H}')
+            #
+            height = np.max([v.x_a[2], 0.0])
+            if 0:
+                df = gamma * H  # Hydrostatic pressure
+            print(f' HNdA_i_cache[v.x] = {HNdA_i_cache[v.x]}')
+            #print(f'HNdA_i_Cij_cache[v.x] = {HNdA_i_Cij_cache[v.x]}')
+            df = gamma * H  # Hydrostatic pressure
+            print(f' gamma * H = { gamma * H}')
+            print(f' HNdA_i_cache[v.x] = {HNdA_i_cache[v.x]}')
+            print(f' HN_i = {HNdA_i_cache[v.x]}')
+            print(f' rho * g * height = {rho * g * height}')
+            print(f' height = {height}')
+            H = HNdA_i_cache[v.x]
+            dg = np.array([0, 0, -rho * g * height])
+            df = gamma * H #- (rho * g * height)
+            #df = 2* gamma * H - 1e-3*(rho * g * height)
+            #f_k = f + tau * df
+
+            print(f' df = {df}')
+            #print(f' gamma = {gamma}')
+            # Add compressive forces:
+            dc = local_compressive_forces(v, r)
+            #  Weak compressibility and gravity for solver stability
+            if 1:
+                #dc = 1e-1 * dc  #
+                dc = dc  #
+                dg = 1e-3 * dg  #
+            print(f' dc = {dc}')
+            print(f' dg = {dg}')
+            #print(f;)
+
+            #f_k = v.x_a + np.array([0, 0, tau * df]).
+            #f_k = v.x_a + df + dc + dg
+            f_k = v.x_a + df + dc + dg
+            #f_k = v.x_a + df #+ dc
+            f_k[2] = np.max([f_k[2], 0.0])
+            new_vx = tuple(f_k)
+
+            #VA.append(v.x_a)
+            # Move interior complex
+            if print_out:
+                print('.')
+                print(f'HNdA_i_cache[{v.x}] = {HNdA_i_cache[v.x]}')
+                print(f'HN_i_cache[{v.x}] = {HN_i_cache[v.x]}')
+                print(f'H = {H}')
+                print(f'v.x_a  = {v.x_a}')
+                print(f'df = {df}')
+                print(f'height = {height}')
+
+                print(f'np.max([f_k[2], 0.0]) = {np.max([f_k[2], 0.0])}')
+                print(f'f_k = {f_k}')
+
+            HC.V.move(v, new_vx)
+
+
+    if print_out:
+        print(f'bV_new = {bV_new}')
+
+    return HC, bV_new
+
+def incr(HC, bV, params, tau=1e-5, plot=False, verbosity=1):
+    HC.dim = 3  # Rest in case visualization has changed
+
+    if verbosity == 2:
+        print_out = True
+    else:
+        print_out = False
+    # Update the progress
+    HC, bV = mean_flow(HC, bV, params, tau=tau, print_out=print_out)
+
+    # Compute progress of Capillary rise:
+    if verbosity == 1:
+        print('.')
+        #current_Jurin_err(HC)
+
+    # Plot in Polyscope:
+    if plot:
+        pass
+        #ps_inc(surface, HC)
+        #HC.plot_complex()
+        #plt.close
+
+    return HC, bV
+
+def ps_inc(surface, HC):
+    #F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
+    #                                          refinement=refinement,
+    #                                          equilibrium=True
+    #                                          )
+
+    HC.dim = 2  # The dimension has changed to 2 (boundary surface)
+    HC.vertex_face_mesh()
+    points = np.array(HC.vertices_fm)
+    triangles = np.array(HC.simplices_fm_i)
+
+    ### Register a point cloud
+    # `my_points` is a Nx3 numpy array
+    my_points = points
+    ps_cloud = ps.register_point_cloud("my points", my_points)
+    # ps_cloud.set_color((0.0, 0.0, 0.0))
+    verts = my_points
+    newPositions = verts
+    surface.update_vertex_positions(newPositions)
+    try:
+        with timeout(0.1, exception=RuntimeError):
+            # perform a potentially very slow operation
+            ps.show()
+    except RuntimeError:
+        pass
 
 # Parameters
 if 1:
+    refinement = 0
     T_0 = 273.15 + 25  # K, initial tmeperature
     P_0 = 101.325  # kPa, Ambient pressure
     gamma = IAPWS(T_0)  # N/m, surface tension of water at 20 deg C
@@ -53,6 +326,7 @@ if 1:
     g = 9.81  # m/s2
 
     theta_p = (63 / 75) * 20 + 30
+    #theta_p = 0.0
     theta_p = theta_p * np.pi / 180.0
     r = ((44 / 58) * 0.25 + 1.0) * 1e-3  # height mm --> m  # Radius
     h = ((3 / 58) * 0.25 + 0.5) * 1e-3  # height mm --> m
@@ -64,11 +338,19 @@ if 1:
    # r, h, v, V, Volume = r*1e3, h*1e3, v*1e3, V*1e3, Volume*1e3
     m_0 = rho_0 * Volume  # kg, initial mass (kg/m3 * m3)
     print(f'theta_p = {theta_p * 180.0 / np.pi}')
+    print(f'm_0 = {m_0}')
     print(f'r = {r * 1e3} mm')
     print(f'h = {h * 1e3} mm')
     print(f'v = {v * 1e9} mm^3')
     print(f'V = {V * 1e9} mm^3')
     print(f'Volume = {Volume * 1e9} mm^3')
+
+    # define params tuple used in solver:
+    rho = rho_0
+    R = r / np.cos(theta_p)  # = R at theta = 0
+    # Exact values:
+    K_f = (1 / R) ** 2
+    params =  (gamma, rho, g, r, theta_p, K_f, h)
 
 #from ddgclib.curvatures import plot_surface, curvature
 
@@ -154,13 +436,22 @@ if 1:
         x = (xpos - x0) / scale  # voxels --> mm
         y = (-ypos + y0) / scale  # voxels --> mm
 
+        data_xyz = np.zeros([len(x), 3])
+
+        for ind, (x_i, y_i) in enumerate(zip(x, y)):
+            data_xyz[ind, 0] = x_i
+            data_xyz[ind, 2] = y_i
+            #data_xyz
+            #data_xyz[]
+        #print(f'data_xyz = {data_xyz}')
         # Matplotlib scatter plot:
-        if 0:
+        if 1:
             plt.figure()
             plt.scatter(x, y)
+            plt.ylim((0, 1))
             plt.xlabel('mm')
             plt.ylabel('mm')
-            plt.show()
+            #plt.show()
 
 # Mean flow simulation
 
@@ -271,7 +562,7 @@ if 0:
     #F = np.array(F)
 
 # Spherical cap test
-if 1:
+if 0:
     # Parameters for a water droplet in air at standard laboratory conditions
     gamma = 0.0728  # N/m, surface tension of water at 20 deg C
     rho = 1000  # kg/m3, density
@@ -283,7 +574,7 @@ if 1:
     theta_p = 0.0 * np.pi / 180.0  # Three phase contact angle
     r = 1e-3  # Radius of the tube (1 mm)
     #NOTE: MERGING DOES NOT WORK CORRECTLY WITH 1e-3, FIX FOR MICRODROPLETS
-    r = 1  # Radius of the tube (1 mm)
+    #r = 1  # Radius of the tube (1 mm)
     r = np.array(r, dtype=np.longdouble)
     R = r / np.cos(theta_p)
     equilibrium = 1  #
@@ -372,8 +663,23 @@ if 1:
     print('Mean normal approach:')
     print('=====================')
     print(f'HN_i = {HN_i}')
+    print(f'HNdA_i_cache = {HNdA_i_cache}')
     print(f'K_H_i = {K_H_i}')
     print(f'C_ij = {C_ij}')
+    #
+    print('=====================')
+    print('Sphere radius:')
+    print('=====================')
+    print(f'R = {R}')
+    print(f'verex radia from centre of sphere:')
+    for v in HC.V:
+        print(f'v.x = {v.x}')
+        N_f0 = np.array(
+            [0.0, 0.0, R * np.sin(theta_p)]) - v.x_a  # First approximation
+
+        print(f'N_f0 = {N_f0}')
+        print(f'np.linalg.norm(N_f0) = {np.linalg.norm(N_f0)}')
+        N_f0 = normalized(N_f0)[0]
 
     if 0:
         ps = pplot_surface(HC)
@@ -389,8 +695,10 @@ if 0:
     HC = Complex(3, domain=[(-r, r), ] * 3)
     HC.triangulate()
 
-    for i in range(1):
+    refinement = 1
+    for i in range(refinement):
         HC.refine_all()
+
 
     # for v in HC2V:
     #    HC.refine_star(v)
@@ -463,7 +771,52 @@ if 0:
         else:
             continue
 
-    if 1:
+
+    # Remove extra vertices
+    # NEW 2021.10.07
+    if 0:
+        del_list2 = []
+        for v in HC.V:
+            if v.x_a[2] > h_cylinder:
+                del_list2.append(v)
+
+        for v in del_list2:
+            HC.V.remove(v)
+
+
+    # Test plot
+    if 0:
+        HC.dim = 3  # In case this changed for polyscope surface
+        fig, axes, fig_s, axes_s = HC.plot_complex(point_color=db,
+                                                   line_color=db,
+                                                   complex_color_f=lb,
+                                                   complex_color_e=db
+                                                   )
+
+    cdist=1e-5
+    HC.V.merge_all(cdist=cdist)
+
+    # Experimental refinement:
+    if 0:
+        for i in range(1):
+            HC_V = copy.copy(HC.V)
+            for v in HC_V:
+                if v.x_a[2] == h_cylinder:
+                    HC.refine_star(v)
+
+    elif 0:
+        #exclude_set =
+        #refine_all_star(self, exclude=set())
+        HC.dim = 2
+        exclude_set = set()
+        for v in HC.V:
+            if v.x_a[2] < h_cylinder:
+                exclude_set.add(v)
+        for i in range(1):
+            HC.refine_all_star(exclude=exclude_set)
+        #HC.dim = 3
+
+    if 0:
         fig, axes, fig_s, axes_s = HC.plot_complex(point_color=db,
                                                    line_color=db,
                                                    complex_color_f=lb,
@@ -486,7 +839,7 @@ if 0:
     # axes.set_ylim3d(-(0.1*r + r) , 0.1*r + r)
     # axes.set_zlim3d(-(0.1*r + r) , 0.1*r + 2*r)
     # Test volumes:
-    if 1:
+    if 0:
         (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
          HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
          Theta_i_cache) = HC_curvatures(HC, bV, r, theta_p, printout=0)
@@ -509,6 +862,113 @@ if 0:
         A_cylinder = 2 * np.pi * r * h_cylinder
         A_cylinder =  A_cylinder + (np.pi * r**2) # not including bottom face
         print(f'A_cylinder = {A_cylinder * 1e6} mm^2')
+
+
+
+# Cylinder init 2 attempt:
+if 1:
+    theta_p_test = 0
+    N = 7
+    cdist = 1e-7
+    refinement = 0
+    F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
+                                              refinement=refinement,
+                                              cdist=cdist,
+                                              equilibrium=0
+                                              )
+
+    # Lowers
+    if 1:
+        v_list = []
+        nn_list = []
+        nn_ind = 0
+        HC.dim = 2
+        yl_b = HC.boundary(HC.V)
+        HC.dim = 3
+        #print(f'yl_b = {yl_b}')
+        for v in yl_b:
+            #print(f' v in boundary = {v.x_a}')
+            v_list.append(v.x_a)
+            nn_list.append([])
+            for v2 in v.nn:
+                if v2 in yl_b:
+                    nn_list[nn_ind].append(v2.x_a)
+            nn_ind += 1
+
+        #v_array = np.array(v_list)
+
+        #print(f'v_list = {v_list}')
+        #print(f'nn_list = {nn_list}')
+
+        # Move to h_cylinder
+        for v in HC.V:
+            f_k = [v.x_a[0], v.x_a[1], v.x_a[2] + h_cylinder]
+            HC.V.move(v, tuple(f_k))
+
+        # Create new ground layer
+        nn_ind = 0
+        for va in v_list:
+            va_n = va #- np.array([0, 0, h_cylinder])
+            v = HC.V[tuple(va_n)]
+            for va2 in nn_list[nn_ind]:
+                va2_n = va2 #- np.array([0, 0, h_cylinder])
+                v2 = HC.V[tuple(va2_n)]
+                v.connect(v2)
+            nn_ind += 1
+
+        # Add half way layer (in future can add more)
+        if 1:
+            nn_ind = 0
+            for va in v_list:
+
+                va_n = va + 0.5* np.array([0, 0, h_cylinder])
+                v = HC.V[tuple(va_n)]
+                # Connect lower
+                v_l = HC.V[tuple(va)]
+                v.connect(v_l)
+                # Connect upper
+                va_u = va + np.array([0, 0, h_cylinder])
+                v_u = HC.V[tuple(va_u)]
+                v.connect(v_u)
+
+                for va2 in nn_list[nn_ind]:
+
+                    va2_n = va2 + 0.5* np.array([0, 0, h_cylinder])
+                    v2 = HC.V[tuple(va2_n)]
+                    v.connect(v2)
+                    # Connect lower
+                    v_l = HC.V[tuple(va2_n- 0.5* np.array([0, 0, h_cylinder]))]
+                    v.connect(v_l)
+                    # Connect upper
+                    va_u = va2 + np.array([0, 0, h_cylinder])
+                    v_u = HC.V[tuple(va_u)]
+                    v.connect(v_u)
+
+                nn_ind += 1
+
+
+    # Remove extra vertices
+    # NEW 2021.10.07
+    if 0:
+        del_list2 = []
+        for v in HC.V:
+            if v.x_a[2] > h_cylinder:
+                del_list2.append(v)
+
+        for v in del_list2:
+            HC.V.remove(v)
+
+    # Test plot
+    if 0:
+        HC.dim = 3  # In case this changed for polyscope surface
+        fig, axes, fig_s, axes_s = HC.plot_complex(point_color=db,
+                                                   line_color=db,
+                                                   complex_color_f=lb,
+                                                   complex_color_e=db
+                                                   )
+
+   # cdist = 1e-5
+   # HC.V.merge_all(cdist=cdist)
 
 # Sanity checks for cylinder and volume, connect all to COM
 if 0:
@@ -551,4 +1011,212 @@ if 0:
                                                 complex_color_e=db
                                                 )
 
+#for v in bV:
+#    print(f'v = {v.x}')
+
+# Steps:
+if 0:
+    steps = 100# Still stable
+    for i in range(steps):  #unstable
+        #HC, bV = incr(HC, bV, params, tau=0.1, plot=0)
+        #, bV = incr(HC, bV, params, tau=0.000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        for v in HC.V:
+            print(f'len(v.nn) = {len(v.nn)}')
+        HC, bV = incr(HC, bV, params, tau=0.00000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.000000000001, plot=0)
+        cdist=1e-8
+        #cdist=1e-5
+        #cdist=1e-3
+        print(f'-')
+        print(f'HC.V.size = {HC.V.size()}')
+        HC.V.merge_all(cdist=cdist)
+        print(f'HC.V.size = {HC.V.size()}')
+
+        # Recompute boundary?
+        # TODO: NOT WOPRKING:
+        bV = HC.boundary()
+
+
+# Print data
+if 1:
+    (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+     Theta_i_cache) = HC_curvatures_sessile(HC, bV, r, theta_p, printout=0)
+
+    HC.dim = 2
+    bV = HC.boundary()
+    HC.dim = 3
+    # Angles
+    phi_est_list = []
+    for v in HC.V:
+        print(f'.')
+        print(f'v.x = {v.x}')
+        if v.x[0] == 0.0 and v.x[1] == 0.0:
+            print(f'='*10)
+
+        # Compute boundary movements
+        # Note: boundaries is fixed for now, this is legacy:
+        if v in bV:
+            rati = (np.pi - np.array(Theta_i) / 2 * np.pi)
+            K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
+            l_a = 2 * np.pi * r / len(bV)  # arc length
+            Xi = 1
+            # Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
+            # NOTE: Area should be height of spherical cap
+            # h = R - r * 4np.tan(theta_p)
+            # Approximate radius of the great shpere K = (1/R)**2:
+            #R_approx = 1 / np.sqrt(K_f)
+            R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
+            theta_p_approx = np.arccos(np.min([r / R_approx, 1]))
+            h = R_approx - r * np.tan(theta_p_approx)
+            A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
+            kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx)
+            # TODO: This is NOT the correct arc length (wrong angle)
+            ds = 2 * np.pi * r  # Arc length of whole spherical cap
+            #print(f'ds = {ds}')
+            k_g = kg_ds / ds  # / 2.0
+            print(f' R_approx * k_g = {R_approx * k_g}')
+            phi_est = np.arctan(R_approx * k_g)
+            print(f' phi_est = {phi_est * 180 / np.pi}')
+            phi_est_list.append(phi_est * 180 / np.pi)
+
+
+print(f'phi_est_list = {phi_est_list}')
+""""
+RESULTS:
+
+Refinement = 2:
+[46.79999999999900701, 46.79999999999914398, 46.799999999998757014, \
+46.79999999999902296, 46.79999999999878712, 46.799999999999899424
+
+Avg error % -1.910469250352121e-12
+
+Refinement = 1"
+[46.79999999999983873, 46.799999999999834316, 46.79999999999976023, 
+46.799999999999797665, 46.79999999999975185, 46.79999999999995077, 
+46.800000000000007018, 46.79999999999999141, 46.79999999999999035,
+ 46.800000000000010477, 46.799999999999972105, 46.799999999999992994]
+
+Avg error % -1.923121364592864e-13
+
+Refinement = 0:
+[46.799999999999992426, 46.79999999999999688, 46.79999999999999618, 
+46.79999999999998116, 46.799999999999989858, 46.79999999999999907]
+
+Avg error %-1.012169139259402e-14
+
+
+"""
+avg_l = [46.799999999999992426, 46.79999999999999688, 46.79999999999999618,
+         46.79999999999998116, 46.799999999999989858, 46.79999999999999907]
+
+avg = (np.array(avg_l) - 46.8)/46.8
+print(f'avg = {np.sum(avg)/len(avg) * 100}')
+print(f'HC.V.len() = {HC.V.size()}')
+print(f'bV = {bV}')
+# Polyscope things:
+# Polyscope
+def plot_polyscope(HC, data_points):
+    # Initialize polyscope
+    ps.init()
+    ps.set_up_dir("z_up")
+
+    do = coldict['db']
+    lo = coldict['lb']
+    HC.dim = 2  # The dimension has changed to 2 (boundary surface)
+    HC.vertex_face_mesh()
+    points = np.array(HC.vertices_fm)
+    triangles = np.array(HC.simplices_fm_i)
+    print(f'HC.vertices_fm = {HC.vertices_fm}')
+    print(f'HC.simplices_fm_i = {HC.simplices_fm_i}')
+    print(f'HC.V.size = {HC.V.size()}')
+    ### Register a point cloud
+    # `my_points` is a Nx3 numpy array
+    my_points = points
+    ps_cloud = ps.register_point_cloud("my points", my_points)
+    ps_cloud.set_color(tuple(do))
+    #ps_cloud.set_color((0.0, 0.0, 0.0))
+    verts = my_points
+    faces = triangles
+    ### Register a mesh
+    # `verts` is a Nx3 numpy array of vertex positions
+    # `faces` is a Fx3 array of indices, or a nested list
+    surface = ps.register_surface_mesh("my mesh", verts, faces,
+                             color=do,
+                             edge_width=1.0,
+                             edge_color=(0.0, 0.0, 0.0),
+                             smooth_shade=False)
+
+    ps_cloud = ps.register_point_cloud("data points", data_points)
+    ps_cloud.set_color((0.0, 0.0, 0.0))
+
+    # Add a scalar function and a vector function defined on the mesh
+    # vertex_scalar is a length V numpy array of values
+    # face_vectors is an Fx3 array of vectors per face
+    if 0:
+        ps.get_surface_mesh("my mesh").add_scalar_quantity("my_scalar",
+                vertex_scalar, defined_on='vertices', cmap='blues')
+        ps.get_surface_mesh("my mesh").add_vector_quantity("my_vector",
+                face_vectors, defined_on='faces', color=(0.2, 0.5, 0.5))
+
+    # View the point cloud and mesh we just registered in the 3D UI
+    #ps.show()
+    ps.show()
+
+# Plot
+if 1:
+    HC.dim = 3  # In case this changed for polyscope surface
+    fig, axes, fig_s, axes_s = HC.plot_complex(point_color=db,
+                                               line_color=db,
+                                               complex_color_f=lb,
+                                               complex_color_e=db
+                                               )
+
+#fig, axes, fig_s, axes_s
+#plot_polyscope(HC)
+data_xyz = data_xyz * 1e-3  # mm --> m
+axes.scatter(data_xyz[:, 0], data_xyz[:, 1], data_xyz[:, 2])
+#axes.scatter(0.0, 0.0, -R * np.sin(theta_p))
+axes.set_zlim((0, 1e-3))
+#axes.scatter(0.0, 0.0, -(R-R * np.sin(theta_p)))
+
+#for v in HC.V:
+if 1:
+    max_d = 0.0
+    min_d = 0.0
+    for v in data_xyz:
+        #print(f'R = {R}')
+        N_f0 = v - np.array([0.0, 0.0, -(R - R * np.sin(theta_p))])
+        N_f0 = v - np.array([0.0, 0.0, - R * np.sin(theta_p)])
+        d = np.linalg.norm(N_f0)
+        #print(f' np.linalg.norm(N_f0) = {d}')
+        max_d = max([(R - d), max_d])
+        min_d = min([(R - d), min_d])
+
+
+if 0:
+    for v in HC.V:
+        print(f'v.x + np.random.rand(3) = {v.x + np.random.rand(3)}')
+        print(f'np.random.rand(3) = { 1e-6 * np.random.rand(3)}')
+        HC.V.move(v, tuple(v.x_a + 1e-4 *np.random.rand(3)))
+
+print('-')
+print(f'max_d = {max_d}')
+print(f'min_d = {min_d}')
+if 0:
+    print(f'x.size = {x.size}')
+    data_points = np.zeros([x.size, 3])
+    print(f'data_points = {data_points}')
+    data_points[0,:] = x
+    data_points[2,:] = y
+    print(f'data_points = {data_points}')
+
+
+
+data_points = data_xyz
+print(f'data_xyz = {data_xyz}')
+plt.show()
+plot_polyscope(HC, data_points)
 plt.show()

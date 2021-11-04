@@ -39,11 +39,11 @@ def catenoid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibri
  #   u = np.pi  # 0 to pi
 
 
-    print(f'R = {R}')
-    print(f'(1 / R) ** 2 = {(1 / R) ** 2}')
+  #  print(f'R = {R}')
+  #  print(f'(1 / R) ** 2 = {(1 / R) ** 2}')
     #print(f'K_f = {K_f}')
-    print(f' 1 / R + 1 / R = { 1 / R + 1 / R}')
-    print(f' 1 / R  = { 1 / R}')
+   # print(f' 1 / R + 1 / R = { 1 / R + 1 / R}')
+  #  print(f' 1 / R  = { 1 / R}')
     #print(f'H_f = {H_f}')
 
    #return F, nn, HC, bV, K_f, H_f
@@ -111,7 +111,8 @@ def catenoid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibri
             bV.remove(v)
 
     for v in bV:
-        print(f'bv = {v.x}')
+        pass
+        #print(f'bv = {v.x}')
 
     if 0:
         u_listc, v_listc = copy.copy(u_list), copy.copy(v_list)
@@ -199,8 +200,8 @@ def catenoid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibri
                         neck_verts.append(vert.index)
                         neck_sols.append((H_f_i, K_f_i))
 
-    print(f'len(H_f) = {len(H_f)}')
-    print(f'len(K_f) = {len(K_f)}')
-    print(f'HC.V.size = {HC.V.size()}')
-    print(f'len(bV) = {len(bV)}')
+   # print(f'len(H_f) = {len(H_f)}')
+   # print(f'len(K_f) = {len(K_f)}')
+   # print(f'HC.V.size = {HC.V.size()}')
+   # print(f'len(bV) = {len(bV)}')
     return HC, bV, K_f, H_f, neck_verts, neck_sols

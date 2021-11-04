@@ -285,11 +285,11 @@ class VertexCacheBase(object):
                         merge_pairs_l.append((v, v2))
                         merge_pairs.add(frozenset({v, v2}))
 
-        print(f'merge_pairs = {merge_pairs}')
+        #print(f'merge_pairs = {merge_pairs}')
         for vp in merge_pairs_l:
-            self.merge_pair(vp)
+            #self.merge_pair(vp)
             try:
-                pass#self.merge_pair(vp)
+                self.merge_pair(vp)
             except KeyError:
                 pass  # pairs have possibly aleady been removed
 
@@ -299,8 +299,8 @@ class VertexCacheBase(object):
         :param vp:
         :return:
         """
-        print(f'vp[0].x = {vp[0].x}')
-        print(f'vp[1].x = {vp[1].x}')
+       # print(f'vp[0].x = {vp[0].x}')
+       # print(f'vp[1].x = {vp[1].x}')
         #print(f'vp[0].nn = {vp[0].nn}')
         #print(f'vp[1].nn = {vp[1].nn}')
         #TODO: Maybe this union operation is the shit part and we should be
