@@ -1192,6 +1192,8 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     F: Array of vectors forming the star domain of v_i = F[0]
     nn: Connections within each vertex in union with the star domain
     n_i: Normal vector at vertex v_i (approx.)
+
+    :return: cout: A dictionary of local curvatures
     """
     # NOTE: We need a better solution to ensure signed quantities retain their structure.
     #      The mesh must be ordered to ensure we obtain the correct normal face directions
@@ -1534,6 +1536,12 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     return dict(**locals())
 
 def construct_HC(F, nn):
+    """
+    Construct a simplicial complex from vectorised point cloud data
+    :param F: Vector of function values in 3-dimensional space
+    :param nn: List of neighbouring vertices (list of indices kn F)
+    :return: HC, simplicial `Complex` object
+    """
     HC = Complex(3)
     V = []
     for f in F:
