@@ -159,10 +159,12 @@ def cap_rise_init_N_old(r, theta_p, gamma, N=4, refinement=0):
 
     return F, nn, K_f, H_f
 
-def out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0):
-    #Theta_p = np.linspace(0.0, np.pi, 100)  # range of theta
-    Theta_p = np.linspace(0.0, 0.5*np.pi, 100)  # range of theta
-
+def out_plot_cap_rise(N=7, r=1, gamma=0.0728, refinement=0, domain=None):
+    if domain is None:
+        #Theta_p = np.linspace(0.0, np.pi, 100)  # range of theta
+        Theta_p = np.linspace(0.0, 0.5*np.pi, 100)  # range of theta
+    else:
+        Theta_p = domain
     # Containers
     H_i = []
     H_ij_sum = []

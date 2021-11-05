@@ -233,6 +233,8 @@ if 0:
 
         # Normal good for K = 1 vs. loglog plots
         if 1:
+            key = 'K_f'
+            value = K_fl
             ax.plot(Theta_p* 180 / np.pi, value,
                     marker=keyslabel[key]['marker'],
                     linestyle=keyslabel[key]['linestyle'],
@@ -262,6 +264,8 @@ if 0:
                     label=keyslabel[key]['label'], alpha=0.7)
 
         else:
+            key = 'K_f'
+            value = K_fl
             ax.semilogy(Theta_p * 180 / np.pi, value,
                     marker=keyslabel[key]['marker'],
                     linestyle=keyslabel[key]['linestyle'],
