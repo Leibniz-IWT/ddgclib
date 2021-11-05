@@ -23,7 +23,9 @@ from ._misc import *
 from ._plotting import *
 
 
-def plot_cap_rise_over_theta(c_outd_list, c_outd, vdict, X):
+#def plot_cap_rise_over_theta(r, c_outd_list, c_outd, vdict, X, gamma, N=N, refinement=refinement):
+def plot_cap_rise_over_theta(r, gamma, N, refinement):
+    c_outd_list, c_outd, vdict, X = new_out_plot_cap_rise(N=N, r=r, gamma=gamma, refinement=refinement)
     keyslabel = {'K_f': {'label': '$K$',
                          'linestyle':  '-',
                          'marker': None},
@@ -38,7 +40,7 @@ def plot_cap_rise_over_theta(c_outd_list, c_outd, vdict, X):
                          'marker': 'D'},
     }
 
-    plot_c_outd(c_outd_list, c_outd, vdict, X, keyslabel=keyslabel)
+    #plot_c_outd(c_outd_list, c_outd, vdict, X, keyslabel=keyslabel)
 
     # Plot the values from new_out_plot_cap_rise
     fig = plt.figure()

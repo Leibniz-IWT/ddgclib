@@ -41,11 +41,6 @@ r = 1.4e-5  # Radius of the tube
 r = 0.5e-3  # Radius of the tube (20 mm)
 r = 0.5  # Radius of the tube (20 mm)
 r = 1 # Radius of the tube (20 mm)
-#r = 2e-3  # Radius of the tube (20 mm)
-#r = 1.0  # Radius of the droplet sphere
-#r = 10.0  # Radius of the droplet sphere
-#r = 1.0  # Radius of the droplet sphere
-#r = 0.1  # Radius of the droplet sphere
 
 #r = 0.5e-5  # Radius of the droplet sphere
 #theta_p = 45 * np.pi/180.0  # Three phase contact angle
@@ -71,7 +66,7 @@ theta_p = np.array(theta_p, dtype=np.longdouble)
 
 ##################################################
 # Cap rise plot with surrounding cylinder
-if 1:
+if 0:
     fig, axes, HC = cape_rise_plot(r, theta_p, gamma, N=N,
                                    refinement=refinement)
    # r_temp = r  # normalize the radius
@@ -179,13 +174,13 @@ if 1:
     #r = r_temp
 ##################################################
 # PLot theta rise
-if 0:
+if 1:
     c_outd_list, c_outd, vdict, X = out_plot_cap_rise(N=N, r=r, gamma=gamma, refinement=refinement)
     plot_c_outd(c_outd_list, c_outd, vdict, X)
 
 # PLot theta rise with New fomulation over Phi_C (2021-07)
 # NOTE: THIS IS CURRENTLY USED IN THE MANUSCRIPT:
-if 1:
+if 0:
     #TODO: Check out the N_f0 vectors here! They are NOT the same as the ones
     #      used in the default HC_curvatures function
     c_outd_list, c_outd, vdict, X = new_out_plot_cap_rise(N=N, r=r,

@@ -124,8 +124,8 @@ def cap_rise_init_N(r, theta_p, gamma, N=4, refinement=0, cdist=1e-10,
             HC.V.move(v, v_new)
 
     # TODO: Reconstruct F, nn
-    F = []
-    nn = []
+   # F = []
+   # nn = []
     return F, nn, HC, bV, K_f, H_f
 
 def cap_rise_init_N_old(r, theta_p, gamma, N=4, refinement=0):

@@ -3,8 +3,8 @@ import copy
 from ._curvatures import *
 import matplotlib.pyplot as plt
 
-def catenoid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibrium=True):
-    Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
+def catenoid_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=True):
+   # Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
    # v = Theta  # 0 to 2 pi
   #  u = 0.0    # [-2, 2.0
     #R = r / np.cos(theta_p)  # = R at theta = 0

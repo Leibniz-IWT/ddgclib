@@ -26,7 +26,7 @@ from ddgclib._ellipsoid import *
 from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
-from ddgclib._case2 import *
+#from ddgclib._case2 import *
 
 # Parameters for a water droplet in air at standard laboratory conditions
 gamma = 0.0728  # N/m, surface tension of water at 20 deg C
@@ -42,8 +42,14 @@ refinements =  [2, 3, 4, 5]   # NOTE: 2 is the minimum refinement needed for the
 lp_error = []
 lp_error_2 = []
 geo_error = []
+Nlist = []
 
 for refinement in refinements:
+    # Construct the new Catenoid
+    a, b, c = 1, 0.0, 1  # Geometric parameters of the catenoid
+    abc = (a, b, c)
+    HC, bV, K_f, H_f, neck_verts, neck_sols = catenoid_N(r, theta_p, gamma, abc, refinement=refinement,
+                                                         cdist=1e-5, equilibrium=True)
     # Compute all curvatures:
     (HNda_v_cache, K_H_cache, C_ijk_v_cache, HN_i,  HNdA_ij_dot_hnda_i,
          K_H_2, HNdA_i_Cij) = int_curvatures(HC, bV, r, theta_p, printout=0)
@@ -102,7 +108,8 @@ for refinement in refinements:
 
     print(f'geo erange = {ern }')
     geo_error.append(ern)
-
+    # Append number of boundary vertices:
+    Nlist.append(len(bV))
 
 # Plot the final results
 fig = plt.figure()
@@ -140,8 +147,9 @@ labs = [l.get_label() for l in lns]
 ax.legend(lns, labs, loc=0)
 
 plt.tick_params(axis='y', which='minor')
-if 1:
-    from matplotlib import pyplot as plt, ticker as mticker
+from matplotlib import pyplot as plt, ticker as mticker
 
-    ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
-    ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+
+plt.show()
