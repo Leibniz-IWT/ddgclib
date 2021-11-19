@@ -22,36 +22,12 @@ def catenoid_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=Tr
         z = v
         return x, y, z
 
-    #a, b, c = 0.5, 0.0, 0.5  # Test for unit sphere
-  #  a, b, c = 2, 2, 2  # Test for unit sphere
     # Equation: x**2/a**2 + y**2/b**2 + z**2/c**2 = 1
     # TODO: Assume that a > b > c?
     # Exact values:
     R = a
-
-    # iff a = b = c
-   # R = np.sqrt(1 * a**2)
-    #K_f = (1 / R) ** 2
-   # H_f = 1 / R + 1 / R  # 2 / R
-  #  v = np.pi  #  0 to  pi
-   # v = theta_p
-
- #   u = np.pi  # 0 to pi
-
-
-  #  print(f'R = {R}')
-  #  print(f'(1 / R) ** 2 = {(1 / R) ** 2}')
-    #print(f'K_f = {K_f}')
-   # print(f' 1 / R + 1 / R = { 1 / R + 1 / R}')
-  #  print(f' 1 / R  = { 1 / R}')
-    #print(f'H_f = {H_f}')
-
-   #return F, nn, HC, bV, K_f, H_f
-
     domain = [#(-2.0, 2.0),  # u
               (0.0, 2 * np.pi),  # u
-              #(0.0, np.pi)  # v
-              #(0.0, 2* np.pi)  # v
               (v_l, v_u)  # v
               ]
     HC_plane = Complex(2, domain)
@@ -82,14 +58,8 @@ def catenoid_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=Tr
                         #v.x[2] == domain[0][0] or v.x[2] == domain[0][1]
                        # or v.x[1] == domain[1][0] or v.x[1] == domain[1][1]
                          )
-        #print(f'-')
-        #print(f'v.x = {v.x}')
-        #print(f'boundary_bool = {boundary_bool}')
-        #print(f'domain = {domain}')
-        #print(f'boundary_bool = {boundary_bool}')
         if boundary_bool:
             bV.add(v2)
-            #boundary_bool = False
 
     # Connect neighbours
     for v in HC_plane.V:
@@ -98,9 +68,6 @@ def catenoid_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=Tr
             v2 = list(HC.V)[vn.index]
             v1.connect(v2)
 
-
-   # for v1, v2 in HC_plane
-    #print(f'list(HC.V) = {list(HC.V)}')
 
     # Remerge:
     HC.V.merge_all(cdist=cdist)
@@ -200,8 +167,5 @@ def catenoid_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=Tr
                         neck_verts.append(vert.index)
                         neck_sols.append((H_f_i, K_f_i))
 
-   # print(f'len(H_f) = {len(H_f)}')
-   # print(f'len(K_f) = {len(K_f)}')
-   # print(f'HC.V.size = {HC.V.size()}')
-   # print(f'len(bV) = {len(bV)}')
+
     return HC, bV, K_f, H_f, neck_verts, neck_sols

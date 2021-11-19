@@ -40,7 +40,7 @@ N = 7
 a, b, c = 1, 0.0, 1
 abc = (a, b, c)
 #HC, bV, K_f, H_f, neck_verts, neck_sols = hyperboloid_N(r, theta_p, gamma, abc, N=4, refinement=2, cdist=1e-10, equilibrium=True)
-HC, bV, K_f, H_f, neck_verts, neck_sols = catenoid_N(r, theta_p, gamma, abc, N=4,
+HC, bV, K_f, H_f, neck_verts, neck_sols = catenoid_N(r, theta_p, gamma, abc,
     refinement=2,
     #refinement=4,
     #refinement=6,
@@ -54,7 +54,7 @@ if 0:
 print(f'K_f = {K_f}')
 print(f'H_f = {H_f}')
 
-
+# active latest 10.10.2021
 if 1:
     def int_curvatures(HC, bV, r, theta_p, printout=False):
         HNdA_ij = []
@@ -602,7 +602,6 @@ def plot_polyscope(HC):
 
     #print(help(ps.register_point_cloud))
     if 1:
-
         cloud2 = ps.register_point_cloud("my points 2", points)
         cloud2.set_enabled(False)  # disable
         cloud2.set_enabled()  # default is true
@@ -623,7 +622,7 @@ def plot_polyscope(HC):
     ps.show()
 
 
-#plot_polyscope(HC)
+plot_polyscope(HC)
 
 
 
