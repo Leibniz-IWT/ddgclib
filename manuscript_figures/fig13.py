@@ -44,8 +44,9 @@ r = 0.5e-6  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 1.4e-5  # Radius of the tube
 r = 0.5e-3  # Radius of the tube (20 mm)
-r = 0.5  # Radius of the tube (20 mm)
-r = 1 # Radius of the tube (20 mm)
+#r = 0.5  # Radius of the tube (20 mm)
+#r = 1 # Radius of the tube (20 mm)
+
 
 #r = 0.5e-5  # Radius of the droplet sphere
 #theta_p = 45 * np.pi/180.0  # Three phase contact angle
@@ -88,111 +89,94 @@ if 1:
 
     plot_c_outd(c_outd_list, c_outd, vdict, X, keyslabel=keyslabel)
 
-    # Plot the values from new_out_plot_cap_rise
-    if 1:
-        fig = plt.figure()
-        # ax = fig.add_subplot(2, 1, 1)
-        ax = fig.add_subplot(1, 1, 1)
+    fig = plt.figure()
+    # ax = fig.add_subplot(2, 1, 1)
+    ax = fig.add_subplot(1, 1, 1)
 
-        ind = 0
-        Lines = {}
-        fig.legend()
+    ind = 0
+    Lines = {}
+    fig.legend()
 
-        K_fl = []
-        H_fl = []
-        Theta_p = np.linspace(0.0, 0.5 * np.pi, 100)
-        for theta_p in Theta_p:
-            # Contruct the simplicial complex, plot the initial construction:
-            # F, nn = droplet_half_init(R, N, phi)
-            R = r / np.cos(theta_p)  # = R at theta = 0
-            # Exact values:
-            K_f = (1 / R) ** 2
-            H_f = 1 / R + 1 / R  # 2 / R
-            # dp_exact = gamma * H_f
+    K_fl = []
+    H_fl = []
+    Theta_p = np.linspace(0.0, 0.5 * np.pi, 100)
+    for theta_p in Theta_p:
+        # Contruct the simplicial complex, plot the initial construction:
+        # F, nn = droplet_half_init(R, N, phi)
+        R = r / np.cos(theta_p)  # = R at theta = 0
+        # Exact values:
+        K_f = (1 / R) ** 2
+        H_f = 1 / R + 1 / R  # 2 / R
+        # dp_exact = gamma * H_f
 
-            F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
-                                                      refinement=refinement)
-            K_fl.append(K_f)
-            H_fl.append(H_f)
+        F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
+                                                  refinement=refinement)
+        K_fl.append(K_f)
+        H_fl.append(H_f)
 
-        key = 'K_f'
-        value = K_fl
+    key = 'K_f'
+    value = K_fl
+    # Normal good for K = 1 vs. loglog plots
+    ax.plot(Theta_p* 180 / np.pi, value,
+            color='tab:blue',
+            marker=keyslabel[key]['marker'],
+            linestyle=keyslabel[key]['linestyle'],
+            label=keyslabel[key]['label'], alpha=0.7)
 
-        # Normal good for K = 1 vs. loglog plots
-        if 1:
-            ax.plot(Theta_p* 180 / np.pi, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    label=keyslabel[key]['label'], alpha=0.7)
+    key = 'K_H_i'
+    value = vdict[key]
+    ax.plot(X, value,
+            color='tab:purple',
+            marker=keyslabel[key]['marker'],
+            linestyle=keyslabel[key]['linestyle'],
+            markerfacecolor='None',
+            label=keyslabel[key]['label'], alpha=0.7)
 
-            key = 'K_H_i'
-            value = vdict[key]
-            ax.plot(X, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    markerfacecolor='None',
-                    label=keyslabel[key]['label'], alpha=0.7)
+    plot.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
+    plot.ylabel(r'Gaussian curvature ($m^{-2}$)')
 
-            key = 'H_f'
-            value = H_fl
-            ax.plot(Theta_p* 180 / np.pi, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    label=keyslabel[key]['label'], alpha=0.7)
+    ax2 = ax.twinx()
 
-            key = 'HN_i'
-            value = vdict[key]
-            ax.plot(X, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    markerfacecolor='None',
-                    label=keyslabel[key]['label'], alpha=0.7)
 
-        else:
-            ax.semilogy(Theta_p * 180 / np.pi, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    label=keyslabel[key]['label'], alpha=0.7)
+    key = 'H_f'
+    value = H_fl
+    ax2.plot(Theta_p* 180 / np.pi, value,
+            color='tab:orange',
+            marker=keyslabel[key]['marker'],
+            linestyle=keyslabel[key]['linestyle'],
+            label=keyslabel[key]['label'], alpha=0.7)
 
-            key = 'K_H_i'
-            value = vdict[key]
-            ax.semilogy(X, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    markerfacecolor='None',
-                    label=keyslabel[key]['label'], alpha=0.7)
+    key = 'HN_i'
+    value = vdict[key]
+    ax2.plot(X, value,
+            color='tab:red',
+            marker=keyslabel[key]['marker'],
+            linestyle=keyslabel[key]['linestyle'],
+            markerfacecolor='None',
+            label=keyslabel[key]['label'], alpha=0.7)
 
-            key = 'H_f'
-            value = H_fl
-            ax.semilogy(Theta_p * 180 / np.pi, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    label=keyslabel[key]['label'], alpha=0.7)
 
-            key = 'HN_i'
-            value = vdict[key]
-            ax.semilogy(X, value,
-                    marker=keyslabel[key]['marker'],
-                    linestyle=keyslabel[key]['linestyle'],
-                    markerfacecolor='None',
-                    label=keyslabel[key]['label'], alpha=0.7)
 
-        if 1:
-            plot.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
-            plot.ylabel(r'Gaussian curvature ($m^{-2}$)')
-            ax2 = ax.twinx()
-            plt.ylabel('Mean normal curvature ($m^{-1}$)')
-        else:
-            plot.xlabel(r'Contact angle $\Theta_{C}$')
-            plot.ylabel(r'$K$ ($m^{-1}$)')
-            ax2 = ax.twinx()
-            plt.ylabel('$H$ ($m^{-1}$)')
+    plt.ylabel('Mean normal curvature ($m^{-1}$)')
 
-        plt.ylim((0, max(max( vdict['K_H_i']), max( vdict['HN_i']))))
-        ax.legend(bbox_to_anchor=(0.15, 0.15), loc="lower left",
-                  bbox_transform=fig.transFigure, ncol=2)
-        # interact(update);
+  #  plt.ylim((0, max(max( vdict['K_H_i']), max( vdict['HN_i']) + 1e-6)))
+  #  ax.set_ylim((0, max(vdict['K_H_i']) + 1))
+  #  ax2.set_ylim((0, max(vdict['HN_i'])))
+    ax.legend(#bbox_to_anchor=(0.15, 0.15),
+              loc="lower left",
+              #bbox_transform=fig.transFigure,
+        ncol=2
+    )
+    ax2.legend(#loc="lower left",
+             # bbox_transform=fig.transFigure,
+        ncol=2
+    )
+    # interact(update);
 
+    #import matplotlib.ticker as mticker
+    #f = mticker.ScalarFormatter(useOffset=False, useMathText=True)
+    #g = lambda x, pos: "${}$".format(f._formatSciNotation('%1.10e' % x))
+    #plt.gca().yaxis.set_major_formatter(mticker.FuncFormatter(g))
 
 
 plt.show()

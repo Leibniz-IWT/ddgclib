@@ -49,8 +49,6 @@ np_2 = np.array([4.5, 0.0, 0.0])  # nm, radius of nanoparticle 2
 R_2 = 2.0  # nm, radius of nanoparticle 2
 delta_2 = 0.6  # nm, hydrate layer thickness of nanoparticle 2
 
-
-
 #HC.triangulate()
 HC.triangulate()
 #for i in range(4):
@@ -109,17 +107,13 @@ if 1:
     x = np.outer(np.cos(u), np.sin(v))
     y = np.outer(np.sin(u), np.sin(v))
     z = np.outer(np.ones(np.size(u)), np.cos(v))
-    #x = np.cos(u) * np.sin(v)
-    #y = np.sin(u) * np.sin(v)
-    #z = np.cos(v)
+
     ax_complex.plot_surface((x + np_2[0]/2.0)*R_1, y*R_1, z*R_1, linewidth=0.0,
                             color=do, alpha=0.3
-                            #, cstride=stride, rstride=stride
                             )
 
     ax_complex.plot_surface(x*R_1, y*R_1, z*R_1, linewidth=0.0,
                             color=do, alpha=0.3
-                            #, cstride=stride, rstride=stride
                             )
 
     if 0:

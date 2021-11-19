@@ -287,8 +287,6 @@ def HC_curvatures_sessile(HC, bV, r, theta_p, printout=False):
             HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
             Theta_i_cache)
 
-
-
 def HC_curvatures(HC, bV, r, theta_p, printout=False):
     R = r / np.cos(theta_p)
     K_f = (1 / R) ** 2
