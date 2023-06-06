@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8010952.svg)](https://doi.org/10.5281/zenodo.8010952)
+
 # ddgclib
 Experimental library for discrete differential geometry curvature in fluid simulations.
 
