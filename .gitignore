@@ -1,3 +1,6 @@
 
 ddgclib/.idea/vcs.xml
 ddgclib/.idea/workspace.xml
+ddgclib/.idea/*
+*.xml
+*.pyc
