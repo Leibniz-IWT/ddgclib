@@ -24,9 +24,14 @@ def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdi
         x = a * np.cos(u) * np.cosh(v / a)
         y = a * np.sin(u) * np.cosh(v / a)
         z = v
+
+        # Parametrisierung Zylinder
         x = a * np.cos(u)
         y = a * np.sin(u)
         z = v
+
+
+
         return x, y, z
 
     # Equation: x**2/a**2 + y**2/b**2 + z**2/c**2 = 1

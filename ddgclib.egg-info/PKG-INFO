@@ -1,0 +1,18 @@
+Metadata-Version: 2.1
+Name: ddgclib
+Version: 0.1.0
+Summary: Discrete differential goemetry curvature librrayr
+Author: Stefan Endres, Lutz Mädler
+Author-email: s.endres@iwt-uni-bremen.de
+License: MIT
+Keywords: optimization
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Scientific/Engineering
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.9
+Description-Content-Type: text/markdown
+
+None

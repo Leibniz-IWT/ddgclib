@@ -31,9 +31,9 @@ def halfSphere_N(r, theta_p, gamma, abc, u_l, u_u, v_l, v_u, refinement=2, cdist
         '''
         Coordinate transformation into a sphere
         '''
-        #x = a * np.sin(v) * np.cos(u)
-        #y = a * np.sin(v) * np.sin(u)
-        #z = a * np.cos(v)
+        x = a * np.sin(v) * np.cos(u)
+        y = a * np.sin(v) * np.sin(u)
+        z = a * np.cos(v)
         return x, y, z
 
     # Equation: x**2/a**2 + y**2/b**2 + z**2/c**2 = 1
@@ -77,6 +77,10 @@ def halfSphere_N(r, theta_p, gamma, abc, u_l, u_u, v_l, v_u, refinement=2, cdist
             bV.add(v2)
 
     # Connect neighbours
+   '''
+   mit der nächsten for-Loop  geht man zu diesen Punkt (man geht jeden Punkt v durch)
+   Anschließend wird für diesen Punkt jeder nachbar (vnn) verglichen und der Index bestimmt.
+   '''
     for v in HC_plane.V:
         for vn in v.nn:
             v1 = list(HC.V)[v.index]
