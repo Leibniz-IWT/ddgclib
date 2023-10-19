@@ -3,16 +3,16 @@ import copy
 from ._curvatures import *
 import matplotlib.pyplot as plt
 
-def cylinder_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=True):
+def cylinder_N(r, theta_p, gamma, abc,  u_l, u_v, v_l, v_u,refinement, cdist=1e-10, equilibrium=True):
    # Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
    # v = Theta  # 0 to 2 pi
   #  u = 0.0    # [-2, 2.0
     #R = r / np.cos(theta_p)  # = R at theta = 0
 
-    v_l, v_u = -1.5, 1.5
+    #v_l, v_u = -1.5, 1.5
     #a, b, c = 1, 0.0, 1
-    a, b, c = abc  # Test for unit sphere
-
+    #a, b, c = abc  # Test for unit sphere
+    a = r
     def sech(x):
         return 1 / np.cosh(x)
 
@@ -22,13 +22,14 @@ def cylinder_N(r, theta_p, gamma, abc, refinement=2, cdist=1e-10, equilibrium=Tr
         z = v
         return x, y, z
 
+
     # Equation: x**2/a**2 + y**2/b**2 + z**2/c**2 = 1
     # TODO: Assume that a > b > c?
     # Exact values:
-    R = a
+    R = r
     domain = [#(-2.0, 2.0),  # u
               (0.0, 2 * np.pi),  # u
-              (1.5, 1.5)  # v
+              (v_l, v_u)   # v
               ]
     HC_plane = Complex(2, domain)
     HC_plane.triangulate()

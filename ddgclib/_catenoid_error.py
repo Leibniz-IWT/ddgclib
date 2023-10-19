@@ -1,6 +1,8 @@
 import numpy as np
 import copy
-from ._curvatures import *
+#from ._curvatures import *
+
+from ._curvaturesplay import *
 import matplotlib.pyplot as plt
 
 def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdist=1e-10, equilibrium=True):

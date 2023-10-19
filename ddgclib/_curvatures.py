@@ -1269,6 +1269,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
             # Compute dual area on edge
             k = nn[j][0]  # - 1
             wedge_ij_ik = np.cross(E_ij[j], E_ij[k])
+
             E_jk[j] = F[k] - F[j]
             E_ik[j] = F[k] - F[i]
             if np.dot(normalized(wedge_ij_ik)[0], n_i) < 0:
