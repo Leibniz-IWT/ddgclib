@@ -6,18 +6,27 @@ ddgclib/_capillary_rise_flow.py
 ddgclib/_case1.py
 ddgclib/_case2.py
 ddgclib/_catenoid.py
+<<<<<<< Updated upstream
 ddgclib/_catenoid_error.py
 ddgclib/_complex.py
 ddgclib/_cube_droplet.py
 ddgclib/_curvatures.py
 ddgclib/_cylinder.py
 ddgclib/_cylinder_rotate.py
+=======
+ddgclib/_complex.py
+ddgclib/_cube_droplet.py
+ddgclib/_curvatures.py
+>>>>>>> Stashed changes
 ddgclib/_ellipsoid.py
 ddgclib/_eos.py
 ddgclib/_field.py
 ddgclib/_flow.py
 ddgclib/_gauss_bonnet.py
+<<<<<<< Updated upstream
 ddgclib/_half_sphere.py
+=======
+>>>>>>> Stashed changes
 ddgclib/_hyperboloid.py
 ddgclib/_misc.py
 ddgclib/_plotting.py
