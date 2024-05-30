@@ -1,0 +1,79 @@
+##################################################
+11_Simulation:
+contact-angle activated: 	yes
+contact-angle:			10°
+volume-constraint:		no
+breaking-condition:		1e-9 m
+iteration-size:			1
+
+refinement: 			3
+particle-radian:		15e-3 m
+bridge-radian:			2.6e-3 m
+bridge-length:			1.5e-3m
+gamma (surface-tension):	2.45e-3 N/m
+
+Force-Calculation: 	db = np.dot(db, N_f0)*N_f0
+			df = - gamma * HNdA_i
+
+
+##################################################
+12_Simulation:
+contact-angle activated: 	yes
+contact-angle:			60°
+volume-constraint:		no
+breaking-condition:		1e-9 m
+iteration-size:			1
+
+refinement: 			3
+particle-radian:		15e-3 m
+bridge-radian:			2.6e-3 m
+bridge-length:			1.5e-3m
+gamma (surface-tension):	2.45e-3 N/m
+
+Force-Calculation: 	db = np.dot(db, N_f0)*N_f0
+			df = - gamma * HNdA_i
+
+
+##################################################
+21_Simulation:
+Same as 12
+
+##################################################
+22_Simulation:
+Same as 21
+
+##################################################
+31_Simulation:
+contact-angle activated: 	yes
+contact-angle:			60°
+volume-constraint:		no
+breaking-condition:		1e-9 m
+iteration-size:			1
+
+refinement: 			3
+particle-radian:		15e-3 m
+bridge-radian:			2.6e-3 m
+bridge-length:			1.5e-3m
+gamma (surface-tension):	2.45e-3 N/m
+
+Force-Calculation: 	db = db
+			df = - gamma * HNdA_i
+
+
+##################################################
+32_Simulation:
+31_Simulation:
+contact-angle activated: 	yes
+contact-angle:			10°
+volume-constraint:		no
+breaking-condition:		1e-9 m
+iteration-size:			1
+
+refinement: 			3
+particle-radian:		15e-3 m
+bridge-radian:			2.6e-3 m
+bridge-length:			1.5e-3m
+gamma (surface-tension):	2.45e-3 N/m
+
+Force-Calculation: 	db = db
+			df = - gamma * HNdA_i

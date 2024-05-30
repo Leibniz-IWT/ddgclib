@@ -5,7 +5,8 @@ import copy
 from ._curvaturesplay import *
 import matplotlib.pyplot as plt
 
-def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdist=1e-10, equilibrium=True):
+#def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdist=1e-10, equilibrium=True):
+def catenoiderror_N(abc, v_l, v_u, refinement):
    # Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
    # v = Theta  # 0 to 2 pi
   #  u = 0.0    # [-2, 2.0
@@ -43,8 +44,8 @@ def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdi
     domain = [#(-2.0, 2.0),  # u
               #(0.0, 2 * np.pi),  # u
               (0.0, 2 * np.pi),  # u
-              (v_l, v_u)  # v
-              ]
+              (v_l, v_u)]  # v
+
 
 
     HC_plane = Complex(2, domain)

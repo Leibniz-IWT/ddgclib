@@ -1,36 +1,53 @@
 import numpy as np
 import copy
-from ._curvatures import *
+#from ._curvatures import *
+
+from ._curvaturesplay import *
 import matplotlib.pyplot as plt
 
-def cylinder_N(r, theta_p, gamma, abc,  u_l, u_v, v_l, v_u,refinement, cdist=1e-10, equilibrium=True):
+#def catenoiderror_N(r, theta_p, gamma, abc ,u_l, u_v, v_l,v_u, refinement=2, cdist=1e-10, equilibrium=True):
+def cylinder_N(abc, v_l, v_u, refinement):
    # Theta = np.linspace(0.0, 2 * np.pi, N)  # range of theta
    # v = Theta  # 0 to 2 pi
   #  u = 0.0    # [-2, 2.0
     #R = r / np.cos(theta_p)  # = R at theta = 0
 
     #v_l, v_u = -1.5, 1.5
+    #v_l, v_u = -2, 2
+
+
     #a, b, c = 1, 0.0, 1
-    #a, b, c = abc  # Test for unit sphere
-    a = r
+
+    a, b, c = abc  # Test for unit sphere
+
     def sech(x):
         return 1 / np.cosh(x)
 
     def catenoid(u, v):
+        x = a * np.cos(u) * np.cosh(v / a)
+        y = a * np.sin(u) * np.cosh(v / a)
+        z = v
+
+        # Parametrisierung Zylinder
         x = a * np.cos(u)
         y = a * np.sin(u)
         z = v
-        return x, y, z
 
+
+
+        return x, y, z
 
     # Equation: x**2/a**2 + y**2/b**2 + z**2/c**2 = 1
     # TODO: Assume that a > b > c?
     # Exact values:
-    R = r
+    R = a
     domain = [#(-2.0, 2.0),  # u
+              #(0.0, 2 * np.pi),  # u
               (0.0, 2 * np.pi),  # u
-              (v_l, v_u)   # v
+              (v_l, v_u)  # v
               ]
+
+
     HC_plane = Complex(2, domain)
     HC_plane.triangulate()
     for i in range(refinement):

@@ -1486,6 +1486,7 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
     # TODO: Need to replace with dot n_i
 
     HN_i = np.sum(np.dot(HNdA_i, n_i))/np.sum(C_ij)
+    HN_i = np.sum(np.dot(HNdA_i, n_i)) / np.sum(C_ij)
     #TURN THIS OFF IN NORMAL RUNS:
     if 0:
         HN_i = np.sum(np.dot(HNdA_i, normalized(np.sum(NdA_ij_Cij, axis=0))[0])) / np.sum(C_ij)

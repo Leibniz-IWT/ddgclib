@@ -1197,7 +1197,7 @@ def b_curvatures_hn_ij_c_ij_play(F, nn, n_i=None):
     #      The mesh must be ordered to ensure we obtain the correct normal face directions
    # print(f'.')
     #print(f'.')
-    #print(f'n_i = {n_i}')
+    #print(f'n_i = {n_iHC}')
     #print(f'F = {F}')
     #print(f'nn = {nn}')
     if n_i is None:

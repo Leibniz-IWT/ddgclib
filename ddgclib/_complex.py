@@ -52,7 +52,6 @@ import decimal
 from memory_profiler import profile
 
 
-
 from abc import ABC, abstractmethod
 # Required modules:
 import numpy
@@ -2486,7 +2485,7 @@ class Complex:
         try:
             self.fig_complex
         except AttributeError:
-            self.fig_complex = pyplot.figure()
+            self.fig_complex = pyplot.figure(figsize=(5,3))
 
         # Consistency
         if self.sfield is None:
@@ -2843,7 +2842,7 @@ class Complex:
     def plot_save_figure(self, strpath):
 
         self.fig_complex.savefig(strpath, transparent=True,
-                                 bbox_inches='tight', pad_inches=0)
+                                 bbox_inches='tight', pad_inches=0,dpi=400)
 
     def plot_clean(self, del_ax=True, del_fig=True):
         try:
@@ -3345,25 +3344,25 @@ class Complex:
 
         data = collections.OrderedDict()
         HCckey = copy.copy(HC.V.cache)
-        print(f'HC.V.cache.keys() = {HC.V.cache.keys()}')
+       # print(f'HC.V.cache.keys() = {HC.V.cache.keys()}')
         for v in HCckey:
-            print('.')
-            print(f'v = {v}')
-            print(f'type(v) = {type(v)}')
+       #     print('.')
+       #     print(f'v = {v}')
+       #     print(f'type(v) = {type(v)}')
             data[str(v)] = {}
-            print(f'HC.V[v].nn = {HC.V[v].nn}')
+       #     print(f'HC.V[v].nn = {HC.V[v].nn}')
             nn_keys = []
             for v2 in HC.V[v].nn:
                 nn_keys.append(v2.x)
 
-            print(f'{nn_keys}')
+       #     print(f'{nn_keys}')
             data[str(v)]['nn'] = nn_keys
             #print(f'vars(HC.V[str(v)]) = {vars(HC.V[str(v)])}')
-            print(f'vars(HC.V[v]) = {vars(HC.V[v])}')
+       #     print(f'vars(HC.V[v]) = {vars(HC.V[v])}')
             for key in vars(HC.V[v]):
                 if key not in ['nn', 'x', 'x_a', 'hash']:
                     #print(f'key = {key}')
-                    print(f'val = {vars(HC.V[v])[key]}')
+       #             print(f'val = {vars(HC.V[v])[key]}')
                     data[str(v)][key] = vars(HC.V[v])[key]
                     if key == 'f':
                         data[str(v)][key] = float(vars(HC.V[v])[key])
@@ -3371,7 +3370,7 @@ class Complex:
                         data[str(v)][key] = int(vars(HC.V[v])[key])
                         #data[str(v)][key] = float(vars(HC.V[v])[key])
 
-        print(f'data = {data}')
+       # print(f'data = {data}')
         with open(fn, 'w') as fp:
             json.dump(data, fp)
 
