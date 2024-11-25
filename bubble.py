@@ -5,6 +5,7 @@
 import copy
 import sys
 import numpy as np
+import polyscope as ps
 #import scipy
 #from matplotlib import pyplot as plt
 #import matplotlib.image as mpimg
@@ -22,6 +23,16 @@ from ddgclib._sessile import *
 from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 from ddgclib._eos import *
 from ddgclib._plotting import plot_polyscope
+
+if 0:
+ class vert:
+  mHNdA_ij
+  mHN_i = []
+  mC_ij = []
+  mK_H_i = []
+  mHNdA_i_Cij = []
+  mTheta_i = []
+  mlastMove = []
 
 def sector_volume(HC):
   #compute the volume of the complex by splitting it into sectors centred on origin
@@ -44,7 +55,23 @@ def sector_volume(HC):
   print('totalArea',totalArea)
   return total_bubble_volume
 
-def mean_flow(HC, bV, params, tau, print_out=False, pinned_line=False):
+def prism_volume(HC):
+  #compute the volume of the complex by splitting it into prisms over the surface
+  (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+    HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+    Theta_i_cache) = HC_curvatures_sessile(HC, bV, r, theta_p, printout=0)
+  total_bubble_volume=0.0
+  totalArea=0.0
+  for v in HC.V:
+    dualArea = sum(C_ij_cache[v.x])
+    totalArea += dualArea
+    H = HNdA_i_cache[v.x]
+    N_approx = - normalized(H)[0]
+    total_bubble_volume += dualArea * N_approx[2] * v.x_a[2] #+ np.dot(H, v.x_a) 
+  print('totalArea',totalArea)
+  return total_bubble_volume
+
+def mean_flow(HC, bV, dDict, params, tau, print_out=False, pinned_line=False):
   (gamma, rho, g, r, theta_p, K_f, h) = params
   if print_out:
     print('.')
@@ -53,14 +80,14 @@ def mean_flow(HC, bV, params, tau, print_out=False, pinned_line=False):
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, r, theta_p, printout=0)
 
-  total_bubble_volume = sector_volume(HC)
+  total_bubble_volume = prism_volume(HC)
   print("total_bubble_volume",total_bubble_volume)
   airPressure = P_0 + P_0 * ( initial_volume - total_bubble_volume ) / total_bubble_volume
   print("airPressure",airPressure)
-  
 
   # Move boundary vertices:
   bV_new = set()
+  dDict_new = {}
   for v in HC.V:
     if print_out:
       print(f'v.x = {v.x}')
@@ -76,9 +103,10 @@ def mean_flow(HC, bV, params, tau, print_out=False, pinned_line=False):
       #ToDo: THis is not the actual sector ration (wrong angle)
       # rati = np.array(Theta_i) / (2 * np.pi)
       # print(f' rati = 2 * np.pi /np.array(Theta_i)= { rati}')
-      print('-'*10)
-      print('Boundary vertex:')
-      print('-'*10)
+      if print_out:
+        print('-'*10)
+        print('Boundary vertex:')
+        print('-'*10)
       if 0:
         #ToDo: len(bV) is sector fraction
         H_K = HNda_v_cache[v.x] * np.array([0, 0, -1]) * len(bV)
@@ -122,16 +150,17 @@ def mean_flow(HC, bV, params, tau, print_out=False, pinned_line=False):
       # Move line if the contact angle is not pinned: 
       if not pinned_line: HC.V.move(v, new_vx)
       bV_new.add(HC.V[new_vx])
-      print('-' * 10)
+      #print('-' * 10)
     # Current main code:
     else:
-      print('-'*10)
-      print('Interior vertex:')
-      print('-'*10)
-      print(f' v.x_a = {v.x_a}')
+      if print_out:
+        print('-'*10)
+        print('Interior vertex:')
+        print('-'*10)
+        print(f' v.x_a = {v.x_a}')
       H = HNdA_i_cache[v.x]
       df = gamma * H
-      print(f' df = {df}')
+      if print_out:print(f' df = {df}')
       netSurfForce += df
       #ToDo: Convex should be negative, concave parts should be positive.
       if numpy.linalg.norm(H) > 1e-10:
@@ -141,39 +170,49 @@ def mean_flow(HC, bV, params, tau, print_out=False, pinned_line=False):
       #dualArea = np.linalg.norm(C_ij_cache[v.x])
       dualArea = sum(C_ij_cache[v.x])
       dc = airPressure * N_approx  * dualArea
-      print(f' dc = {dc}')
-      netCompressForce += df
+      #print(f' dc = {dc}')
+      netCompressForce += dc
       waterPressure = P_0 - rho * g * v.x_a[2]
       dg = - waterPressure * N_approx  * dualArea
-      print(f' dg = {dg}')
+      #print(f' dg = {dg}')
       netBuoyancy += dg
+      dtot = df + dg + dc
       # Scale forces to characteristic dimension:
-      f_k = v.x_a + tau * ( df + dg + dc )
+      #print('v.x',v.x)
+      if v.x in dDict:
+        #print('AB',dDict)
+        f_k = v.x_a + tau * ( 1.5*dtot - 0.5*dDict[v.x] )
+      else:
+        #print('Euler',dDict)
+        f_k = v.x_a + tau * dtot
       maxMove=max(maxMove,np.linalg.norm(df+dg+dc)) 
-      print(f'f_k = {f_k }')
+      #print(f'f_k = {f_k }')
       f_k[2] = np.max([f_k[2], 0.0])  # Floor constraint
       new_vx = tuple(f_k)
       # Move interior complex
       HC.V.move(v, new_vx)
-      print('-' * 10)
+      #print('v.x2',v.x)
+      dDict_new[v.x] = dtot
+      #print('-' * 10)
   if print_out: print(f'bV_new = {bV_new}')
   print('netSurfForce',netSurfForce)
   print('netBuoyancy',netBuoyancy)
   print('netCompressForce',netCompressForce)
   print('maxMove',maxMove)
-  print(i,total_bubble_volume,maxMove,file=vol_txt)
+  print(i,total_bubble_volume,maxMove,*netSurfForce,*netCompressForce,*netBuoyancy,file=vol_txt)
+  vol_txt.flush()
   #print(str(total_bubble_volume),file='vol_txt')
-  return HC, bV_new
+  return HC, bV_new, dDict_new
 
-def incr(HC, bV, params, tau=1e-5, plot=False, verbosity=1, pinned_line=False):
+def incr(HC, bV, dDict, params, tau=1e-5, plot=False, verbosity=1, pinned_line=False):
   HC.dim = 3  # Rest in case visualization has changed
   if verbosity == 2:
     print_out = True
   else:
     print_out = False
   # Update the progress
-  HC, bV = mean_flow(HC, bV, params, tau=tau, print_out=print_out, pinned_line=pinned_line)
-  return HC, bV
+  HC, bV, dDict = mean_flow(HC, bV, dDict, params, tau=tau, print_out=print_out, pinned_line=pinned_line)
+  return HC, bV, dDict
 
 def ps_inc(surface, HC):
   HC.dim = 2  # The dimension has changed to 2 (boundary surface)
@@ -254,11 +293,11 @@ def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
 ## Numerical
 #To see the initial complex, set steps to 0.
 refinement = 1
-steps = 100 # Still stable, but not for higher values
-tau = 3 #0.001  # 0.1 works
+steps = 200 # Still stable, but not for higher values
+tau = 1 #0.001  # 0.1 works
 
 ## Physical
-P_0 = 101.325  # kPa, Ambient pressure
+P_0 = 101.325e3  # Pa, Ambient pressure
 gamma = 72.8e-3  # # N/m
 rho_0 = 998.2071  # kg/m3, density, STP
 #rho_1 = 1.0 # kg/m3, density of air
@@ -289,21 +328,29 @@ print(f'r = {r}')
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-
 HC,bV = spherical_cap_init(r, theta_p, NFoot=6, refinement=4)
-initial_volume = sector_volume(HC)
+initial_volume = prism_volume(HC)
 plot_polyscope(HC)
+ps.init()
 plt.show()
 #Surface energy minimisation
 fname='vol.txt'
 with open(fname, "w") as vol_txt:
   print('saving',fname)
+  dDict = {}
   for i in range(steps):
     print("i",i)
     print('lenBV',len(bV))
     #plot_polyscope(HC)
-    #if i%10==0:plot_polyscope(HC)
-    HC, bV = incr(HC, bV, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
+    if i%10==0:
+      #plot_polyscope(HC)
+      ps.frame_tick()
+      fname='pos'+str(i)+'.txt'
+      with open(fname, "w") as pos_txt:
+        print('saving',fname)
+        for v in HC.V:
+          print(v.x,file=pos_txt)
+    HC, bV, dDict = incr(HC, bV, dDict, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
     cdist=r*1e-5
     HC.V.merge_all(cdist=cdist)
 plot_polyscope(HC)
