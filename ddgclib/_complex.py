@@ -2506,7 +2506,7 @@ class Complex:
                    }
 
         def define_cols(col):
-            if (col is 'lo') or (col is 'do'):
+            if (col == 'lo') or (col == 'do'):
                 col = coldict[col]
             elif col is None:
                 col = None
@@ -3092,7 +3092,7 @@ class Complex:
         """
         if proj_dim == 2:
             for v in min_points:
-                if point_color is 'r':
+                if point_color == 'r':
                     min_col = 'k'
                 else:
                     min_col = 'r'
@@ -3108,7 +3108,7 @@ class Complex:
 
         if proj_dim == 3:
             for v in min_points:
-                if point_color is 'r':
+                if point_color == 'r':
                     min_col = 'k'
                 else:
                     min_col = 'r'
@@ -3225,8 +3225,8 @@ class Complex:
         # NOTE: THIS IS A NEW METHOD 2021.09.29 TO TEST SOMETHING:
         if 1:
             import numpy as np
-            print(f'np.zeros([self.V.size(), self.dim]) = '
-                  f'{np.zeros([self.V.size(), self.dim])}')
+            #ICNov2024 print(f'np.zeros([self.V.size(), self.dim]) = '
+            #ICNov2024      f'{np.zeros([self.V.size(), self.dim])}')
             self.vertices_fm = np.zeros([self.V.size(), self.dim + 1])
             self.vertices_fm
             for v in self.V:
@@ -3235,7 +3235,7 @@ class Complex:
         # TODO: Add in field
         for v in self.V.cache:  # Note that cache is an OrderedDict
             #NOTE: THIS WAS COMMENTED OUT 2021.09.29 TO TEST SOMETHING:
-            print(f'self.V[v].index = {self.V[v].index}')
+            #ICNov2024 print(f'self.V[v].index = {self.V[v].index}')
             if 0:
                 self.vertices_fm.append(v)
 
@@ -3321,7 +3321,10 @@ class Complex:
         for s in self.simplices_fm_i:
             sl = []
             for i in s:
-                sl.append(self.vertices_fm[i])
+                try:
+                    sl.append(self.vertices_fm[i])
+                except IndexError:
+                    pass  #ICannon 2024 Nov: vertex has possibly been removed
 
             # print(sl)
 
