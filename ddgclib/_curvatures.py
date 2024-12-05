@@ -1319,9 +1319,15 @@ def b_curvatures_hn_ij_c_ij(F, nn, n_i=None):
                 HNdA_ij[j] = (cotan(alpha_ij)) * (F[j] - F[i])
 
             continue
-
-        k = nn[j][0]  # - 1
-        l = nn[j][1]  # - 1
+        #if 1:
+        try:
+          k = nn[j][0]  # - 1
+          l = nn[j][1]  # - 1
+        except IndexError:
+          print('l1326IndexError')
+          print('j',j)
+          print('F',F)
+          print('nn',nn)
 
         # Discrete vector area:
         # Simplex areas of ijk and normals
