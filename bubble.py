@@ -16,9 +16,9 @@ import polyscope as ps
 
 # Local library
 from ddgclib import *
+from ddgclib._curvatures import HC_curvatures_sessile
 from ddgclib._complex import *
 from ddgclib._sphere import *
-from ddgclib._curvatures import * #plot_surface#, curvature
 from ddgclib._sessile import *
 from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 from ddgclib._eos import *
@@ -71,6 +71,46 @@ def prism_volume(HC):
   print('totalArea',totalArea)
   return total_bubble_volume
 
+def saveNeigh(fname):
+  vNum=0
+  posDic={}
+  for v in HC.V:
+    posDic[v.x]=vNum
+    vNum+=1
+  with open(fname, "w") as nei_txt:
+    print('saving',fname)
+    vNum=0
+    for v in HC.V:
+      print(vNum, ' ', file=nei_txt, end='')
+      for nei in v.nn:
+        print(posDic[nei.x], ' ', file=nei_txt, end='')
+      print('', file=nei_txt)
+      vNum+=1
+  return
+
+def saveComplex(t):
+  fname='data/pos'+str(t)+'.txt'
+  with open(fname, "w") as pos_txt:
+    print('saving',fname)
+    for v in HC.V:
+      print(*v.x,file=pos_txt)
+  saveNeigh('data/nei'+str(t)+'.txt')
+
+def loadComplex(t):
+  fname='data/pos'+str(t)+'.txt'
+  with open(fname) as f:
+    print('loading',fname)
+    pos = [[float(x) for x in line.split()] for line in f]
+  fname='data/nei'+str(t)+'.txt'
+  with open(fname) as f:
+    print('loading',fname)
+    nn = [[int(x) for x in line.split()[1:]] for line in f]
+  HC = construct_HC(pos, nn)   
+  bV = set()
+  for v in HC.V:
+    if abs(v.x[2]) < 1e-9: bV.add(v)
+  return HC, bV
+
 def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
   (gamma, rho, g, RadFoot, theta_p) = params
   if print_out:
@@ -83,7 +123,7 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
   total_bubble_volume = prism_volume(HC)
   print("total_bubble_volume",total_bubble_volume)
   if total_bubble_volume != total_bubble_volume: return -1
-  gasPressure = P_0 + 1e-3*P_0 * ( initial_volume - total_bubble_volume ) / total_bubble_volume
+  gasPressure = P_0 + 1e-2*P_0 * ( initial_volume - total_bubble_volume ) / total_bubble_volume
   #if gasPressure<P_0: gasPressure = P_0 
   #gasPressure = P_0 * initial_volume / total_bubble_volume
   print("gasPressure",gasPressure)
@@ -192,7 +232,13 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
       if v.x in forcePrev:
         #print('AB',forcePrev)
         f_k = v.x_a + tau * ( 1.5*force - 0.5*forcePrev[v.x] )
-        #f_k = v.x_a - tau * force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
+        #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
+        #numer=0
+        #denom=0
+        #for i in range(3):
+        #  numer += force[i] * (v.x_a[i] - posPrev[v.x][i]) 
+        #  denom += force[i] * (force[i] - forcePrev[v.x][i]) 
+        #f_k = v.x_a - force * numer / denom 
       else:
         #print('Euler',forcePrev)
         f_k = v.x_a + tau * force
@@ -403,7 +449,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0, cdist=-1):
 # ### Parameters
 ## Numerical
 tau = .2 #0.001  # 0.1 works
-cdist=1e-4#7
+cdist=5e-5#7
 
 ## Physical
 Bo=.5#.0955#100*rho*g*RadSphere**2/gamma
@@ -457,43 +503,36 @@ params =  (gamma, rho, g, RadFoot, theta_p)
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
-initial_volume = prism_volume(HC)
-#plot_polyscope(HC)
+tInit=0
+t=tInit
+if tInit==0:
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
+else:
+  HC, bV = loadComplex(t)
 #for mer in range():
 #  HC.V.merge_nn(cdist=cdist)
-#plot_polyscope(HC)
 #ps.init()
 #plt.show()
-#Surface energy minimisation
+#HC.refine_all_star(exclude=bV)
+plot_polyscope(HC)
+initial_volume = Volume#prism_volume(HC)
 fname='data/vol.txt'
-with open(fname, "w") as vol_txt:
+with open(fname, "a") as vol_txt:
   print('saving',fname)
   forcePrev = {}
   posPrev = {}
-  for t in range(300):
+  #Surface energy minimisation
+  while t<=tInit+100:
+    t+=1
     print("t",t)
-    if 1:#t%10==0:
-      fname='data/pos'+str(t)+'.txt'
-      with open(fname, "w") as pos_txt:
-        print('saving',fname)
-        for v in HC.V:
-          print(*v.x,file=pos_txt)
-      #if t%10==0:
-      #if t>7:
-        #plot_polyscope(HC)
-      #ps.frame_tick()
-    HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
     HC.V.merge_nn(cdist=cdist)
-    #HC.V.merge_all(cdist=cdist)
     for v in HC.V:
-      #print('v.nn',v.nn)
-      #for nei in v.nn:
       if len(v.nn)<2:  
           print('v.nn',v.nn)
           print('remove',v.x_a)
           HC.V.remove(v)
-    #if t>30:
-    #plot_polyscope(HC)
+    HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
+    if t%10==0:saveComplex(t)
+      #ps.frame_tick()
 plot_polyscope(HC)
 plt.show()
