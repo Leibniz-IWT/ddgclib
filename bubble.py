@@ -83,7 +83,10 @@ def saveNeigh(fname):
     for v in HC.V:
       print(vNum, ' ', file=nei_txt, end='')
       for nei in v.nn:
-        print(posDic[nei.x], ' ', file=nei_txt, end='')
+        try:
+          print(posDic[nei.x], ' ', file=nei_txt, end='')
+        except KeyError:
+          print('KeyError caught, not in dictionary',nei.x)
       print('', file=nei_txt)
       vNum+=1
   return
@@ -110,6 +113,115 @@ def loadComplex(t):
   for v in HC.V:
     if abs(v.x[2]) < 1e-9: bV.add(v)
   return HC, bV
+
+def refineCentroids():
+  new_verts=[]
+  neigbours=[]
+  for i, v1 in enumerate(HC.V):
+    #if i!=10: continue
+    for v2 in v1.nn:
+      for v3 in v2.nn:
+        if v3==v1: continue
+        for v4 in v3.nn:
+          if v4!=v1: continue
+          area = 0.5 * np.linalg.norm( np.cross(v1.x_a,v2.x_a) 
+                                     + np.cross(v2.x_a,v3.x_a) 
+                                     + np.cross(v3.x_a,v1.x_a) )
+          if area < cdist**2: continue
+          posNew = (v1.x_a + v2.x_a + v3.x_a) / 3
+          new_verts.append(HC.V[tuple(posNew)])
+          # Connect to original 2 vertices to the new centre vertex
+          neigbours.append([v1,v2,v3])
+  for i, new_vert in enumerate(new_verts):
+    for neigh in neigbours[i]:
+      new_vert.connect(neigh)
+  return
+
+def refine_ed(HC, dist):
+  to_split_1D=[]
+  to_split=[]
+  for i, v1 in enumerate(HC.V):
+    if v1 in to_split_1D: continue
+    if i!=10: continue
+    for v2 in v1.nn:
+      if v2 in to_split_1D: continue
+      if sum(v1.x_a*v2.x_a) > dist**2: 
+        common_neigh = list(v1.nn.intersection(v2.nn))
+        if len(common_neigh) != 2: continue
+        if common_neigh[0] in to_split_1D: continue
+        if common_neigh[1] in to_split_1D: continue
+        to_split.append((v1,v2,*common_neigh))
+        to_split_1D.extend((v1,v2,*common_neigh))
+        return to_split
+        
+def refine_edges(HC, dist):
+  #to_split=refine_ed(HC, dist)
+  to_split_1D=[]
+  to_split=[]
+  for i, v1 in enumerate(HC.V):
+    if v1 in to_split_1D: continue
+    #if i!=10: continue
+    for v2 in v1.nn:
+      if v2 in to_split_1D: continue
+      if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
+        common_neigh = list(v1.nn.intersection(v2.nn))
+        if len(common_neigh) != 2: continue
+        if common_neigh[0] in to_split_1D: continue
+        if common_neigh[1] in to_split_1D: continue
+        to_split.append((v1,v2,*common_neigh))
+        to_split_1D.extend((v1,v2,*common_neigh))
+  if len(to_split)==0:return
+  for (v1, v2, v3, v4) in to_split:
+    #v_new = HC.split_edge(v1.x,v2.x)
+    v1.disconnect(v2)
+    # Compute vertex on centre of edge:
+    v_pos = 0.5*v1.x_a + 0.5*v2.x_a
+    v_new = HC.V[tuple(v_pos)]
+    # Connect to original 2 vertices to the new centre vertex
+    v_new.connect(v1)
+    v_new.connect(v2)
+    v_new.connect(v3)
+    v_new.connect(v4)
+    #HC.split_edge(v1, v2)
+  return
+
+def find_quad(v1):
+  for v2 in v1.nn:
+    common_neigh = list(v1.nn.intersection(v2.nn))
+    if len(common_neigh) != 2: continue
+    v3 = common_neigh[0]
+    v4 = common_neigh[1]
+    common_neigh = list(v3.nn.intersection(v4.nn))
+    if common_neigh != [v1,v2] and common_neigh != [v2,v1]: continue
+    for quad in to_reconnect:
+      if len(quad.intersection((v1,v2,v3,v4)))>2: return
+    if np.linalg.norm(v1.x_a-v2.x_a) > 1.5*np.linalg.norm(v3.x_a-v4.x_a): 
+      to_reconnect.append((v1,v2,v3,v4))
+
+def reconnect_long_diagonals(HC):
+  to_reconnect=[]
+  for i, v1 in enumerate(HC.V):
+    for v2 in v1.nn:
+      common_neigh = list(v1.nn.intersection(v2.nn))
+      if len(common_neigh) != 2: continue
+      v3 = common_neigh[0]
+      v4 = common_neigh[1]
+      common_neigh = list(v3.nn.intersection(v4.nn))
+      if common_neigh != [v1,v2] and common_neigh != [v2,v1]: continue
+      if any( [len(set(quad).intersection((v1,v2,v3,v4))) > 2 for quad in to_reconnect] ): continue
+      #cont = False
+      #for quad in to_reconnect: 
+      #  if len(quad.intersection((v1,v2,v3,v4))) > 2:
+      #    cont=True 
+      #    break
+      #if cont: continue
+      if np.linalg.norm(v1.x_a-v2.x_a) > 1.5*np.linalg.norm(v3.x_a-v4.x_a): 
+        to_reconnect.append((v1,v2,v3,v4))
+  if len(to_reconnect)==0:return
+  for (v1, v2, v3, v4) in to_reconnect:
+    v1.disconnect(v2)
+    v3.connect(v4)
+  return
 
 def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
   (gamma, rho, g, RadFoot, theta_p) = params
@@ -448,8 +560,8 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0, cdist=-1):
 
 # ### Parameters
 ## Numerical
-tau = .2 #0.001  # 0.1 works
-cdist=5e-5#7
+tau = .001 #0.001  # 0.1 works
+cdist=1e-3#7
 
 ## Physical
 Bo=.5#.0955#100*rho*g*RadSphere**2/gamma
@@ -506,7 +618,7 @@ lb = np.array([176, 206, 234]) / 255  # Light blue
 tInit=0
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1, cdist=cdist)
 else:
   HC, bV = loadComplex(t)
 #for mer in range():
@@ -515,6 +627,17 @@ else:
 #plt.show()
 #HC.refine_all_star(exclude=bV)
 plot_polyscope(HC)
+#(HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+#  HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+#  Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
+
+  #dualArea = sum(C_ij_cache[v.x])
+  #if i==10:#dualArea>10*cdist**2:
+  #  HC.refine_star(v)
+
+refine_edges(HC, .002)#*cdist)
+reconnect_long_diagonals(HC)
+plot_polyscope(HC)
 initial_volume = Volume#prism_volume(HC)
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
@@ -522,16 +645,20 @@ with open(fname, "a") as vol_txt:
   forcePrev = {}
   posPrev = {}
   #Surface energy minimisation
-  while t<=tInit+100:
+  while t<=tInit+10:
     t+=1
     print("t",t)
-    HC.V.merge_nn(cdist=cdist)
+    HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
+    #HC.V.merge_nn(cdist=cdist)
+    #refineCentroids()
+    refine_edges(HC, .002)#*cdist)
+    reconnect_long_diagonals(HC)
+    plot_polyscope(HC)
     for v in HC.V:
       if len(v.nn)<2:  
           print('v.nn',v.nn)
           print('remove',v.x_a)
           HC.V.remove(v)
-    HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
     if t%10==0:saveComplex(t)
       #ps.frame_tick()
 plot_polyscope(HC)
