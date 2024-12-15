@@ -114,15 +114,18 @@ def loadComplex(t):
     if abs(v.x[2]) < 1e-9: bV.add(v)
   return HC, bV
 
-def refineCentroids():
+def refineCentroids(exclude=set()):
   new_verts=[]
   neigbours=[]
   for i, v1 in enumerate(HC.V):
-    #if i!=10: continue
+    if v1 in exclude: continue
     for v2 in v1.nn:
+      if v2 in exclude: continue
       for v3 in v2.nn:
+        if v3 in exclude: continue
         if v3==v1: continue
         for v4 in v3.nn:
+          if v4 in exclude: continue
           if v4!=v1: continue
           area = 0.5 * np.linalg.norm( np.cross(v1.x_a,v2.x_a) 
                                      + np.cross(v2.x_a,v3.x_a) 
@@ -170,7 +173,7 @@ def refine_edges(HC, dist):
         if common_neigh[1] in to_split_1D: continue
         to_split.append((v1,v2,*common_neigh))
         to_split_1D.extend((v1,v2,*common_neigh))
-  if len(to_split)==0:return
+  if len(to_split)==0:return 0
   for (v1, v2, v3, v4) in to_split:
     #v_new = HC.split_edge(v1.x,v2.x)
     v1.disconnect(v2)
@@ -183,7 +186,7 @@ def refine_edges(HC, dist):
     v_new.connect(v3)
     v_new.connect(v4)
     #HC.split_edge(v1, v2)
-  return
+  return len(to_split)
 
 def find_quad(v1):
   for v2 in v1.nn:
@@ -217,16 +220,18 @@ def reconnect_long_diagonals(HC):
       #if cont: continue
       if np.linalg.norm(v1.x_a-v2.x_a) > 1.5*np.linalg.norm(v3.x_a-v4.x_a): 
         to_reconnect.append((v1,v2,v3,v4))
-  if len(to_reconnect)==0:return
+  if len(to_reconnect)==0: return 0
   for (v1, v2, v3, v4) in to_reconnect:
     v1.disconnect(v2)
     v3.connect(v4)
-  return
+  return len(to_reconnect)
 
 def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
   (gamma, rho, g, RadFoot, theta_p) = params
   if print_out:
     print('.')
+  timeInt='adaptiveEuler'#'AdamBash'#'NewtonRapson'#
+  maxMove=1e-5
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
@@ -235,7 +240,8 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
   total_bubble_volume = prism_volume(HC)
   print("total_bubble_volume",total_bubble_volume)
   if total_bubble_volume != total_bubble_volume: return -1
-  gasPressure = P_0 + 1e-2*P_0 * ( initial_volume - total_bubble_volume ) / total_bubble_volume
+  #gasPressure = P_0 + 1e-2*P_0 * ( initial_volume - total_bubble_volume ) / total_bubble_volume
+  gasPressure = P_0 + delPressu
   #if gasPressure<P_0: gasPressure = P_0 
   #gasPressure = P_0 * initial_volume / total_bubble_volume
   print("gasPressure",gasPressure)
@@ -244,6 +250,7 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
   bV_new = set()
   forceDict = {}
   posDict = {}
+  nConcave=0
   for v in HC.V:
     if print_out:
       print(f'v.x = {v.x}')
@@ -251,7 +258,7 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
     netSurfForce = np.array([0.0,0.0,0.0])
     netBuoyancy = np.array([0.0,0.0,0.0])
     netCompressForce = np.array([0.0,0.0,0.0])
-    maxMove = 0.0
+    maxForce = 0.0
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
     if v in bV:
@@ -327,7 +334,12 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
       if numpy.linalg.norm(H) > 1e-10:
         N_approx = - normalized(H)[0]
       else:#if the surface is flat, we use the direction from the origin
-        N_approx = - normalized(v.x_a)[0]
+        N_approx = normalized(v.x_a)[0]
+      inOut=sum(N_approx[1:]*normalized(v.x_a)[0][1:])
+      if inOut<0:
+        nConcave+=1
+        #make sure the normal points away from the origin
+        N_approx = -N_approx
       #dualArea = np.linalg.norm(C_ij_cache[v.x])
       dualArea = sum(C_ij_cache[v.x])
       dc = gasPressure * N_approx  * dualArea
@@ -341,40 +353,48 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
       force = df + dc + dg 
       # Scale forces to characteristic dimension:
       #print('v.x',v.x)
-      if v.x in forcePrev:
+      if timeInt=='AdamBash' and v.x in forcePrev:
         #print('AB',forcePrev)
         f_k = v.x_a + tau * ( 1.5*force - 0.5*forcePrev[v.x] )
+      elif timeInt=='NewtonRapson' and v.x in forcePrev:
         #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
-        #numer=0
-        #denom=0
-        #for i in range(3):
-        #  numer += force[i] * (v.x_a[i] - posPrev[v.x][i]) 
-        #  denom += force[i] * (force[i] - forcePrev[v.x][i]) 
-        #f_k = v.x_a - force * numer / denom 
-      else:
+        numer=0
+        denom=0
+        for i in range(3):
+          numer += force[i] * (v.x_a[i] - posPrev[v.x][i]) 
+          denom += force[i] * (force[i] - forcePrev[v.x][i]) 
+        f_k = v.x_a - force * numer / denom 
+      else: #timeInt!='adaptiveEuler':
         #print('Euler',forcePrev)
         f_k = v.x_a + tau * force
-      maxMove=max(maxMove,np.linalg.norm(df+dg+dc)) 
+      maxForce=max( maxForce, np.linalg.norm(force) ) 
       #print(f'f_k = {f_k }')
       #ICNov2024 f_k[2] = np.max([f_k[2], 0.0])  # Floor constraint
       new_vx = tuple(f_k)
       old_vx = v.x_a
       # Move interior complex
-      HC.V.move(v, new_vx)
+      if timeInt!='adaptiveEuler':
+        HC.V.move(v, new_vx)
       #print('v.x2',v.x)
       forceDict[v.x] = force
       posDict[v.x] = old_vx
       #print('-' * 10)
+  if timeInt=='adaptiveEuler':
+    for v in HC.V:
+      if v.x in forceDict:
+        f_k = v.x_a + maxMove/maxForce*forceDict[v.x]
+        HC.V.move(v, tuple(f_k))
   if print_out: print(f'bV_new = {bV_new}')
   print('netSurfForce',netSurfForce)
   print('netBuoyancy',netBuoyancy)
   print('netCompressForce',netCompressForce)
-  print('maxMove',maxMove)
-  if maxMove>2*cdist: 
-    print('Warning: maxMove is greater than cdist')
+  print('maxForce',maxForce)
+  print('nConcave',nConcave)
+  if maxForce>2*cdist: 
+    print('Warning: maxForce is greater than cdist')
     print('cdist=',cdist)
     print('unmerged vertices may crossover and the interface may overlap')
-  print(t,total_bubble_volume,maxMove,*netSurfForce,*netCompressForce,*netBuoyancy,file=vol_txt)
+  print(t,total_bubble_volume,maxForce,*netSurfForce,*netCompressForce,*netBuoyancy,file=vol_txt)
   vol_txt.flush()
   #print(str(total_bubble_volume),file='vol_txt')
   return HC, bV_new, forceDict, posDict
@@ -560,7 +580,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0, cdist=-1):
 
 # ### Parameters
 ## Numerical
-tau = .001 #0.001  # 0.1 works
+tau = 1 #0.001  # 0.1 works
 cdist=1e-3#7
 
 ## Physical
@@ -572,7 +592,8 @@ rho = 998.2071  # kg/m3, density, STP
 g = 9.81  # m/s2
 pinned_line = True  # pin the three phase contact if set to True
 theta_p = 0 #.9*np.pi #179 #2*(63 / 75) * 20 + 30  # 46.8  40 #IC
-RadTop = (Bo*gamma/rho/g)**.5 #250e-6 #8.426e-4 #300e-6
+RadTop = 1e-3#(Bo*gamma/rho/g)**.5 #250e-6 #8.426e-4 #300e-6
+delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
 #print('RadSphere',RadSphere)
 #RadFoot = .1*RadSphere# 2e-6 #1e-4#((44 / 58) * 0.25 + 1.0) * 1e-3  # height mm --> m  Radius 10e-6
 #theta_p = np.pi - np.asin(RadFoot / RadSphere)
@@ -615,10 +636,10 @@ params =  (gamma, rho, g, RadFoot, theta_p)
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-tInit=0
+tInit=6740
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1, cdist=cdist)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
 else:
   HC, bV = loadComplex(t)
 #for mer in range():
@@ -626,7 +647,7 @@ else:
 #ps.init()
 #plt.show()
 #HC.refine_all_star(exclude=bV)
-plot_polyscope(HC)
+#plot_polyscope(HC)
 #(HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
 #  HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
 #  Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
@@ -645,21 +666,23 @@ with open(fname, "a") as vol_txt:
   forcePrev = {}
   posPrev = {}
   #Surface energy minimisation
-  while t<=tInit+10:
+  while t<=tInit+3000:
     t+=1
     print("t",t)
     HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
-    #HC.V.merge_nn(cdist=cdist)
+    print('merge', HC.V.merge_nn(cdist=1e-4, exclude=bV) )
     #refineCentroids()
-    refine_edges(HC, .002)#*cdist)
-    reconnect_long_diagonals(HC)
+    print('refine', refine_edges(HC, 2e-4) )
+    print('reconnect', reconnect_long_diagonals(HC))
     plot_polyscope(HC)
     for v in HC.V:
       if len(v.nn)<2:  
           print('v.nn',v.nn)
           print('remove',v.x_a)
           HC.V.remove(v)
-    if t%10==0:saveComplex(t)
+    if t%10==0:
+      #plot_polyscope(HC)
+      saveComplex(t)
       #ps.frame_tick()
 plot_polyscope(HC)
 plt.show()
