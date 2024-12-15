@@ -256,7 +256,7 @@ class VertexCacheBase(object):
         self.index -= 1
         return
 
-    def merge_nn(self, cdist):
+    def merge_nn(self, cdist, exclude=set()):
         """
         ICannon 2024 Nov 28
         Merge connected neighbors within the Euclidean norm cdist
@@ -273,10 +273,13 @@ class VertexCacheBase(object):
         merge_vertices_l = []
 
         for v in self:
+            if v in exclude: continue
+            if v in merge_vertices_l: continue
             for v2 in v.nn:  
+                if v2 in exclude: continue
                 if v is v2:
                     continue
-                if v in merge_vertices_l:
+                if v2 in merge_vertices_l:
                     continue
                 dist = np.linalg.norm(v.x_a - v2.x_a)
                 if dist < cdist:
@@ -284,11 +287,14 @@ class VertexCacheBase(object):
                     merge_vertices_l.append(v)
                     merge_vertices_l.append(v2)
 
+        n_merged = 0
         for vp in merge_pairs_l:
             try:
                 self.merge_pair(vp)
+                n_merged += 1 
             except KeyError:
                 pass  # pairs have possibly aleady been removed
+        return n_merged
 
     def merge_all(self, cdist):
         """
@@ -333,7 +339,7 @@ class VertexCacheBase(object):
         :param vp:
         :return:
         """
-        print('merge', vp[0].x_a, vp[1].x_a)
+        #print('merge', vp[0].x_a, vp[1].x_a)
         #print(f'vp[0].nn = {vp[0].nn}')
         #print(f'vp[1].nn = {vp[1].nn}')
         #TODO: Maybe this union operation is the shit part and we should be
