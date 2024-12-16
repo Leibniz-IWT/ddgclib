@@ -66,7 +66,7 @@ def prism_volume(HC):
     dualArea = sum(C_ij_cache[v.x])
     totalArea += dualArea
     H = HNdA_i_cache[v.x]
-    N_approx = - normalized(H)[0]
+    N_approx = outward_normal(v,H)
     total_bubble_volume += dualArea * N_approx[2] * v.x_a[2] #+ np.dot(H, v.x_a) 
   print('totalArea',totalArea)
   return total_bubble_volume
@@ -226,6 +226,77 @@ def reconnect_long_diagonals(HC):
     v3.connect(v4)
   return len(to_reconnect)
 
+def outward_normal(vert, meanCurv):
+  #ToDo: Convex should be negative, concave parts should be positive.
+  if numpy.linalg.norm(meanCurv) > 1e-10:
+    N_approx = - normalized(meanCurv)[0]
+  else:#if the surface is flat, we use the direction from the origin
+    N_approx = normalized(vert.x_a)[0]
+  #make sure the normal points away from the origin
+  if sum(N_approx[:3]*vert.x_a[:3])<0: N_approx = -N_approx
+  return N_approx
+
+def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
+  (gamma, rho, g, RadFoot, theta_p) = params
+  maxMove=.05*RadTop
+  # Compute interior curvatures
+  (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+    HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+    Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
+  total_bubble_volume = prism_volume(HC)
+  print("total_bubble_volume",total_bubble_volume)
+  if total_bubble_volume != total_bubble_volume: return -1
+  gasPressure = P_0*Volume/total_bubble_volume
+  print("gasPressure",gasPressure)
+  forceDict = {}
+  posDict = {}
+  nConcave=0
+  maxForce = 0.0
+  for v in HC.V:
+    netSurfForce = np.array([0.0,0.0,0.0])
+    netBuoyancy = np.array([0.0,0.0,0.0])
+    netCompressForce = np.array([0.0,0.0,0.0])
+    force = 0.0
+    # Compute boundary movements
+    # Note: boundaries are fixed for now, this is legacy:
+    if v not in bV:
+      H = HNdA_i_cache[v.x]
+      df = gamma * H
+      netSurfForce += df
+      N_approx = outward_normal(v,H)
+      dualArea = sum(C_ij_cache[v.x])
+      dc = gasPressure * N_approx  * dualArea
+      netCompressForce += dc
+      liquidPressure = P_0 #- rho * g * v.x_a[2]
+      if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
+      dg = - liquidPressure * N_approx  * dualArea
+      netBuoyancy += dg
+      force = df + dc + dg 
+      maxForce=max( maxForce, np.linalg.norm(force) ) 
+      forceDict[v.x] = force
+  for v in HC.V:
+    if v.x in forceDict:
+      normFor = maxMove/maxForce*forceDict[v.x]
+      f_k = v.x_a + maxMove/maxForce*forceDict[v.x]
+      HC.V.move(v, tuple(f_k))
+      if np.linalg.norm(normFor)>2*maxMove: 
+        print('warning, normFor', np.linalg.norm(normFor))
+        print('maxForce', maxForce)
+        print('maxMove', maxMove)
+      if np.linalg.norm(v.x_a)>3e-3: print('warning, vertex at ', v.x_a)
+  print('netSurfForce',netSurfForce)
+  print('netBuoyancy',netBuoyancy)
+  print('netCompressForce',netCompressForce)
+  print('maxForce',maxForce)
+  if maxForce>2*cdist: 
+    print('Warning: maxForce is greater than cdist')
+    print('cdist=',cdist)
+    print('unmerged vertices may crossover and the interface may overlap')
+  print(t,total_bubble_volume,maxForce,*netSurfForce,*netCompressForce,*netBuoyancy,file=vol_txt)
+  vol_txt.flush()
+  #print(str(total_bubble_volume),file='vol_txt')
+  return HC, bV, forceDict, posDict
+
 def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
   (gamma, rho, g, RadFoot, theta_p) = params
   if print_out:
@@ -259,6 +330,7 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
     netBuoyancy = np.array([0.0,0.0,0.0])
     netCompressForce = np.array([0.0,0.0,0.0])
     maxForce = 0.0
+    force = 0.0
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
     if v in bV:
@@ -382,8 +454,14 @@ def mean_flow(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_l
   if timeInt=='adaptiveEuler':
     for v in HC.V:
       if v.x in forceDict:
+        normFor = maxMove/maxForce*forceDict[v.x]
         f_k = v.x_a + maxMove/maxForce*forceDict[v.x]
         HC.V.move(v, tuple(f_k))
+        if np.linalg.norm(normFor)>2*maxMove: 
+          print('warning, normFor', np.linalg.norm(normFor))
+          print('maxForce', maxForce)
+          print('maxMove', maxMove)
+        if np.linalg.norm(v.x_a)>3e-3: print('warning, vertex at ', v.x_a)
   if print_out: print(f'bV_new = {bV_new}')
   print('netSurfForce',netSurfForce)
   print('netBuoyancy',netBuoyancy)
@@ -628,7 +706,7 @@ for d in dt:
 # define params tuple used in solver:
 #Volume = Volume*RadTop**3
 #RadFoot = r*RadTop
-RadFoot = 1e-3
+RadFoot = RadTop
 Volume = np.pi/3*RadTop**3
 print(f'RadFoot = {RadFoot}')
 params =  (gamma, rho, g, RadFoot, theta_p)
@@ -636,7 +714,7 @@ params =  (gamma, rho, g, RadFoot, theta_p)
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-tInit=6740
+tInit=0
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
@@ -656,7 +734,7 @@ else:
   #if i==10:#dualArea>10*cdist**2:
   #  HC.refine_star(v)
 
-refine_edges(HC, .002)#*cdist)
+refine_edges(HC, .2*RadTop)#*cdist)
 reconnect_long_diagonals(HC)
 plot_polyscope(HC)
 initial_volume = Volume#prism_volume(HC)
@@ -669,12 +747,12 @@ with open(fname, "a") as vol_txt:
   while t<=tInit+3000:
     t+=1
     print("t",t)
-    HC, bV, forcePrev, posPrev = incr(HC, bV, forcePrev, posPrev, params, tau=tau, plot=0, verbosity=0, pinned_line=pinned_line)
-    print('merge', HC.V.merge_nn(cdist=1e-4, exclude=bV) )
+    HC, bV, forcePrev, posPrev = reduce_energy(HC, bV, forcePrev, posPrev, params, tau=tau, pinned_line=pinned_line)
+    print('merge', HC.V.merge_nn(cdist=.1*RadTop, exclude=bV) )
     #refineCentroids()
-    print('refine', refine_edges(HC, 2e-4) )
+    print('refine', refine_edges(HC, .2*RadTop) )
     print('reconnect', reconnect_long_diagonals(HC))
-    plot_polyscope(HC)
+    #plot_polyscope(HC)
     for v in HC.V:
       if len(v.nn)<2:  
           print('v.nn',v.nn)
