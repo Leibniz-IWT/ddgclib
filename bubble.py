@@ -34,6 +34,7 @@ def sector_volume(HC):
 
 def prism_volume(HC):
 #Compute volume of the complex by splitting it into prisms over the surface.
+#To do: include the boundaries
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
@@ -175,32 +176,45 @@ def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinn
   posDict = {}
   nConcave=0
   maxForce = 0.0
+  net_interf_force = np.array([0.0,0.0,0.0])
+  net_liq_force = np.array([0.0,0.0,0.0])
+  net_gas_force = np.array([0.0,0.0,0.0])
+  net_solid_force= np.array([0.0,0.0,0.0])
   for v in HC.V:
-    netSurfForce = np.array([0.0,0.0,0.0])
-    netBuoyancy = np.array([0.0,0.0,0.0])
-    netCompressForce = np.array([0.0,0.0,0.0])
     force = 0.0
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
-    if v not in bV:
+    if v in bV:
+      #get boundary sector length and normal, perhaps with b_curvatures
+      for vn in v.nn:
+        if vn in bV:
+          cLineLen = np.linalg.norm(v.x_a - vn.x_a)
+          common_neigh = list(v.nn.intersection(vn.nn))
+          if len(common_neigh)==1:
+            midpoint = .5*v.x_a + .5*vn.x_a
+            pullDirection = midpoint - common_neigh[0].x_a
+            ContactForce = gamma * cLineLen * pullDirection / np.linalg.norm(pullDirection)
+            net_solid_force += ContactForce
+          else: print('len common_neigh',len(common_neigh))
+    else:
       H = HNdA_i_cache[v.x]
-      df = gamma * H
-      netSurfForce += df
-      N_approx = outward_normal(v,H)
+      interf_force = gamma * H
+      net_interf_force += interf_force
+      dualNormal = outward_normal(v,H)
       dualArea = sum(C_ij_cache[v.x])
-      dc = gasPressure * N_approx  * dualArea
-      netCompressForce += dc
+      gas_force = gasPressure * dualNormal  * dualArea
+      net_gas_force += gas_force
       liquidPressure = P_0 #- rho * g * v.x_a[2]
       if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
-      dg = - liquidPressure * N_approx  * dualArea
-      netBuoyancy += dg
-      force = df + dc + dg 
+      liq_force = - liquidPressure * dualNormal  * dualArea
+      net_liq_force += liq_force
+      force = interf_force + gas_force + liq_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
       forceDict[v.x] = force
   for v in HC.V:
     if v.x in forceDict:
       normFor = maxMove/maxForce*forceDict[v.x]
-      f_k = v.x_a + maxMove/maxForce*forceDict[v.x]
+      f_k = v.x_a + normFor
       HC.V.move(v, tuple(f_k))
       if np.linalg.norm(normFor)>2*maxMove: 
         print('warning, normFor', np.linalg.norm(normFor))
@@ -211,7 +225,7 @@ def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinn
     print('Warning: maxForce is greater than cdist')
     print('cdist=',cdist)
     print('unmerged vertices may crossover and the interface may overlap')
-  print(t,total_bubble_volume,gasPressure,maxForce,*netSurfForce,*netCompressForce,*netBuoyancy,file=vol_txt)
+  print(t,total_bubble_volume,gasPressure,maxForce,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
   return HC, bV, forceDict, posDict
 
@@ -395,7 +409,7 @@ params =  (gamma, rho, g, RadFoot, theta_p)
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-tInit=670
+tInit=1100
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
