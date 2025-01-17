@@ -48,6 +48,25 @@ def prism_volume(HC):
     total_bubble_volume += dualArea * N_approx[2] * v.x_a[2] #+ np.dot(H, v.x_a) 
   return total_bubble_volume
 
+def triangle_prism_volume(HC):
+#Compute volume of the complex by splitting it into prisms over the surface.
+#To do: include the boundaries
+  total_bubble_volume=0.0
+  #totalArea=0.0
+  for v in HC.V:
+    for vn1 in v.nn:
+      for vn2 in v.nn:
+        if vn2 in vn1.nn:
+          triArea = .5*cross_prod(vn1.x_a-v.x_a, vn2.x_a-v.x_a)
+          #set the area vector pointing away from the z axis
+          if sum(triArea[:3]*v.x_a[:3])<0: triArea = - triArea
+          centroid = ( v.x_a[2] + vn1.x_a[2] + vn2.x_a[2] )/3
+          total_bubble_volume += triArea[2] * centroid /6 #+ np.dot(H, v.x_a) 
+          #divide by 2 because vn1 and vn2 are equivalent
+          #divide by 3 because each triangle is counted at the three vertices
+    #totalArea += np.linalg.norm(triArea)
+  return total_bubble_volume
+
 def save_neighbours(fname):
 #Make a text file listing the vertices (id from 0) in first column,
 #with the ids of the connected vertices in next columns.
@@ -160,15 +179,19 @@ def outward_normal(vert, meanCurv):
   if sum(N_approx[:3]*vert.x_a[:3])<0: N_approx = -N_approx
   return N_approx
 
-def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinned_line=False):
+def cross_prod(a,b):
+  return np.array([ a[1]*b[2]-a[2]*b[1],
+                    a[2]*b[0]-a[0]*b[2],
+                    a[0]*b[1]-a[1]*b[0]  ])
+
+def reduce_energy(HC, bV, forcePrev, posPrev, tau, print_out=False, pinned_line=False):
 #Move vertices to reduce the surface, pressure, and gravitaional energy
-  (gamma, rho, g, RadFoot, theta_p) = params
-  maxMove=.005*RadTop#.05*RadTop
+  maxMove=.05*minEdge
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
-  total_bubble_volume = prism_volume(HC)
+  total_bubble_volume = triangle_prism_volume(HC)
   print("total_bubble_volume",total_bubble_volume)
   if total_bubble_volume != total_bubble_volume: return -1
   gasPressure = P_0*Volume/total_bubble_volume
@@ -200,13 +223,27 @@ def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinn
       H = HNdA_i_cache[v.x]
       interf_force = gamma * H
       net_interf_force += interf_force
-      dualNormal = outward_normal(v,H)
-      dualArea = sum(C_ij_cache[v.x])
-      gas_force = gasPressure * dualNormal  * dualArea
+      if False:
+        dualNormal = outward_normal(v,H)
+        dualArea = sum(C_ij_cache[v.x])
+        gas_force = gasPressure * dualNormal  * dualArea
+        liquidPressure = P_0 #- rho * g * v.x_a[2]
+        if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
+        liq_force = - liquidPressure * dualNormal  * dualArea
+      else:
+        gas_force = 0
+        liq_force = 0
+        for vn1 in v.nn:
+          for vn2 in v.nn:
+            if vn2 in vn1.nn:
+              triArea = .5*cross_prod(vn1.x_a-v.x_a, vn2.x_a-v.x_a)
+              #set the area vector pointing away from the z axis
+              centroid = ( v.x_a[2] + vn1.x_a[2] + vn2.x_a[2] )/3
+              if sum(triArea[:3]*v.x_a[:3])<0: triArea = - triArea
+              gas_force += triArea*gasPressure/3
+              liquidPressure = P_0 #- rho * g * centroid 
+              liq_force -= triArea*liquidPressure/3
       net_gas_force += gas_force
-      liquidPressure = P_0 #- rho * g * v.x_a[2]
-      if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
-      liq_force = - liquidPressure * dualNormal  * dualArea
       net_liq_force += liq_force
       force = interf_force + gas_force + liq_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
@@ -221,15 +258,11 @@ def reduce_energy(HC, bV, forcePrev, posPrev, params, tau, print_out=False, pinn
         print('maxForce', maxForce)
         print('maxMove', maxMove)
       if np.linalg.norm(v.x_a)>3e-3: print('warning, vertex at ', v.x_a)
-  if maxForce>2*cdist: 
-    print('Warning: maxForce is greater than cdist')
-    print('cdist=',cdist)
-    print('unmerged vertices may crossover and the interface may overlap')
   print(t,total_bubble_volume,gasPressure,maxForce,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
   return HC, bV, forceDict, posDict
 
-def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0, cdist=-1):
+def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
 #Create a complex in the shape of a sphere with contact angle theta_p
   RadSphere = RadFoot / np.sin(theta_p)
   Cone = []
@@ -288,19 +321,13 @@ def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0, cdist=-1):
     z = RadSphere * np.cos(thet) - RadSphere * np.cos(theta_p)
     if abs(z) < RadSphere*1e-6: z = 0.0
     HC.V.move(v, tuple((x,y,z)))
-  if 0:#cdist>0: 
-    for i in range(6):
-      lenH=0
-      for v in HC.V: lenH+=1
-      print('merge',i,lenH)
-      HC.V.merge_all(cdist=cdist)
   # Rebuild set after moved vertices (appears to be needed)
   bV = set()
   for v in HC.V:
     if abs(v.x[2]) < RadSphere*1e-4: bV.add(v)
   return HC, bV
 
-def cone_init(RadFoot, Volume, NFoot=4, refinement=0, cdist=-1):
+def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
 #Make a cone shaped complex
   height = 3*Volume / np.pi / RadFoot**2
   print('height',height)
@@ -359,7 +386,6 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0, cdist=-1):
 # ### Parameters
 ## Numerical
 tau = 1 #0.001  # 0.1 works
-cdist=1e-3#7
 
 ## Physical
 Bo=.5#.0955#100*rho*g*RadSphere**2/gamma
@@ -402,17 +428,18 @@ for d in dt:
 #Volume = Volume*RadTop**3
 #RadFoot = r*RadTop
 RadFoot = RadTop
+minEdge = .1*RadTop
+maxEdge = .2*RadTop
 Volume = 2*np.pi/3*RadTop**3
 print(f'RadFoot = {RadFoot}')
-params =  (gamma, rho, g, RadFoot, theta_p)
 # Colour scheme for surfaces
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
-tInit=1100
+tInit=1490
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3, cdist=cdist)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
 else:
   HC, bV = load_complex(t)
 refine_edges(HC, .1*RadTop)
@@ -428,9 +455,9 @@ with open(fname, "a") as vol_txt:
   while t<=tInit+3000:
     t+=1
     print("t",t)
-    HC, bV, forcePrev, posPrev = reduce_energy(HC, bV, forcePrev, posPrev, params, tau=tau, pinned_line=pinned_line)
-    print('merge', HC.V.merge_nn(cdist=.05*RadTop, exclude=bV) )
-    print('refine', refine_edges(HC, .1*RadTop) )
+    if t>10: HC, bV, forcePrev, posPrev = reduce_energy(HC, bV, forcePrev, posPrev, tau=tau, pinned_line=pinned_line)
+    print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
+    print('refine', refine_edges(HC, maxEdge) )
     print('reconnect', reconnect_long_diagonals(HC))
     for v in HC.V:
       if len(v.nn)<2:  
@@ -439,5 +466,6 @@ with open(fname, "a") as vol_txt:
           HC.V.remove(v)
     if t%10==0:
       save_vert_positions(t)
+      #plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
