@@ -52,7 +52,7 @@ def triangle_prism_volume(HC):
 #Compute volume of the complex by splitting it into prisms over the surface.
 #To do: include the boundaries
   total_bubble_volume=0.0
-  #totalArea=0.0
+  total_bubble_area=0.0
   for v in HC.V:
     for vn1 in v.nn:
       for vn2 in v.nn:
@@ -61,11 +61,11 @@ def triangle_prism_volume(HC):
           #set the area vector pointing away from the z axis
           if sum(triArea[:3]*v.x_a[:3])<0: triArea = - triArea
           centroid = ( v.x_a[2] + vn1.x_a[2] + vn2.x_a[2] )/3
-          total_bubble_volume += triArea[2] * centroid /6 #+ np.dot(H, v.x_a) 
+          total_bubble_volume += triArea[2] * centroid/2/3 #+ np.dot(H, v.x_a) 
+          total_bubble_area += np.linalg.norm(triArea)/2/3
           #divide by 2 because vn1 and vn2 are equivalent
           #divide by 3 because each triangle is counted at the three vertices
-    #totalArea += np.linalg.norm(triArea)
-  return total_bubble_volume
+  return total_bubble_volume, total_bubble_area
 
 def save_neighbours(fname):
 #Make a text file listing the vertices (id from 0) in first column,
@@ -184,20 +184,18 @@ def cross_prod(a,b):
                     a[2]*b[0]-a[0]*b[2],
                     a[0]*b[1]-a[1]*b[0]  ])
 
-def reduce_energy(HC, bV, forcePrev, posPrev, tau, print_out=False, pinned_line=False):
-#Move vertices to reduce the surface, pressure, and gravitaional energy
-  maxMove=.05*minEdge
+def get_forces(HC, bV):
+#get the surface tension and pressure forces on the vertices
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
-  total_bubble_volume = triangle_prism_volume(HC)
-  print("total_bubble_volume",total_bubble_volume)
+  total_bubble_volume, total_bubble_area = triangle_prism_volume(HC)
+  print("total_bubble_volume, area",total_bubble_volume,total_bubble_area)
   if total_bubble_volume != total_bubble_volume: return -1
   gasPressure = P_0*Volume/total_bubble_volume
   forceDict = {}
   posDict = {}
-  nConcave=0
   maxForce = 0.0
   net_interf_force = np.array([0.0,0.0,0.0])
   net_liq_force = np.array([0.0,0.0,0.0])
@@ -216,7 +214,8 @@ def reduce_energy(HC, bV, forcePrev, posPrev, tau, print_out=False, pinned_line=
           if len(common_neigh)==1:
             midpoint = .5*v.x_a + .5*vn.x_a
             pullDirection = midpoint - common_neigh[0].x_a
-            ContactForce = gamma * cLineLen * pullDirection / np.linalg.norm(pullDirection)
+            ContactForce = gamma * cLineLen * pullDirection / np.linalg.norm(pullDirection) / 2
+            #divide by 2 as two vertices per edge
             net_solid_force += ContactForce
           else: print('len common_neigh',len(common_neigh))
     else:
@@ -238,29 +237,21 @@ def reduce_energy(HC, bV, forcePrev, posPrev, tau, print_out=False, pinned_line=
             if vn2 in vn1.nn:
               triArea = .5*cross_prod(vn1.x_a-v.x_a, vn2.x_a-v.x_a)
               #set the area vector pointing away from the z axis
-              centroid = ( v.x_a[2] + vn1.x_a[2] + vn2.x_a[2] )/3
-              if sum(triArea[:3]*v.x_a[:3])<0: triArea = - triArea
-              gas_force += triArea*gasPressure/3
-              liquidPressure = P_0 #- rho * g * centroid 
-              liq_force -= triArea*liquidPressure/3
+              centroid = ( v.x_a + vn1.x_a + vn2.x_a )/3
+              if sum( triArea[:3] * centroid[:3] ) < 0: triArea = - triArea
+              #divide by 2 because vn1 and vn2 can be swapped
+              #divide by 3 because each triangle contributes to 3 vertices
+              gas_force += triArea*gasPressure /2 /3
+              liquidPressure = P_0 #- rho * g * centroid[2]
+              liq_force -= triArea*liquidPressure /2 /3
       net_gas_force += gas_force
       net_liq_force += liq_force
       force = interf_force + gas_force + liq_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
       forceDict[v.x] = force
-  for v in HC.V:
-    if v.x in forceDict:
-      normFor = maxMove/maxForce*forceDict[v.x]
-      f_k = v.x_a + normFor
-      HC.V.move(v, tuple(f_k))
-      if np.linalg.norm(normFor)>2*maxMove: 
-        print('warning, normFor', np.linalg.norm(normFor))
-        print('maxForce', maxForce)
-        print('maxMove', maxMove)
-      if np.linalg.norm(v.x_a)>3e-3: print('warning, vertex at ', v.x_a)
   print(t,total_bubble_volume,gasPressure,maxForce,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
-  return HC, bV, forceDict, posDict
+  return forceDict, maxForce
 
 def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
 #Create a complex in the shape of a sphere with contact angle theta_p
@@ -384,17 +375,12 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   return HC, bV
 
 # ### Parameters
-## Numerical
-tau = 1 #0.001  # 0.1 works
-
-## Physical
 Bo=.5#.0955#100*rho*g*RadSphere**2/gamma
 P_0 = 101.325e3  # Pa, Ambient pressure
 gamma = 72.8e-3  # # N/m
 rho = 998.2071  # kg/m3, density, STP
 #rho_1 = 1.0 # kg/m3, density of air
 g = 9.81  # m/s2
-pinned_line = True  # pin the three phase contact if set to True
 theta_p = 0 #.9*np.pi #179 #2*(63 / 75) * 20 + 30  # 46.8  40 #IC
 RadTop = 1e-3#(Bo*gamma/rho/g)**.5 #250e-6 #8.426e-4 #300e-6
 delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
@@ -430,13 +416,14 @@ for d in dt:
 RadFoot = RadTop
 minEdge = .1*RadTop
 maxEdge = .2*RadTop
+maxMove=.05*minEdge
 Volume = 2*np.pi/3*RadTop**3
 print(f'RadFoot = {RadFoot}')
 # Colour scheme for surfaces
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
-
-tInit=1490
+timeInt='NewtonRapson'#'adaptiveEuler'#'AdamBash'#
+tInit=5180
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
@@ -451,11 +438,30 @@ with open(fname, "a") as vol_txt:
   print('saving',fname)
   forcePrev = {}
   posPrev = {}
+  x_new = 0
   #Surface energy minimisation
   while t<=tInit+3000:
     t+=1
     print("t",t)
-    if t>10: HC, bV, forcePrev, posPrev = reduce_energy(HC, bV, forcePrev, posPrev, tau=tau, pinned_line=pinned_line)
+    if t>10: 
+      forceDict, maxForce = get_forces(HC, bV)
+      for v in HC.V:
+        if timeInt=='NewtonRapson' and v.x in forcePrev:
+          #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
+          numer=0
+          denom=0
+          for i in range(3):
+            numer += forceDict[v.x][i] * (v.x_a[i] - posPrev[v.x][i]) 
+            denom += forceDict[v.x][i] * (forceDict[v.x][i] - forcePrev[v.x][i]) 
+          if np.linalg.norm(forceDict[v.x] * numer / denom) > maxMove: x_new = -1
+          else: x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
+        if v.x in forceDict and (x_new==-1 or timeInt=='adaptiveEuler'):
+          normFor = maxMove/maxForce*forceDict[v.x]
+          x_new = tuple(v.x_a + normFor)
+        else: continue
+        posPrev[x_new] = v.x_a
+        forcePrev[x_new] = forceDict[v.x]
+        HC.V.move(v, tuple(x_new))
     print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
     print('refine', refine_edges(HC, maxEdge) )
     print('reconnect', reconnect_long_diagonals(HC))
