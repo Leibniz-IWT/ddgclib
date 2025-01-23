@@ -375,7 +375,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   return HC, bV
 
 # ### Parameters
-Bo=.5#.0955#100*rho*g*RadSphere**2/gamma
+Bo=.0955#100*rho*g*RadSphere**2/gamma
 P_0 = 101.325e3  # Pa, Ambient pressure
 gamma = 72.8e-3  # # N/m
 rho = 998.2071  # kg/m3, density, STP
@@ -392,13 +392,18 @@ delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
 #height = RadFoot / np.sin(theta_p) * ( 1 - np.cos(theta_p) )
 #Volume = np.pi * (3 * RadFoot ** 2 * height + height ** 3) / 6.0  # Volume in m3 (Segment of a sphere, see note above)
 
-dt=[.01,.001,.0001]
-for d in dt:
+#dt=[.01,.001,.0001]
+#for d in dt:
+d=.0001
+Bos=range(-4,5,1)#[.2,.3,.4,.5,.6]
+for B in Bos:
+  Bo=0.1*B
   psi=0
   r=0
   z=0
   Volume=0
-  fname='data/adams'+str(d)[2:]+'.txt'
+  #fname='data/adams'+str(d)[2:]+'.txt'
+  fname='data/adams'+str(B)+'.txt'
   with open(fname, "w") as adams_txt:
     print('saving',fname)
     for i in range(int(4/d)):
@@ -408,7 +413,10 @@ for d in dt:
       Volume += np.pi*r**2*dz
       if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
       psi += d * (2 - Bo*z - np.sin(psi)/r)
-      if psi > np.pi/2: break
+      #if 2 - Bo*z - np.sin(psi)/r < 0: break
+      #if z < -.4: break
+      if psi > np.pi: break
+      if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
 
 # define params tuple used in solver:
 #Volume = Volume*RadTop**3
@@ -423,7 +431,7 @@ print(f'RadFoot = {RadFoot}')
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 timeInt='NewtonRapson'#'adaptiveEuler'#'AdamBash'#
-tInit=5180
+tInit=0
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
@@ -472,6 +480,6 @@ with open(fname, "a") as vol_txt:
           HC.V.remove(v)
     if t%10==0:
       save_vert_positions(t)
-      #plot_polyscope(HC)
+      plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
