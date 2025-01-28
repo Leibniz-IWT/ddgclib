@@ -197,12 +197,14 @@ def get_forces(HC, bV):
   forceDict = {}
   posDict = {}
   maxForce = 0.0
+  height = 0
   net_interf_force = np.array([0.0,0.0,0.0])
   net_liq_force = np.array([0.0,0.0,0.0])
   net_gas_force = np.array([0.0,0.0,0.0])
   net_solid_force= np.array([0.0,0.0,0.0])
   for v in HC.V:
     force = 0.0
+    height = max(height,v.x_a[2])
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
     if v in bV:
@@ -226,7 +228,7 @@ def get_forces(HC, bV):
         dualNormal = outward_normal(v,H)
         dualArea = sum(C_ij_cache[v.x])
         gas_force = gasPressure * dualNormal  * dualArea
-        liquidPressure = P_0 #- rho * g * v.x_a[2]
+        liquidPressure = P_0 - rho * g * v.x_a[2]
         if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
         liq_force = - liquidPressure * dualNormal  * dualArea
       else:
@@ -249,7 +251,7 @@ def get_forces(HC, bV):
       force = interf_force + gas_force + liq_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
       forceDict[v.x] = force
-  print(t,total_bubble_volume,gasPressure,maxForce,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
+  print(t,total_bubble_volume,gasPressure,maxForce,height,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
   return forceDict, maxForce
 
@@ -372,10 +374,11 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   bV = set()
   for v in HC.V:
     if abs(v.x[2]) < height*1e-4: bV.add(v)
+    #if v.x[0] > 1e-4: HC.V.remove(v)
   return HC, bV
 
 # ### Parameters
-Bo=.0955#100*rho*g*RadSphere**2/gamma
+#Bo=.1#.0955#100*rho*g*RadSphere**2/gamma
 P_0 = 101.325e3  # Pa, Ambient pressure
 gamma = 72.8e-3  # # N/m
 rho = 998.2071  # kg/m3, density, STP
@@ -395,8 +398,10 @@ delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
 #dt=[.01,.001,.0001]
 #for d in dt:
 d=.0001
-Bos=range(-4,5,1)#[.2,.3,.4,.5,.6]
-for B in Bos:
+#Bos=range(-4,5,1)#[.2,.3,.4,.5,.6]
+B=4
+if True:#False:
+#for B in Bos:
   Bo=0.1*B
   psi=0
   r=0
@@ -415,30 +420,31 @@ for B in Bos:
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
+      if psi > np.pi/2: break
       if psi > np.pi: break
       if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
 
 # define params tuple used in solver:
-#Volume = Volume*RadTop**3
-#RadFoot = r*RadTop
-RadFoot = RadTop
-minEdge = .1*RadTop
-maxEdge = .2*RadTop
-maxMove=.05*minEdge
-Volume = 2*np.pi/3*RadTop**3
+Volume = Volume*RadTop**3
+RadFoot = r*RadTop
+#RadFoot = RadTop
+minEdge = .1*RadFoot
+maxEdge = .2*RadFoot
+maxMove=.2*minEdge
+#Volume = 2*np.pi/3*RadTop**3
 print(f'RadFoot = {RadFoot}')
 # Colour scheme for surfaces
 db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
-timeInt='NewtonRapson'#'adaptiveEuler'#'AdamBash'#
+timeInt='adaptiveEuler'#'NewtonRapson'#'AdamBash'#
 tInit=0
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
 else:
   HC, bV = load_complex(t)
-refine_edges(HC, .1*RadTop)
-reconnect_long_diagonals(HC)
+#refine_edges(HC, .1*RadTop)
+#reconnect_long_diagonals(HC)
 plot_polyscope(HC)
 initial_volume = Volume
 fname='data/vol.txt'
@@ -451,9 +457,12 @@ with open(fname, "a") as vol_txt:
   while t<=tInit+3000:
     t+=1
     print("t",t)
-    if t>10: 
+    nRap = 0
+    euler = 0
+    if True:#t>100: 
       forceDict, maxForce = get_forces(HC, bV)
       for v in HC.V:
+        x_new = -1
         if timeInt=='NewtonRapson' and v.x in forcePrev:
           #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
           numer=0
@@ -461,15 +470,19 @@ with open(fname, "a") as vol_txt:
           for i in range(3):
             numer += forceDict[v.x][i] * (v.x_a[i] - posPrev[v.x][i]) 
             denom += forceDict[v.x][i] * (forceDict[v.x][i] - forcePrev[v.x][i]) 
-          if np.linalg.norm(forceDict[v.x] * numer / denom) > maxMove: x_new = -1
-          else: x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
+          if np.linalg.norm(forceDict[v.x] * numer / denom) < maxMove: 
+            x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
+            nRap += 1
         if v.x in forceDict and (x_new==-1 or timeInt=='adaptiveEuler'):
           normFor = maxMove/maxForce*forceDict[v.x]
           x_new = tuple(v.x_a + normFor)
-        else: continue
+          euler += 1
+        if x_new==-1: continue
         posPrev[x_new] = v.x_a
         forcePrev[x_new] = forceDict[v.x]
         HC.V.move(v, tuple(x_new))
+    print('nRap',nRap)
+    print('euler',euler)
     print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
     print('refine', refine_edges(HC, maxEdge) )
     print('reconnect', reconnect_long_diagonals(HC))
@@ -480,6 +493,6 @@ with open(fname, "a") as vol_txt:
           HC.V.remove(v)
     if t%10==0:
       save_vert_positions(t)
-      plot_polyscope(HC)
+      #plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()

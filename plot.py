@@ -1,12 +1,11 @@
 """
-Created 2021 Aug 13
+Created 2025 Jan 22
 @author: ianto-cannon
-plot statistics of drops in homogeneous isotropic turbulence
+plot bubbles on electrodes
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import matplotlib as mpl
 
 def AdamBash(): 
   plt.rcdefaults()
@@ -54,17 +53,16 @@ def AdamBash():
   ax.text(.3, -1.45, '$Bo=-0.4$',c=(1,0,0), fontsize=10, ha='center', va='center')
   ax.text(.2, -2.05, '$Bo=0$',c=(0,0,0), fontsize=10, ha='center', va='center', rotation=10)
   ax.text(.68, -3.15, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
-  fig.show()
-  fig.savefig('data/AdamBash.pdf', bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  fname='data/AdamBash.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
 def bubbleCoords(): 
   plt.rcdefaults()
   plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
-  root =  'data/'
-  Bo = 0 
-  fname = root + 'adams' + str(Bo) + '.txt'
+  fname = 'data/adams0.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
@@ -92,9 +90,132 @@ def bubbleCoords():
   ax.set_xlim([0,1.2])
   ax.set_ylim([-3.3,0])
   ax.text(*df[81,:]*1e3, '$s$',c=(0,0,0), fontsize=12, ha='center', va='center')
-  fig.show()
-  fig.savefig('data/bubbleCoords.pdf', bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  fname = 'data/bubbleCoords.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def cone(): 
+  import matplotlib.image as mpimg
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)
+  root =  'data/'
+  fname = root + 'cone.png'
+  image = mpimg.imread(fname)
+  shp = np.shape(image)
+  print('shp',shp)
+  ax.imshow(image)
+  ax.annotate('', xy=[.5*shp[1],150], xytext=[.5*shp[1],130],arrowprops=dict(arrowstyle="<|-",fc='k') )
+  ax.plot([ .5*shp[1], .5*shp[1] ], [1465,1370],c='k') 
+  ax.plot([ .5*shp[1], .5*shp[1] ], [160,300],c='k') 
+  ax.text(.5*shp[1], 110, "${z}$", fontsize=20, ha='center', va='center') 
+  plt.axis('off')
+  fname = 'data/cone.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def height(): 
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
+  fname = 'data/vol.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  ax.plot(df[:,0],df[:,4]*1000, color=(0,0,0))
+  ax.tick_params(which='both', direction='in', top=True, right=True)
+  ax.set_xlabel('$n$', rotation=0)
+  ax.set_ylabel('$h/R$', rotation=0)
+  ax.set_xlim([0,600])
+  ax.set_ylim([.9,2.1])
+  fname = 'data/height.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def vol(): 
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
+  fname = 'Bo0/vol.txt'
+  V0 = 2*np.pi*1e-9/3
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  ax.plot(df[:,0],df[:,1]/V0, '.', color=(0,0,0))
+  ax.tick_params(which='both', direction='in', top=True, right=True)
+  ax.set_xlabel('$n$', rotation=0)
+  ax.set_ylabel('$V/V_0$', rotation=0)
+  ax.set_xlim([0,540])
+  #ax.set_ylim([.9,2.1])
+  fname = 'data/vol.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def BoColour(Bo):
+  r=0
+  g=0
+  b=0
+  if Bo<0: r=-(Bo/4)**.5
+  if Bo>0: b= (Bo/4)**.5
+  return (r,g,b)
+
+def profile(): 
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
+  col=BoColour(0)
+  fname = 'BoP4And0/pos1120.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=(0,0,0))
+  fname = 'BoP4And0/adams0.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  for i in range(len(df[:,0])):
+    if df[i,0] > df[i+1,0]: break
+  ax.plot(df[:i+1,0]*1e3,(df[:i+1,1])*1e3, color=col)
+  col=BoColour(4)
+  fname = 'BoP4And0/pos1770.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=col)
+  fname = 'BoP4And0/adams4.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  for i in range(len(df[:,0])):
+    if df[i,0] > df[i+1,0]: break
+  #height = (-df[i,1] - df[i+1,1])/2
+  #print('height',height)
+  #ax.plot(df[:,0]*1e3,(df[:,1]+height)*1e3, color=col)
+  ax.plot(df[:i+1,0]*1e3,(df[:i+1,1])*1e3, color=col)
+  ax.tick_params(which='both', direction='in', top=True, right=True)
+  ax.set_xlabel('$r/R$', rotation=0)
+  ax.set_ylabel('$z/R$', rotation=0)
+  ax.yaxis.set_label_coords(-.15,.45)
+  ax.set_xlim([0,1.2])
+  ax.set_ylim([-1.35,0.1])
+  ax.set_aspect('equal', adjustable='box')
+  ax.text(.95, -1.05, '$Bo=0$',c=(0,0,0), fontsize=10, ha='center', va='center', rotation=0)
+  ax.text(1.07, -1.3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
+  fname = 'BoP4And0/profile.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
 #AdamBash()
-bubbleCoords()
+#bubbleCoords()
+#cone()
+#height()
+#vol()
+profile()
+
