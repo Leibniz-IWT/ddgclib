@@ -54,7 +54,7 @@ def triangle_prism_volume(HC):
 #To do: include the boundaries
   total_bubble_volume=0.0
   total_bubble_area=0.0
-  bubble_centroid=np.array([0.0,0.0,0.0])
+  bubble_centroid=0.0
   for v in HC.V:
     for vn1 in v.nn:
       for vn2 in v.nn:
@@ -196,9 +196,10 @@ def get_forces(HC, bV):
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  print("total_bubble_volume, area",total_bubble_volume,total_bubble_area)
   if total_bubble_volume != total_bubble_volume: return -1
-  gasPressure = P_0*Volume/total_bubble_volume
+  volHist.append(total_bubble_volume)
+  volHist.pop(0)
+  gasPressure = P_0*initial_volume*len(volHist)/sum(volHist)
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -213,6 +214,7 @@ def get_forces(HC, bV):
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
     if v in bV:
+      force = [0.0, 0.0, 0.0]
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
         if vn in bV:
@@ -248,23 +250,25 @@ def get_forces(HC, bV):
               if sum( triArea[:3] * centroid[:3] ) < 0: triArea = - triArea
               #divide by 2 because vn1 and vn2 can be swapped
               #divide by 3 because each triangle contributes to 3 vertices
-              gas_force += triArea*gasPressure /2 /3
-              liquidPressure = P_0 #- rho * g * centroid[2]
+              #gas_force += triArea*gasPressure /2 /3
+              liquidPressure = - rho * g * centroid[2] #+P_0
               liq_force -= triArea*liquidPressure /2 /3
       net_gas_force += gas_force
       net_liq_force += liq_force
-      force = interf_force + gas_force + liq_force 
+      force = interf_force + liq_force# + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
-      forceDict[v.x] = force
+    forceDict[v.x] = force
   print(t,total_bubble_volume,gasPressure,maxForce,height,E_0,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
   return forceDict, maxForce
 
 def get_force_array(posArray):
   HC_temp = HC
+  bV_temp = set()
   for i,v in enumerate(HC_temp.V):
     HC_temp.V.move(v, tuple(posArray[i*3:(i+1)*3]))
-  forceDict, maxF  = get_forces(HC_temp, [])
+    if posArray[i*3+2] < RadTop*1e-4: bV_temp.add(v)
+  forceDict, maxF  = get_forces(HC_temp, bV_temp)
   forArray = np.array([fi for f in forceDict.values() for fi in f])
   return forArray
 
@@ -275,9 +279,27 @@ def get_energy(posArray):
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
   idealGasEn = P_0*initial_volume*np.log(initial_volume/total_bubble_volume)
   interfaceEn = gamma*total_bubble_area
-  gravityEn = rho*g*bubble_centroid[2]
-  print('energy',idealGasEn + interfaceEn + gravityEn - E_0)
+  gravityEn = - rho*g*bubble_centroid*total_bubble_volume
+  fname='data/energy.txt'
+  with open(fname, "a") as en_txt:
+    print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
+    en_txt.flush()
   return idealGasEn + interfaceEn + gravityEn
+
+def correct_the_volume(HC, bV):
+#get the surface tension and pressure forces on the vertices
+  # Compute interior curvatures
+  (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+    HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+    Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
+  total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
+  shift = ( initial_volume - total_bubble_volume ) / total_bubble_area
+  for v in HC.V:
+    if v not in bV:
+      H = HNdA_i_cache[v.x]
+      dualNormal = outward_normal(v,H)
+      HC.V.move(v, tuple(v.x_a + dualNormal*shift))
+  return 
 
 def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
 #Create a complex in the shape of a sphere with contact angle theta_p
@@ -469,8 +491,9 @@ else:
   HC, bV = load_complex(t)
 #refine_edges(HC, .1*RadTop)
 #reconnect_long_diagonals(HC)
-#plot_polyscope(HC)
+plot_polyscope(HC)
 initial_volume = Volume
+volHist = [initial_volume]*10
 E_0 = 0
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
@@ -488,17 +511,16 @@ with open(fname, "a") as vol_txt:
       posArray = np.array([x for v in HC.V for x in v.x])
       E_0 = get_energy(posArray)
       forArray = get_force_array(posArray)
-      #print('typ posArray',type(posArray))
-      #print('typ forArray',type(forArray))
-      #print('posArray',posArray)
-      #print('forArray',forArray)
-      print('shp posArray',np.shape(posArray))
-      print('shp forArray',np.shape(forArray))
-      print('lineS',line_search(get_energy, get_force_array, posArray, forArray, maxiter=100, amax=.1*minEdge))
+      #alpha = line_search(get_energy, get_force_array, posArray, -forArray, amax=.1*minEdge)
+      #print(alpha)
       forceDict, maxForce = get_forces(HC, bV)
+      #if alpha[0] == None:
       x_new_array = posArray + forArray*maxMove/maxForce
+      #else:
+      #  x_new_array = posArray + forArray*alpha[0]
       for i,v in enumerate(HC.V):
         HC.V.move( v, tuple( x_new_array[3*i:3*(i+1)] ) )
+      correct_the_volume(HC, bV)
       if False:#for v in HC.V:
         x_new = -1
         if timeInt=='NewtonRapson' and v.x in forcePrev:
@@ -519,8 +541,8 @@ with open(fname, "a") as vol_txt:
         posPrev[x_new] = v.x_a
         forcePrev[x_new] = forceDict[v.x]
         HC.V.move(v, tuple(x_new))
-    print('nRap',nRap)
-    print('euler',euler)
+    #print('nRap',nRap)
+    #print('euler',euler)
     print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
     print('refine', refine_edges(HC, maxEdge) )
     print('reconnect', reconnect_long_diagonals(HC))
