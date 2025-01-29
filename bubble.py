@@ -214,7 +214,6 @@ def get_forces(HC, bV):
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
     if v in bV:
-      force = [0.0, 0.0, 0.0]
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
         if vn in bV:
@@ -257,7 +256,7 @@ def get_forces(HC, bV):
       net_liq_force += liq_force
       force = interf_force + liq_force# + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
-    forceDict[v.x] = force
+      forceDict[v.x] = force
   print(t,total_bubble_volume,gasPressure,maxForce,height,E_0,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
   vol_txt.flush()
   return forceDict, maxForce
@@ -272,11 +271,8 @@ def get_force_array(posArray):
   forArray = np.array([fi for f in forceDict.values() for fi in f])
   return forArray
 
-def get_energy(posArray):
-  HC_temp = HC
-  for i,v in enumerate(HC_temp.V):
-    HC_temp.V.move(v, tuple(posArray[i*3:(i+1)*3]))
-  total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
+def get_energy(HC):
+  total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   idealGasEn = P_0*initial_volume*np.log(initial_volume/total_bubble_volume)
   interfaceEn = gamma*total_bubble_area
   gravityEn = - rho*g*bubble_centroid*total_bubble_volume
@@ -445,7 +441,7 @@ delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
 #for d in dt:
 d=.0001
 #Bos=range(-4,5,1)#[.2,.3,.4,.5,.6]
-B=4
+B=-4
 if True:#False:
 #for B in Bos:
   Bo=0.1*B
@@ -505,44 +501,13 @@ with open(fname, "a") as vol_txt:
   while t<=tInit+3000:
     t+=1
     print("t",t)
-    nRap = 0
-    euler = 0
-    if True:#t>100: 
-      posArray = np.array([x for v in HC.V for x in v.x])
-      E_0 = get_energy(posArray)
-      forArray = get_force_array(posArray)
-      #alpha = line_search(get_energy, get_force_array, posArray, -forArray, amax=.1*minEdge)
-      #print(alpha)
-      forceDict, maxForce = get_forces(HC, bV)
-      #if alpha[0] == None:
-      x_new_array = posArray + forArray*maxMove/maxForce
-      #else:
-      #  x_new_array = posArray + forArray*alpha[0]
-      for i,v in enumerate(HC.V):
-        HC.V.move( v, tuple( x_new_array[3*i:3*(i+1)] ) )
-      correct_the_volume(HC, bV)
-      if False:#for v in HC.V:
-        x_new = -1
-        if timeInt=='NewtonRapson' and v.x in forcePrev:
-          #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
-          numer=0
-          denom=0
-          for i in range(3):
-            numer += forceDict[v.x][i] * (v.x_a[i] - posPrev[v.x][i]) 
-            denom += forceDict[v.x][i] * (forceDict[v.x][i] - forcePrev[v.x][i]) 
-          if np.linalg.norm(forceDict[v.x] * numer / denom) < maxMove: 
-            x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
-            nRap += 1
-        if v.x in forceDict and (x_new==-1 or timeInt=='adaptiveEuler'):
-          normFor = maxMove/maxForce*forceDict[v.x]
-          x_new = tuple(v.x_a + normFor)
-          euler += 1
-        if x_new==-1: continue
-        posPrev[x_new] = v.x_a
-        forcePrev[x_new] = forceDict[v.x]
-        HC.V.move(v, tuple(x_new))
-    #print('nRap',nRap)
-    #print('euler',euler)
+    forceDict, maxForce = get_forces(HC, bV)
+    for v in HC.V:
+      if v.x in forceDict:
+        normFor = maxMove/maxForce*forceDict[v.x]
+        HC.V.move(v, tuple(v.x_a + normFor))
+    correct_the_volume(HC, bV)
+    E_0 = get_energy(HC)
     print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
     print('refine', refine_edges(HC, maxEdge) )
     print('reconnect', reconnect_long_diagonals(HC))
@@ -553,6 +518,6 @@ with open(fname, "a") as vol_txt:
           HC.V.remove(v)
     if t%10==0:
       save_vert_positions(t)
-    #plot_polyscope(HC)
+      #plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
