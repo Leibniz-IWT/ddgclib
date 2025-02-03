@@ -184,7 +184,8 @@ def profile():
   ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
   #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
   col=BoColour(4)
-  fname = 'BoP4And0/pos1200.txt'
+  #fname = 'BoP4And0/pos1200.txt'
+  fname = 'BoP4And0/pos120.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
@@ -202,11 +203,17 @@ def profile():
   #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
   col=BoColour(-4)
   print('col',col)
-  fname = 'BoP4And0/pos450.txt'
+  #fname = 'BoP4And0/pos450.txt'
+  fname = 'BoP4And0/pos140.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col)
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, alpha=0.5)
+  fname = 'BoP4And0/pos210.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, mfc='None', alpha=0.5)
   fname = 'BoP4And0/adams-4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)

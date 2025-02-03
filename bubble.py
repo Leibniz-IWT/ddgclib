@@ -197,9 +197,7 @@ def get_forces(HC, bV):
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   if total_bubble_volume != total_bubble_volume: return -1
-  volHist.append(total_bubble_volume)
-  volHist.pop(0)
-  gasPressure = P_0*initial_volume*len(volHist)/sum(volHist)
+  gasPressure = P_0*initial_volume/total_bubble_volume
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -420,76 +418,51 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   return HC, bV
 
 # ### Parameters
-#Bo=.1#.0955#100*rho*g*RadSphere**2/gamma
+Bo=-.4 #Bond number
 P_0 = 101.325e3  # Pa, Ambient pressure
-gamma = 72.8e-3  # # N/m
-rho = 998.2071  # kg/m3, density, STP
-#rho_1 = 1.0 # kg/m3, density of air
-g = 9.81  # m/s2
-theta_p = 0 #.9*np.pi #179 #2*(63 / 75) * 20 + 30  # 46.8  40 #IC
-RadTop = 1e-3#(Bo*gamma/rho/g)**.5 #250e-6 #8.426e-4 #300e-6
-delPressu = 2*gamma/RadTop #Bo*gamma/g/RadTop**2
-#RadFoot = .1*RadSphere# 2e-6 #1e-4#((44 / 58) * 0.25 + 1.0) * 1e-3  # height mm --> m  Radius 10e-6
-#theta_p = np.pi - np.asin(RadFoot / RadSphere)
-#RadFoot = (180 - theta_p)*RadSphere
-#theta_p = theta_p * np.pi / 180.0
-#height =  ((3 / 58) * 0.25 + 0.5) * 1e-3  # height mm --> m 10e-6
-#height = RadFoot / np.sin(theta_p) * ( 1 - np.cos(theta_p) )
-#Volume = np.pi * (3 * RadFoot ** 2 * height + height ** 3) / 6.0  # Volume in m3 (Segment of a sphere, see note above)
+gamma = 72.8e-3  # N/m, surface tension
+g = 9.81  # m/s2 gravitational acceleration
+RadTop = 1e-3 #(Bo*gamma/rho/g)**.5 # m Radius of curvature of bubble top
+rho = Bo*gamma/g/RadTop**2 #998.2071 - 1.225 # kg/m3, density, STP
+print('rho',rho)
+theta_p = np.pi #contact angle, not used for pinned bubbles
 
-#dt=[.01,.001,.0001]
-#for d in dt:
 d=.0001
-#Bos=range(-4,5,1)#[.2,.3,.4,.5,.6]
-B=-4
-if True:#False:
-#for B in Bos:
-  Bo=0.1*B
-  psi=0
-  r=0
-  z=0
-  Volume=0
-  #fname='data/adams'+str(d)[2:]+'.txt'
-  fname='data/adams'+str(B)+'.txt'
-  with open(fname, "w") as adams_txt:
-    print('saving',fname)
-    for i in range(int(4/d)):
-      r += d * np.cos(psi)
-      dz = d * np.sin(psi)
-      z += dz
-      Volume += np.pi*r**2*dz
-      if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
-      psi += d * (2 - Bo*z - np.sin(psi)/r)
-      #if 2 - Bo*z - np.sin(psi)/r < 0: break
-      #if z < -.4: break
-      if psi > np.pi/2: break
-      if psi > np.pi: break
-      if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
+psi=0
+r=0
+z=0
+Volume=0
+fname='data/adams'+str(Bo)+'.txt'
+with open(fname, "w") as adams_txt:
+  print('saving',fname)
+  for i in range(int(4/d)):
+    r += d * np.cos(psi)
+    dz = d * np.sin(psi)
+    z += dz
+    Volume += np.pi*r**2*dz
+    if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
+    psi += d * (2 - Bo*z - np.sin(psi)/r)
+    #if 2 - Bo*z - np.sin(psi)/r < 0: break
+    #if z < -.4: break
+    if psi > np.pi/2: break
+    if psi > np.pi: break
+    if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
 
 # define params tuple used in solver:
 Volume = Volume*RadTop**3
 RadFoot = r*RadTop
-#RadFoot = RadTop
-minEdge = .1*RadFoot
-maxEdge = .2*RadFoot
+minEdge = .05*RadFoot
+maxEdge = 2*minEdge
 maxMove=.2*minEdge
-#Volume = 2*np.pi/3*RadTop**3
 print(f'RadFoot = {RadFoot}')
-# Colour scheme for surfaces
-db = np.array([129, 160, 189]) / 255  # Dark blue
-lb = np.array([176, 206, 234]) / 255  # Light blue
-timeInt='adaptiveEuler'#'NewtonRapson'#'AdamBash'#
-tInit=0
+tInit=240
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
 else:
   HC, bV = load_complex(t)
-#refine_edges(HC, .1*RadTop)
-#reconnect_long_diagonals(HC)
 plot_polyscope(HC)
 initial_volume = Volume
-volHist = [initial_volume]*10
 E_0 = 0
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
@@ -508,14 +481,17 @@ with open(fname, "a") as vol_txt:
         HC.V.move(v, tuple(v.x_a + normFor))
     correct_the_volume(HC, bV)
     E_0 = get_energy(HC)
-    print('merge', HC.V.merge_nn(cdist=minEdge, exclude=bV) )
-    print('refine', refine_edges(HC, maxEdge) )
-    print('reconnect', reconnect_long_diagonals(HC))
+    HC.V.merge_nn(cdist=minEdge, exclude=bV)
+    refine_edges(HC, maxEdge)
+    reconnect_long_diagonals(HC)
+    nVerts=0
     for v in HC.V:
+      nVerts+=1
       if len(v.nn)<2:  
           print('v.nn',v.nn)
           print('remove',v.x_a)
           HC.V.remove(v)
+    print('nVerts',nVerts)
     if t%10==0:
       save_vert_positions(t)
       #plot_polyscope(HC)
