@@ -2165,6 +2165,7 @@ class Complex:
             #if v in exclude:
             #    continue
             ind += 1
+            print('ind',ind)
             d_v0v1_set = set()
             # d_v1v2_set = set()  # Only used to track new vertices
             for v1, v1nn in zip(vnn, V1nn[ind]):
@@ -2175,6 +2176,7 @@ class Complex:
                 for v2 in vnnu:
                     pass
                     d_v1v2 = self.split_edge(v1.x, v2.x)
+                    print('split',v1.x, v2.x)
                     #d_v1v2 = self.split_edge(v.x, v2.x)  #IC 2024Feb4
                     d_v0v1.connect(d_v1v2)
                     # d_v1v2_set.add(d_v1v2)  # Only used to track new vertices
