@@ -1,5 +1,5 @@
 import numpy as np
-import scipy
+#import scipy
 from ._complex import Complex
 import matplotlib.pyplot as plot
 from mpl_toolkits.mplot3d import Axes3D

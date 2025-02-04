@@ -6,7 +6,6 @@ import copy
 import sys
 import numpy as np
 import polyscope as ps
-from scipy.optimize import line_search
 
 # Local library
 from ddgclib import *
@@ -386,21 +385,34 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
       if abs(fx) < 1e-15:
         f[i] = 0.0
   Cone = np.array(Cone)
+  # link the beginning and end of the boundary
   nn[1][1] = ind
   # Construct complex from the cone geometry:
   HC = construct_HC(Cone, nn)   
   v0 = HC.V[tuple(Cone[0])]
   # Compute boundary vertices
   V = set()
+  lenH = 0
   for v in HC.V:
     V.add(v)
+    lenH +=1
+    print('pos399',lenH,len(v.nn),v.x_a)
+  print('lenHc396',lenH)
+  plot_polyscope(HC)
   bV = V - set([v0])
-  #plot_polyscope(HC)
   for i in range(refinement):
     V = set()
     for v in HC.V:
       V.add(v)
-    HC.refine_all_star(exclude=bV)
+    print('lenbV',len(bV))
+    HC.refine_all_star()#exclude=bV)
+  lenH = 0
+  for v in HC.V:
+    lenH +=1
+    print('pos',lenH,len(v.nn),v.x_a)
+  print('lenHc410',lenH)
+  plot_polyscope(HC)
+  plot_polyscope(HC)
   #move refined vertices to circular cone
   for v in HC.V:
     z = v.x_a[2]
@@ -409,7 +421,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
     x = Rad* np.cos(phi)
     y = Rad* np.sin(phi)
     HC.V.move(v, tuple((x,y,z)))
-  #plot_polyscope(HC)
+  plot_polyscope(HC)
   # Rebuild set after moved vertices (appears to be needed)
   bV = set()
   for v in HC.V:
@@ -455,10 +467,10 @@ minEdge = .05*RadFoot
 maxEdge = 2*minEdge
 maxMove=.2*minEdge
 print(f'RadFoot = {RadFoot}')
-tInit=240
+tInit=0
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=3)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1)
 else:
   HC, bV = load_complex(t)
 plot_polyscope(HC)
@@ -494,6 +506,6 @@ with open(fname, "a") as vol_txt:
     print('nVerts',nVerts)
     if t%10==0:
       save_vert_positions(t)
-      #plot_polyscope(HC)
+      plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
