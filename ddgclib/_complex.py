@@ -2184,7 +2184,7 @@ class Complex:
                     #d_v1v2 = self.split_edge(v.x, v2.x)  #IC 2024Feb4
                     d_v0v1.connect(d_v1v2)
                     # d_v1v2_set.add(d_v1v2)  # Only used to track new vertices
-                print('splitCount',splitCount)
+            print('splitCount',splitCount)
 
         # Vnew = d_v0v1_set.union(d_v1v2_set)
         # print(f'Vnew = {Vnew}')
