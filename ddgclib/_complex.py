@@ -2162,7 +2162,7 @@ class Complex:
                 V1nn[ind].append(copy.copy(list(v1.nn)))
         ind = -1
         print('lenSelf64',len(list(self.V)))
-        for v, vnn in zip(reversed(V0l), reversed(V0nn)):
+        for v, vnn in zip(V0l, V0nn):
             #if v in exclude:
             #    continue
             ind += 1
