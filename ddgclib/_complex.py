@@ -2150,6 +2150,7 @@ class Complex:
         :param exclude: set, exclude subdividing any neighbours in this set
         :return:
         """
+        import numpy as np
         # Vcopy = copy.copy(self.HC.V)
         V0l = list(self.V)
         V0nn = []
@@ -2159,9 +2160,9 @@ class Complex:
             V1nn.append([])
             for v1 in v.nn:
                 V1nn[ind].append(copy.copy(list(v1.nn)))
-
         ind = -1
-        for v, vnn in zip(V0l, V0nn):
+        print('lenSelf64',len(list(self.V)))
+        for v, vnn in zip(reversed(V0l), reversed(V0nn)):
             #if v in exclude:
             #    continue
             ind += 1
@@ -2172,19 +2173,20 @@ class Complex:
             for v1, v1nn in zip(vnn, V1nn[ind]):
                 v1nn = set(v1nn)
                 vnnu = v1nn.intersection(vnn)
-                print('vnnu',len(vnnu))
+                #print('vnnu',len(vnnu))
                 d_v0v1 = self.split_edge(v.x, v1.x)
                 splitCount+=1
                 # d_v0v1_set.add(d_v0v1)
                 for v2 in vnnu:
-                    pass
                     d_v1v2 = self.split_edge(v1.x, v2.x)
                     #print('split',v1.x_a, v2.x_a)
                     splitCount+=1
                     #d_v1v2 = self.split_edge(v.x, v2.x)  #IC 2024Feb4
+                    print('connect dist',np.linalg.norm(d_v0v1.x_a-d_v1v2.x_a))
                     d_v0v1.connect(d_v1v2)
                     # d_v1v2_set.add(d_v1v2)  # Only used to track new vertices
-                print('splitCount',splitCount)
+                    print('lenSelf',len(list(self.V)))
+            #print('splitCount',splitCount)
 
         # Vnew = d_v0v1_set.union(d_v1v2_set)
         # print(f'Vnew = {Vnew}')
