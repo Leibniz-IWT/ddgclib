@@ -132,12 +132,11 @@ def refine_edges(HC, dist):
         common_neigh = list(v1.nn.intersection(v2.nn))
         #Only refine if the vertices are in a planar region
         if len(common_neigh) != 2: continue
-        if common_neigh[0] in to_split_1D: continue
-        if common_neigh[1] in to_split_1D: continue
+        if any(n in to_split_1D for n in common_neigh): continue
         to_split.append((v1,v2,*common_neigh))
         to_split_1D.extend((v1,v2,*common_neigh))
   if len(to_split)==0:return 0
-  for (v1, v2, v3, v4) in to_split:
+  for (v1, v2, *common_neigh) in to_split:
     v1.disconnect(v2)
     # Compute vertex on centre of edge:
     v_pos = 0.5*v1.x_a + 0.5*v2.x_a
@@ -145,22 +144,57 @@ def refine_edges(HC, dist):
     # Connect to original 2 vertices to the new centre vertex
     v_new.connect(v1)
     v_new.connect(v2)
-    v_new.connect(v3)
-    v_new.connect(v4)
+    for n in common_neigh:
+      v_new.connect(n)
   return len(to_split)
 
-def reconnect_long_diagonals(HC):
+def refine_boundaries(HC, bV, dist):
+#Put vertices on edges longer than dist.
+#Like fig 2a of Unverdi and Tryggvason J comp. phys. 1992.
+#Neighbouring edges are not refined.
+  to_split=[]
+  to_connect=[]
+  for i, v1 in enumerate(bV):
+    for v2 in v1.nn:
+      if v2 not in bV: continue
+      if (v2,v1) in to_split: continue
+      if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
+        common_neigh = list(v1.nn.intersection(v2.nn))
+        #Only refine if the vertices are in a planar region
+        if len(common_neigh) != 1: continue
+        #if any(n in to_split_1D for n in common_neigh): continue
+        if any(n in bV for n in common_neigh): continue
+        to_split.append((v1,v2))
+        to_connect.append(common_neigh[0])
+  if len(to_split)==0: return 0
+  for i in range(len(to_split)):
+    (v1, v2) = to_split[i]
+    n = to_connect[i]
+    v1.disconnect(v2)
+    # Compute vertex on centre of edge:
+    v_pos = 0.5*v1.x_a + 0.5*v2.x_a
+    v_new = HC.V[tuple(v_pos)]
+    # Connect to original 2 vertices to the new centre vertex
+    v_new.connect(v1)
+    v_new.connect(v2)
+    v_new.connect(n)
+    bV.add(v_new)
+  return len(to_split)
+
+def reconnect_long_diagonals(HC, bV):
 #Find bisected quadrilaterals and
 #Like fig 2c of Unverdi and Tryggvason J comp. phys. 1992.
 #Neighbouring edges are not refined.
   to_reconnect=[]
-  for i, v1 in enumerate(HC.V):
+  for v1 in HC.V:
     for v2 in v1.nn:
       common_neigh = list(v1.nn.intersection(v2.nn))
       #Only reconnect if the vertices are in a planar region
       if len(common_neigh) != 2: continue
       v3 = common_neigh[0]
       v4 = common_neigh[1]
+      #don't connect boundary verts
+      if v3 in bV and v4 in bV: continue
       common_neigh = list(v3.nn.intersection(v4.nn))
       if common_neigh != [v1,v2] and common_neigh != [v2,v1]: continue
       #Make sure quadrilaterals do not overlap
@@ -392,27 +426,31 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   v0 = HC.V[tuple(Cone[0])]
   # Compute boundary vertices
   V = set()
-  lenH = 0
-  for v in HC.V:
-    V.add(v)
-    lenH +=1
-    print('pos399',lenH,len(v.nn),v.x_a)
-  print('lenHc396',lenH)
-  plot_polyscope(HC)
+  #lenH = 0
+  #for v in HC.V:
+  #  V.add(v)
+  #  lenH +=1
+  #  print('pos399',lenH,len(v.nn),v.x_a)
+  #print('lenHc396',lenH)
+  #plot_polyscope(HC)
   bV = V - set([v0])
   for i in range(refinement):
     V = set()
     for v in HC.V:
       V.add(v)
-    print('lenbV',len(bV))
-    HC.refine_all_star()#exclude=bV)
-  lenH = 0
-  for v in HC.V:
-    lenH +=1
-    print('pos',lenH,len(v.nn),v.x_a)
-  print('lenHc410',lenH)
-  plot_polyscope(HC)
-  plot_polyscope(HC)
+    #print('lenbV',len(bV))
+    print('i',i)
+    #HC.refine_all_star()#exclude=bV)
+    refine_edges(HC, maxEdge/RadFoot)
+    refine_boundaries(HC, bV, maxEdge/RadFoot)
+    reconnect_long_diagonals(HC, bV)
+    #plot_polyscope(HC)
+  #lenH = 0
+  #for v in HC.V:
+  #  lenH +=1
+  #  print('pos',lenH,len(v.nn),v.x_a)
+  #print('lenHc410',lenH)
+  #plot_polyscope(HC)
   #move refined vertices to circular cone
   for v in HC.V:
     z = v.x_a[2]
@@ -421,11 +459,12 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
     x = Rad* np.cos(phi)
     y = Rad* np.sin(phi)
     HC.V.move(v, tuple((x,y,z)))
-  plot_polyscope(HC)
+  #plot_polyscope(HC)
   # Rebuild set after moved vertices (appears to be needed)
   bV = set()
   for v in HC.V:
     if abs(v.x[2]) < height*1e-4: bV.add(v)
+    if sum(abs(v.x_a[:])) < height*1e-4: HC.V.remove(v)
     #if v.x[0] > 1e-4: HC.V.remove(v)
   return HC, bV
 
@@ -463,16 +502,20 @@ with open(fname, "w") as adams_txt:
 # define params tuple used in solver:
 Volume = Volume*RadTop**3
 RadFoot = r*RadTop
-minEdge = .05*RadFoot
+minEdge = .1*RadFoot
 maxEdge = 2*minEdge
 maxMove=.2*minEdge
 print(f'RadFoot = {RadFoot}')
 tInit=0
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=100)
 else:
   HC, bV = load_complex(t)
+#lenH=0
+#for v in HC.V:
+#  lenH +=1
+#  print('pos479',lenH,len(v.nn),v.x_a)
 plot_polyscope(HC)
 initial_volume = Volume
 E_0 = 0
@@ -495,7 +538,8 @@ with open(fname, "a") as vol_txt:
     E_0 = get_energy(HC)
     HC.V.merge_nn(cdist=minEdge, exclude=bV)
     refine_edges(HC, maxEdge)
-    reconnect_long_diagonals(HC)
+    refine_boundaries(HC, bV, maxEdge)
+    reconnect_long_diagonals(HC, bV)
     nVerts=0
     for v in HC.V:
       nVerts+=1
@@ -506,6 +550,6 @@ with open(fname, "a") as vol_txt:
     print('nVerts',nVerts)
     if t%10==0:
       save_vert_positions(t)
-      plot_polyscope(HC)
+    #plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
