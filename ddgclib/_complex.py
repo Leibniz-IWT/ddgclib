@@ -1399,7 +1399,12 @@ class Complex:
     def split_edge(self, v1, v2):
         v1 = self.V[v1]
         v2 = self.V[v2]
-    #    print(f'splitting {v1.x} --- {v2.x}')
+        
+        #IC 2025Feb5 only split existing edges
+        #if v2 not in v1.nn: return -1
+        #if v1 not in v2.nn: return -1
+
+        # print(f'splitting {v1.x} --- {v2.x}')
         # Destroy original edge, if it exists:
         v1.disconnect(v2)
         # Compute vertex on centre of edge:
@@ -2161,31 +2166,34 @@ class Complex:
             for v1 in v.nn:
                 V1nn[ind].append(copy.copy(list(v1.nn)))
         ind = -1
-        print('lenSelf64',len(list(self.V)))
+        #print('lenSelf64',len(list(self.V)))
         for v, vnn in zip(V0l, V0nn):
             #if v in exclude:
             #    continue
             ind += 1
-            print('ind',ind)
+            #print('ind',ind)
             d_v0v1_set = set()
             # d_v1v2_set = set()  # Only used to track new vertices
-            splitCount=0
+            #splitCount=0
             for v1, v1nn in zip(vnn, V1nn[ind]):
                 v1nn = set(v1nn)
                 vnnu = v1nn.intersection(vnn)
                 #print('vnnu',len(vnnu))
                 d_v0v1 = self.split_edge(v.x, v1.x)
-                splitCount+=1
+                #print('v0v1',d_v0v1)
+                #splitCount+=1
                 # d_v0v1_set.add(d_v0v1)
                 for v2 in vnnu:
                     d_v1v2 = self.split_edge(v1.x, v2.x)
+                    #print('v1v2',d_v1v2)
                     #print('split',v1.x_a, v2.x_a)
-                    splitCount+=1
+                    #splitCount+=1
                     #d_v1v2 = self.split_edge(v.x, v2.x)  #IC 2024Feb4
-                    print('connect dist',np.linalg.norm(d_v0v1.x_a-d_v1v2.x_a))
-                    d_v0v1.connect(d_v1v2)
+                    if d_v0v1 != -1 and d_v1v2 != -1: 
+                      #print('connect dist',np.linalg.norm(d_v0v1.x_a-d_v1v2.x_a))
+                      d_v0v1.connect(d_v1v2)
                     # d_v1v2_set.add(d_v1v2)  # Only used to track new vertices
-                    print('lenSelf',len(list(self.V)))
+                    #print('lenSelf',len(list(self.V)))
             #print('splitCount',splitCount)
 
         # Vnew = d_v0v1_set.union(d_v1v2_set)
