@@ -427,24 +427,21 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   # Compute boundary vertices
   V = set()
   #lenH = 0
-  #for v in HC.V:
-  #  V.add(v)
+  for v in HC.V:
+    V.add(v)
   #  lenH +=1
   #  print('pos399',lenH,len(v.nn),v.x_a)
   #print('lenHc396',lenH)
   #plot_polyscope(HC)
   bV = V - set([v0])
   for i in range(refinement):
-    V = set()
-    for v in HC.V:
-      V.add(v)
     #print('lenbV',len(bV))
-    print('i',i)
-    #HC.refine_all_star()#exclude=bV)
-    refine_edges(HC, maxEdge/RadFoot)
-    refine_boundaries(HC, bV, maxEdge/RadFoot)
-    reconnect_long_diagonals(HC, bV)
-    #plot_polyscope(HC)
+    #print('lenH',len(list(HC.V)))
+    #print('i',i)
+    HC.refine_all_star()#exclude=bV)
+    #refine_edges(HC, maxEdge/RadFoot)
+    #refine_boundaries(HC, bV, maxEdge/RadFoot)
+    #reconnect_long_diagonals(HC, bV)
   #lenH = 0
   #for v in HC.V:
   #  lenH +=1
@@ -504,12 +501,13 @@ Volume = Volume*RadTop**3
 RadFoot = r*RadTop
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
-maxMove=.2*minEdge
+maxMove= minEdge*.5**4
+#maxMove=.1*minEdge**2/RadFoot
 print(f'RadFoot = {RadFoot}')
 tInit=0
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=100)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1)
 else:
   HC, bV = load_complex(t)
 #lenH=0
@@ -522,18 +520,17 @@ E_0 = 0
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
   print('saving',fname)
-  forcePrev = {}
-  posPrev = {}
-  x_new = 0
+  forceDict, maxForce0 = get_forces(HC, bV)
+  print("maxForce",maxForce0)
   #Surface energy minimisation
   while t<=tInit+3000:
     t+=1
-    print("t",t)
     forceDict, maxForce = get_forces(HC, bV)
     for v in HC.V:
       if v.x in forceDict:
-        normFor = maxMove/maxForce*forceDict[v.x]
+        normFor = maxMove/maxForce0*forceDict[v.x]
         HC.V.move(v, tuple(v.x_a + normFor))
+    E_0 = get_energy(HC)
     correct_the_volume(HC, bV)
     E_0 = get_energy(HC)
     HC.V.merge_nn(cdist=minEdge, exclude=bV)
@@ -544,10 +541,10 @@ with open(fname, "a") as vol_txt:
     for v in HC.V:
       nVerts+=1
       if len(v.nn)<2:  
-          print('v.nn',v.nn)
-          print('remove',v.x_a)
-          HC.V.remove(v)
-    print('nVerts',nVerts)
+        print('v.nn',v.nn)
+        print('remove',v.x_a)
+        HC.V.remove(v)
+    print('t',t,'nVerts',nVerts)
     if t%10==0:
       save_vert_positions(t)
     #plot_polyscope(HC)
