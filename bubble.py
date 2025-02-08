@@ -405,7 +405,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   #Make cone
   for phi in np.linspace(0.0, 2 * np.pi, NFoot + 1):
     ind += 1
-    Cone.append(np.array([np.sin(phi), np.cos(phi), 0])) #IC contact line circle
+    Cone.append(np.array([RadFoot*np.sin(phi), RadFoot*np.cos(phi), 0])) #IC contact line circle
     # Define connections:
     nn.append([])
     if ind > 0:
@@ -426,28 +426,19 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   v0 = HC.V[tuple(Cone[0])]
   # Compute boundary vertices
   V = set()
-  #lenH = 0
   for v in HC.V:
     V.add(v)
-  #  lenH +=1
-  #  print('pos399',lenH,len(v.nn),v.x_a)
-  #print('lenHc396',lenH)
-  #plot_polyscope(HC)
   bV = V - set([v0])
-  for i in range(refinement):
-    #print('lenbV',len(bV))
-    #print('lenH',len(list(HC.V)))
-    #print('i',i)
+  for i in range(20):
+    plot_polyscope(HC)
+    v1 = list(v0.nn)[0]
+    print('dist',sum((v0.x_a[:]-v1.x_a[:])**2))
+    if sum((v0.x_a[:]-v1.x_a[:])**2) < maxEdge**2: break
     HC.refine_all_star()#exclude=bV)
-    #refine_edges(HC, maxEdge/RadFoot)
-    #refine_boundaries(HC, bV, maxEdge/RadFoot)
+    HC.V.merge_all(cdist=.01*minEdge)
+    #refine_edges(HC, maxEdge)
+    #refine_boundaries(HC, bV, maxEdge)
     #reconnect_long_diagonals(HC, bV)
-  #lenH = 0
-  #for v in HC.V:
-  #  lenH +=1
-  #  print('pos',lenH,len(v.nn),v.x_a)
-  #print('lenHc410',lenH)
-  #plot_polyscope(HC)
   #move refined vertices to circular cone
   for v in HC.V:
     z = v.x_a[2]
@@ -456,7 +447,6 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
     x = Rad* np.cos(phi)
     y = Rad* np.sin(phi)
     HC.V.move(v, tuple((x,y,z)))
-  #plot_polyscope(HC)
   # Rebuild set after moved vertices (appears to be needed)
   bV = set()
   for v in HC.V:
