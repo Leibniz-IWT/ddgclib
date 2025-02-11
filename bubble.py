@@ -64,7 +64,7 @@ def triangle_prism_volume(HC):
           triangle_centroid = ( v.x_a[2] + vn1.x_a[2] + vn2.x_a[2] )/3
           prism_volume = triArea[2] * triangle_centroid/2/3 #+ np.dot(H, v.x_a) 
           total_bubble_volume += prism_volume
-          bubble_centroid += triangle_centroid*prism_volume
+          bubble_centroid += triangle_centroid*prism_volume/2
           total_bubble_area += np.linalg.norm(triArea)/2/3
           #divide by 2 because vn1 and vn2 are equivalent
           #divide by 3 because each triangle is counted at the three vertices
@@ -311,7 +311,7 @@ def get_energy(HC):
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
     en_txt.flush()
-  return idealGasEn + interfaceEn + gravityEn
+  return interfaceEn + gravityEn #idealGasEn + 
 
 def correct_the_volume(HC, bV):
 #get the surface tension and pressure forces on the vertices
@@ -328,7 +328,7 @@ def correct_the_volume(HC, bV):
       HC.V.move(v, tuple(v.x_a + dualNormal*shift))
   return 
 
-def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
+def spherical_cap_init(RadFoot, theta_p, NFoot=4):
 #Create a complex in the shape of a sphere with contact angle theta_p
   RadSphere = RadFoot / np.sin(theta_p)
   Cone = []
@@ -362,11 +362,11 @@ def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
   for v in HC.V:
     V.add(v)
   bV = V - set([v0])
-  for i in range(refinement):
-    V = set()
-    for v in HC.V:
-      V.add(v)
-    HC.refine_all_star(exclude=bV)
+  for i in range(20):
+    v1 = list(v0.nn)[0]
+    if sum((v0.x_a[:]-v1.x_a[:])**2) < (maxEdge/RadFoot)**2: break
+    HC.refine_all_star()#exclude=bV)
+    HC.V.merge_all(cdist=.01*minEdge)
   # Move to spherical cap
   #thetaResolve=.95*theta_p
   #thetaFoot=.01*theta_p
@@ -393,7 +393,7 @@ def spherical_cap_init(RadFoot, theta_p, NFoot=4, refinement=0):
     if abs(v.x[2]) < RadSphere*1e-4: bV.add(v)
   return HC, bV
 
-def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
+def cone_init(RadFoot, Volume, NFoot=4):
 #Make a cone shaped complex
   height = 3*Volume / np.pi / RadFoot**2
   print('height',height)
@@ -430,9 +430,7 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
     V.add(v)
   bV = V - set([v0])
   for i in range(20):
-    plot_polyscope(HC)
     v1 = list(v0.nn)[0]
-    print('dist',sum((v0.x_a[:]-v1.x_a[:])**2))
     if sum((v0.x_a[:]-v1.x_a[:])**2) < maxEdge**2: break
     HC.refine_all_star()#exclude=bV)
     HC.V.merge_all(cdist=.01*minEdge)
@@ -456,14 +454,14 @@ def cone_init(RadFoot, Volume, NFoot=4, refinement=0):
   return HC, bV
 
 # ### Parameters
-Bo=-.4 #Bond number
+Bo=0 #Bond number
 P_0 = 101.325e3  # Pa, Ambient pressure
 gamma = 72.8e-3  # N/m, surface tension
 g = 9.81  # m/s2 gravitational acceleration
 RadTop = 1e-3 #(Bo*gamma/rho/g)**.5 # m Radius of curvature of bubble top
 rho = Bo*gamma/g/RadTop**2 #998.2071 - 1.225 # kg/m3, density, STP
 print('rho',rho)
-theta_p = np.pi #contact angle, not used for pinned bubbles
+theta_p = np.pi/2 #contact angle
 
 d=.0001
 psi=0
@@ -491,52 +489,54 @@ Volume = Volume*RadTop**3
 RadFoot = r*RadTop
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
-maxMove= minEdge*.5**4
-#maxMove=.1*minEdge**2/RadFoot
+maxMove = .5*minEdge
 print(f'RadFoot = {RadFoot}')
 tInit=0
 t=tInit
 if tInit==0:
-  HC,bV = cone_init(RadFoot, Volume, NFoot=6, refinement=1)
+  #HC,bV = cone_init(RadFoot, Volume, NFoot=6)
+  HC,bV = spherical_cap_init(RadFoot, theta_p, NFoot=6)
 else:
   HC, bV = load_complex(t)
-#lenH=0
-#for v in HC.V:
-#  lenH +=1
-#  print('pos479',lenH,len(v.nn),v.x_a)
+print('vol area centroid', triangle_prism_volume(HC))
 plot_polyscope(HC)
+pastE = [0]*10
+prevE = [0]*10
+constMove = True
 initial_volume = Volume
-E_0 = 0
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
   print('saving',fname)
-  forceDict, maxForce0 = get_forces(HC, bV)
-  print("maxForce",maxForce0)
   #Surface energy minimisation
-  while t<=tInit+3000:
+  while t<=tInit+300:
+    if t%10==0: save_vert_positions(t)
+    E_0 = get_energy(HC)
     t+=1
+    if constMove:
+      HC.V.merge_nn(cdist=minEdge, exclude=bV)
+      refine_edges(HC, maxEdge)
+      refine_boundaries(HC, bV, maxEdge)
+      reconnect_long_diagonals(HC, bV)
+      nVerts=0
+      for v in HC.V:
+        nVerts+=1
+        if len(v.nn)<2:  
+          print('v.nn',v.nn)
+          print('remove',v.x_a)
+          HC.V.remove(v)
+      print('t',t,'nVerts',nVerts)
+      pastE.append(E_0)
+      prevE.append(pastE.pop(0))
+      prevE.pop(0)
+      if t> 20 and sum(prevE)/len(prevE) < sum(pastE)/len(pastE): constMove=False
     forceDict, maxForce = get_forces(HC, bV)
+    if constMove: alpha = maxMove/maxForce
+    else: alpha = 1e-1/gamma
     for v in HC.V:
       if v.x in forceDict:
-        normFor = maxMove/maxForce0*forceDict[v.x]
+        normFor = alpha*forceDict[v.x]
         HC.V.move(v, tuple(v.x_a + normFor))
     E_0 = get_energy(HC)
     correct_the_volume(HC, bV)
-    E_0 = get_energy(HC)
-    HC.V.merge_nn(cdist=minEdge, exclude=bV)
-    refine_edges(HC, maxEdge)
-    refine_boundaries(HC, bV, maxEdge)
-    reconnect_long_diagonals(HC, bV)
-    nVerts=0
-    for v in HC.V:
-      nVerts+=1
-      if len(v.nn)<2:  
-        print('v.nn',v.nn)
-        print('remove',v.x_a)
-        HC.V.remove(v)
-    print('t',t,'nVerts',nVerts)
-    if t%10==0:
-      save_vert_positions(t)
-    #plot_polyscope(HC)
 plot_polyscope(HC)
 plt.show()
