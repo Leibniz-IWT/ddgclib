@@ -1,7 +1,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8010952.svg)](https://doi.org/10.5281/zenodo.8010952)
 
 # ddgclib
-Experimental library for discrete differential geometry curvature in fluid simulations.
+Experimental library for discrete differential geometry curvature in fluid simulations, especially for useful for problems with complex and changing topologies.
 
 # Installation
 setup.py files are planned for a future release, currently the test cases can by run by cloning the entire repository:
