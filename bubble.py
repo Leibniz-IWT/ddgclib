@@ -492,7 +492,7 @@ minEdge = .1*RadFoot
 maxEdge = 2*minEdge
 maxMove = .5*minEdge**2/RadFoot
 print(f'RadFoot = {RadFoot}')
-tInit=1500
+tInit=0
 t=tInit
 if tInit==0:
   HC,bV = cone_init(RadFoot, Volume, NFoot=6)
@@ -504,11 +504,15 @@ plot_polyscope(HC)
 pastE = [np.nan]*10
 prevE = [np.nan]*10
 constMove = False
+timeInt='NewtonRapson'
 initial_volume = Volume
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
   print('saving',fname)
   #Surface energy minimisation
+  forcePrev = {}
+  posPrev = {}
+  x_new = 0
   while t<=tInit+300:
     if t%10==0: save_vert_positions(t)
     E_0 = get_energy(HC)
@@ -540,6 +544,23 @@ with open(fname, "a") as vol_txt:
       if v.x in forceDict:
         normFor = alpha*forceDict[v.x]
         HC.V.move(v, tuple(v.x_a + normFor))
+    #for v in HC.V:
+    #  if timeInt=='NewtonRapson' and v.x in forcePrev:
+    #    #f_k = v.x_a - force * (v.x_a - posPrev[v.x]) / (force - forcePrev[v.x]) 
+    #    numer=0
+    #    denom=0
+    #    for i in range(3):
+    #      numer += forceDict[v.x][i] * (v.x_a[i] - posPrev[v.x][i]) 
+    #      denom += forceDict[v.x][i] * (forceDict[v.x][i] - forcePrev[v.x][i]) 
+    #    if np.linalg.norm(forceDict[v.x] * numer / denom) > maxMove: x_new = -1
+    #    else: x_new = uple(v.x_a - forceDict[v.x] * numer / denom)
+    #  if v.x in forceDict and (x_new==-1 or timeInt=='adaptiveEuler'):
+    #    normFor = alpha*forceDict[v.x]
+    #    x_new = tuple(v.x_a + normFor)
+    #  else: continue
+    #  posPrev[x_new] = v.x_a
+    #  forcePrev[x_new] = forceDict[v.x]
+    #  HC.V.move(v, tuple(x_new))
     #E_0 = get_energy(HC)
     if t%10==0: save_vert_positions(str(t)+'uncor')
     #if constMove: correct_the_volume(HC, bV)
