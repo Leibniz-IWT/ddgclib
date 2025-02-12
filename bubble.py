@@ -230,7 +230,7 @@ def get_forces(HC, bV):
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   if total_bubble_volume != total_bubble_volume: return -1
-  gasPressure = P_0*initial_volume/total_bubble_volume
+  gasPressure = P_0 * (initial_volume/total_bubble_volume - 1)
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -280,12 +280,12 @@ def get_forces(HC, bV):
               if sum( triArea[:3] * centroid[:3] ) < 0: triArea = - triArea
               #divide by 2 because vn1 and vn2 can be swapped
               #divide by 3 because each triangle contributes to 3 vertices
-              #gas_force += triArea*gasPressure /2 /3
+              gas_force += triArea*gasPressure /2 /3
               liquidPressure = - rho * g * centroid[2] #+P_0
               liq_force -= triArea*liquidPressure /2 /3
       net_gas_force += gas_force
       net_liq_force += liq_force
-      force = interf_force + liq_force# + gas_force 
+      force = interf_force + liq_force + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
       forceDict[v.x] = force
   print(t,total_bubble_volume,gasPressure,maxForce,height,E_0,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
@@ -324,7 +324,8 @@ def correct_the_volume(HC, bV):
   for v in HC.V:
     if v not in bV:
       H = HNdA_i_cache[v.x]
-      dualNormal = outward_normal(v,H)
+      #dualNormal = outward_normal(v,H)
+      dualNormal = v.x_a/sum(v.x_a[:]**2)**.5
       HC.V.move(v, tuple(v.x_a + dualNormal*shift))
   return 
 
@@ -489,20 +490,20 @@ Volume = Volume*RadTop**3
 RadFoot = r*RadTop
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
-maxMove = .5*minEdge
+maxMove = .5*minEdge**2/RadFoot
 print(f'RadFoot = {RadFoot}')
-tInit=0
+tInit=1500
 t=tInit
 if tInit==0:
-  #HC,bV = cone_init(RadFoot, Volume, NFoot=6)
-  HC,bV = spherical_cap_init(RadFoot, theta_p, NFoot=6)
+  HC,bV = cone_init(RadFoot, Volume, NFoot=6)
+  #HC,bV = spherical_cap_init(RadFoot, theta_p, NFoot=6)
 else:
   HC, bV = load_complex(t)
 print('vol area centroid', triangle_prism_volume(HC))
 plot_polyscope(HC)
-pastE = [0]*10
-prevE = [0]*10
-constMove = True
+pastE = [np.nan]*10
+prevE = [np.nan]*10
+constMove = False
 initial_volume = Volume
 fname='data/vol.txt'
 with open(fname, "a") as vol_txt:
@@ -511,32 +512,36 @@ with open(fname, "a") as vol_txt:
   while t<=tInit+300:
     if t%10==0: save_vert_positions(t)
     E_0 = get_energy(HC)
+    print('t',t,'nVerts',len(list(HC.V)),'maxMove',maxMove)
     t+=1
     if constMove:
       HC.V.merge_nn(cdist=minEdge, exclude=bV)
       refine_edges(HC, maxEdge)
       refine_boundaries(HC, bV, maxEdge)
       reconnect_long_diagonals(HC, bV)
-      nVerts=0
       for v in HC.V:
-        nVerts+=1
         if len(v.nn)<2:  
           print('v.nn',v.nn)
           print('remove',v.x_a)
           HC.V.remove(v)
-      print('t',t,'nVerts',nVerts)
+      #if t> 20 and sum(prevE)/len(prevE) < sum(pastE)/len(pastE): constMove=False
+      if False:#sum(prevE)/len(prevE) < sum(pastE)/len(pastE): 
+        maxMove*=.5
+        E_0=np.nan
       pastE.append(E_0)
       prevE.append(pastE.pop(0))
       prevE.pop(0)
-      if t> 20 and sum(prevE)/len(prevE) < sum(pastE)/len(pastE): constMove=False
     forceDict, maxForce = get_forces(HC, bV)
     if constMove: alpha = maxMove/maxForce
-    else: alpha = 1e-1/gamma
+    else: 
+      alpha = 1e-1#/gamma
+      maxMove = alpha*maxForce
     for v in HC.V:
       if v.x in forceDict:
         normFor = alpha*forceDict[v.x]
         HC.V.move(v, tuple(v.x_a + normFor))
-    E_0 = get_energy(HC)
-    correct_the_volume(HC, bV)
+    #E_0 = get_energy(HC)
+    if t%10==0: save_vert_positions(str(t)+'uncor')
+    #if constMove: correct_the_volume(HC, bV)
 plot_polyscope(HC)
 plt.show()
