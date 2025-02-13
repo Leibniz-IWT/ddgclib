@@ -454,6 +454,16 @@ def cone_init(RadFoot, Volume, NFoot=4):
     #if v.x[0] > 1e-4: HC.V.remove(v)
   return HC, bV
 
+def remesh(HC, minEdge, maxEdge, bV=set()):
+  HC.V.merge_nn(cdist=minEdge, exclude=bV)
+  refine_edges(HC, maxEdge)
+  refine_boundaries(HC, bV, maxEdge)
+  reconnect_long_diagonals(HC, bV)
+  #Remove vertices that get disconnected due to merging
+  for v in HC.V:
+    if len(v.nn)<2: HC.V.remove(v)
+
+
 # ### Parameters
 Bo=0 #Bond number
 P_0 = 101.325e3  # Pa, Ambient pressure
