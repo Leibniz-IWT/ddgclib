@@ -457,7 +457,7 @@ def remesh(HC, minEdge, maxEdge, bV=set()):
     if len(v.nn)<2: HC.V.remove(v)
 
 
-def AdamsBashfortProfile(Bo, RadTop):
+def AdamsBashforthProfile(Bo, RadTop):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble and the radius of the contact patch.
