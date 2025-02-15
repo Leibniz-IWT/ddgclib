@@ -16,9 +16,8 @@ import polyscope as ps
 #from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 #from ddgclib._eos import *
 from ddgclib._plotting import plot_polyscope
-from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashfortProfile
-from ddgclib._integrators import Euler
-
+from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashforthProfile
+from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson
 
 # ### Parameters
 Bo=0 #Bond number
@@ -31,7 +30,7 @@ print('rho',params['rho'])
 
 
 # define params tuple used in solver:
-params['initial_volume'], RadFoot = AdamsBashfortProfile(Bo, RadTop)
+params['initial_volume'], RadFoot = AdamsBashforthProfile(Bo, RadTop)
 print(f'RadFoot = {RadFoot}')
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
@@ -41,5 +40,7 @@ if t==0: HC,bV = cone_init(RadFoot, params['initial_volume'], NFoot=6, maxEdge=m
 else: HC, bV = load_complex(t)
 #plot_polyscope(HC)
 print('vol area centroid', triangle_prism_volume(HC))
-Euler(HC, bV, params, t, 50, 0.1, implicitVolume=True, constMoveLen=True)
-#plot_polyscope(HC)
+#Euler(HC, bV, params, t, 20, .5*minEdge, implicitVolume=True, constMoveLen=True)
+AdamsBashforth(HC, bV, params, t, 20, .1, implicitVolume=False)
+#NewtonRaphson(HC, bV, params, t, 20, .1, implicitVolume=True)
+plot_polyscope(HC)
