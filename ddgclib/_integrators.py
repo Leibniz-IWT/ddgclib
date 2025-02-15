@@ -62,3 +62,21 @@ def NewtonRaphson(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, i
       forcePrev[x_new] = forceDict[v.x]
       HC.V.move(v, tuple(x_new))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+
+def LineSearch(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False, constMoveLen=False):
+#Reduce the interface energy by an Eulerian method
+#If implicitVolume, the volume is corrected at every timestep
+#If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
+  tInit=t
+  while t <= tInit+nSteps:
+    print('t',t)
+    if t%10==0: save_vert_positions(t, HC)
+    t+=1
+    if minEdge>0: remesh(HC,minEdge,maxEdge)
+    forceDict, maxForce = get_forces(HC, bV, t, params)
+    if not constMoveLen: maxForce=1
+    for v in HC.V:
+      if v.x in forceDict:
+        HC.V.move(v, tuple(v.x_a + stepSize*forceDict[v.x]/maxForce))
+    if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+  
