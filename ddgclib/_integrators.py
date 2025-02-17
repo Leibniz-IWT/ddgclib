@@ -26,7 +26,7 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t%10==0: save_vert_positions(t, HC)
+    if t%int(nSteps/10)==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC,minEdge,maxEdge)

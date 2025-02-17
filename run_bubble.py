@@ -35,14 +35,17 @@ print(f'RadFoot = {RadFoot}')
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
 maxMove = .5*minEdge**2/RadFoot
-t=200
+
+print('pressure length',3*RadFoot/params['P_0']/maxEdge**2)
+print('tension length',1/params['gamma'])
+
+t=0
 if t==0: HC,bV = cone_init(RadFoot, params['initial_volume'], NFoot=6, maxEdge=maxEdge)
 else: HC, bV = load_complex(t)
-#plot_polyscope(HC)
-print('vol area centroid', triangle_prism_volume(HC))
-#t = Euler(HC, bV, params, t, 100, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
-print('t44',t)
 plot_polyscope(HC)
+print('vol area centroid', triangle_prism_volume(HC))
+t = Euler(HC, bV, params, t, 100, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
+#plot_polyscope(HC)
 t = AdamsBashforth(HC, bV, params, t, 100, .2)
 #t = NewtonRaphson(HC, bV, params, t, 20, .1, implicitVolume=True)
 #t = lineSearch(HC, bV, params, t, 20, .5*minEdge)
