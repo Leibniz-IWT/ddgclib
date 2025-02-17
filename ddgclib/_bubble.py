@@ -1,7 +1,6 @@
 #Ianto Cannon 2025 Fab 13. 
 #Functions for calculating the interface shape of bubbles on surfaces
 import numpy as np
-
 from ddgclib._curvatures import HC_curvatures_sessile, construct_HC
 
 def sector_volume(HC):
@@ -195,6 +194,17 @@ def reconnect_long_diagonals(HC, bV):
     v3.connect(v4)
   return len(to_reconnect)
 
+def remesh(HC, minEdge, maxEdge, bV=set()):
+#Remesh into roughly equilateral triangles with a size between minEdge and maxEdge
+#Using the method in fig 2 of Unverdi and Tryggvason J comp. phys. 1992.
+  HC.V.merge_nn(cdist=minEdge, exclude=bV)
+  refine_edges(HC, maxEdge)
+  refine_boundaries(HC, bV, maxEdge)
+  reconnect_long_diagonals(HC, bV)
+  #Remove vertices that get disconnected due to merging
+  for v in HC.V:
+    if len(v.nn)<2: HC.V.remove(v)
+
 def outward_normal(vert, meanCurv):
 #Compute the normal, and ensure it points away from the z axis.
 #If the surface is flat we use the direction from the origin.
@@ -230,7 +240,7 @@ def get_forces(HC, bV, t, params):
   net_gas_force = np.array([0.0,0.0,0.0])
   net_solid_force= np.array([0.0,0.0,0.0])
   for v in HC.V:
-    force = 0.0
+    force = np.array([0.0,0.0,0.0])
     height = max(height,v.x_a[2])
     # Compute boundary movements
     # Note: boundaries are fixed for now, this is legacy:
@@ -277,35 +287,58 @@ def get_forces(HC, bV, t, params):
       net_liq_force += liq_force
       force = interf_force + liq_force + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
-      forceDict[v.x] = force
+    forceDict[v.x] = force
   with open('data/vol.txt', "a") as vol_txt:
     print(t,total_bubble_volume,gasPressure,maxForce,height,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
     vol_txt.flush()
   return forceDict, maxForce
 
-def get_force_array(posArray):
+def grad_energy(posArray, *args):
+#compute the gradient of the total energy wrt to the position of each vertex. 
+#I.e., an array of -force 
+#used by scipy line_search
+  (HC, bV, t, params) = args
   HC_temp = HC
   bV_temp = set()
-  for i,v in enumerate(HC_temp.V):
-    HC_temp.V.move(v, tuple(posArray[i*3:(i+1)*3]))
-    if posArray[i*3+2] < RadTop*1e-4: bV_temp.add(v)
-  forceDict, maxF  = get_forces(HC_temp, bV_temp)
+  for i,(v_temp, v) in enumerate(zip(HC_temp.V,HC.V)):
+    HC_temp.V.move(v_temp, tuple(posArray[i*3:(i+1)*3]))
+    if v in bV: bV_temp.add(v_temp)
+  forceDict, maxF  = get_forces(HC_temp, bV_temp, t, params)
   forArray = np.array([fi for f in forceDict.values() for fi in f])
-  return forArray
+  return - forArray
 
-def get_energy(HC):
+def get_energy(HC, t, params):
+#Compute the energy of the interface
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  idealGasEn = P_0*initial_volume*np.log(initial_volume/total_bubble_volume)
-  interfaceEn = gamma*total_bubble_area
-  gravityEn = - rho*g*bubble_centroid*total_bubble_volume
+  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  interfaceEn = params['gamma']*total_bubble_area
+  gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
   fname='data/energy.txt'
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
     en_txt.flush()
-  return interfaceEn + gravityEn #idealGasEn + 
+  return interfaceEn + gravityEn + idealGasEn 
+
+def get_energy_from_array(posArray, *args):
+#Compute the energy of the interface from an array of vertex positions.
+#used by scipy line_search
+  (HC, bV, t, params) = args
+  HC_temp = HC
+  for i, v_temp in enumerate(HC_temp.V):
+    HC_temp.V.move(v_temp, tuple(posArray[i*3:(i+1)*3]))
+  total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
+  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  interfaceEn = params['gamma']*total_bubble_area
+  gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
+  fname='data/energy.txt'
+  with open(fname, "a") as en_txt:
+    print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
+    en_txt.flush()
+  return idealGasEn + interfaceEn + gravityEn
+
 
 def correct_the_volume(HC, bV, target_volume):
-#get the surface tension and pressure forces on the vertices
+#Move the vertices out or in along the local normal to set the bubble volume
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
@@ -446,16 +479,6 @@ def cone_init(RadFoot, Volume, NFoot=4, maxEdge=-1):
     if sum(abs(v.x_a[:])) < height*1e-4: HC.V.remove(v)
     #if v.x[0] > 1e-4: HC.V.remove(v)
   return HC, bV
-
-def remesh(HC, minEdge, maxEdge, bV=set()):
-  HC.V.merge_nn(cdist=minEdge, exclude=bV)
-  refine_edges(HC, maxEdge)
-  refine_boundaries(HC, bV, maxEdge)
-  reconnect_long_diagonals(HC, bV)
-  #Remove vertices that get disconnected due to merging
-  for v in HC.V:
-    if len(v.nn)<2: HC.V.remove(v)
-
 
 def AdamsBashforthProfile(Bo, RadTop):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir

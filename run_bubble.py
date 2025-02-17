@@ -5,7 +5,7 @@
 #import copy
 #import sys
 import numpy as np
-import polyscope as ps
+#import polyscope as ps
 
 # Local library
 #from ddgclib import *
@@ -16,8 +16,8 @@ import polyscope as ps
 #from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 #from ddgclib._eos import *
 from ddgclib._plotting import plot_polyscope
-from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashforthProfile
-from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson
+from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashforthProfile, load_complex
+from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearch
 
 # ### Parameters
 Bo=0 #Bond number
@@ -35,12 +35,15 @@ print(f'RadFoot = {RadFoot}')
 minEdge = .1*RadFoot
 maxEdge = 2*minEdge
 maxMove = .5*minEdge**2/RadFoot
-t=0
+t=200
 if t==0: HC,bV = cone_init(RadFoot, params['initial_volume'], NFoot=6, maxEdge=maxEdge)
 else: HC, bV = load_complex(t)
 #plot_polyscope(HC)
 print('vol area centroid', triangle_prism_volume(HC))
-#Euler(HC, bV, params, t, 20, .5*minEdge, implicitVolume=True, constMoveLen=True)
-AdamsBashforth(HC, bV, params, t, 20, .1, implicitVolume=False)
-#NewtonRaphson(HC, bV, params, t, 20, .1, implicitVolume=True)
+#t = Euler(HC, bV, params, t, 100, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
+print('t44',t)
+plot_polyscope(HC)
+t = AdamsBashforth(HC, bV, params, t, 100, .2)
+#t = NewtonRaphson(HC, bV, params, t, 20, .1, implicitVolume=True)
+#t = lineSearch(HC, bV, params, t, 20, .5*minEdge)
 plot_polyscope(HC)

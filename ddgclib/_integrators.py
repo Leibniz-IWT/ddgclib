@@ -1,13 +1,14 @@
-from ddgclib._bubble import save_vert_positions, get_forces, correct_the_volume
+from ddgclib._bubble import save_vert_positions, get_forces, correct_the_volume, grad_energy, get_energy_from_array, get_energy, remesh
 
-def Euler(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False, constMoveLen=False):
+def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False, constMoveLen=False):
 #Reduce the interface energy by an Eulerian method
 #If implicitVolume, the volume is corrected at every timestep
 #If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
-  tInit=t
+  t = tInit
   while t <= tInit+nSteps:
     print('t',t)
     if t%10==0: save_vert_positions(t, HC)
+    get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC,minEdge,maxEdge)
     forceDict, maxForce = get_forces(HC, bV, t, params)
@@ -16,15 +17,17 @@ def Euler(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitV
       if v.x in forceDict:
         HC.V.move(v, tuple(v.x_a + stepSize*forceDict[v.x]/maxForce))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+  return t
   
-def AdamsBashforth(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
+def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
 #Reduce the interface energy by an Adams Bashforth method
 #The first iteration is Eulerian
-  tInit=t
   forcePrev = {}
+  t = tInit
   while t <= tInit+nSteps:
     print('t',t)
     if t%10==0: save_vert_positions(t, HC)
+    get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC,minEdge,maxEdge)
     forceDict, maxForce = get_forces(HC, bV, t, params)
@@ -35,11 +38,12 @@ def AdamsBashforth(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
       forcePrev[x_new] = forceDict[v.x]
       HC.V.move(v, tuple(x_new))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+  return t
   
-def NewtonRaphson(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
+def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
 #Find minimum interface energy by nSteps applications of the Newton Raphson method
 #stepSize is used for the first iteration, which is Eulerian
-  tInit=t
+  t = tInit
   forcePrev = {}
   posPrev = {}
   while t <= tInit+nSteps:
@@ -62,21 +66,35 @@ def NewtonRaphson(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, i
       forcePrev[x_new] = forceDict[v.x]
       HC.V.move(v, tuple(x_new))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+  return t
 
-def LineSearch(HC, bV, params, t, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False, constMoveLen=False):
-#Reduce the interface energy by an Eulerian method
+def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False):
+#Reduce the interface energy by an Eulerian method, where the step size is chosen at each timestep using a line search
 #If implicitVolume, the volume is corrected at every timestep
-#If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
-  tInit=t
+  from scipy.optimize import line_search
+  import numpy as np
+  t = tInit
   while t <= tInit+nSteps:
     print('t',t)
     if t%10==0: save_vert_positions(t, HC)
     t+=1
     if minEdge>0: remesh(HC,minEdge,maxEdge)
-    forceDict, maxForce = get_forces(HC, bV, t, params)
-    if not constMoveLen: maxForce=1
-    for v in HC.V:
-      if v.x in forceDict:
-        HC.V.move(v, tuple(v.x_a + stepSize*forceDict[v.x]/maxForce))
+    posArray = np.array([x for v in HC.V for x in v.x])
+    args=(HC, bV, t, params)
+    gradArray = grad_energy(posArray, *args)
+    #E0=get_energy_from_array(posArray, *args)
+    #E1=get_energy_from_array(posArray-1e-10*gradArray, *args)
+    #if E0<E1: 
+    #  gradArray *= -1
+    #  E1=get_energy_from_array(posArray-1e-10*gradArray, *args)
+    #  print('E0-E1',E0-E1)
+    ret = line_search(get_energy_from_array, grad_energy, posArray, -gradArray, args=args)#, amax=.1*minEdge)
+    if ret[0] == None: alpha = stepSize
+    else: 
+      alpha = ret[0]
+      print('alpha',alpha)
+    for i, v in enumerate(HC.V):
+      HC.V.move(v, tuple(posArray[3*i:3*(i+1)] - alpha*gradArray[3*i:3*(i+1)]))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
-  
+  return t
+ 
