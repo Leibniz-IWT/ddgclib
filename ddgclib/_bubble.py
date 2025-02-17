@@ -283,6 +283,10 @@ def get_forces(HC, bV, t, params):
               gas_force += triArea*gasPressure /2 /3
               liquidPressure = - params['rho'] * params['g'] * centroid[2] #+P_0
               liq_force -= triArea*liquidPressure /2 /3
+      #gasByInter = sum(gas_force[:]**2) / sum(interf_force[:]**2)
+      #if gasByInter>4:
+      #  #print('gasByInter',gasByInter)
+      #  gas_force *= 2/gasByInter**.5
       net_gas_force += gas_force
       net_liq_force += liq_force
       force = interf_force + liq_force + gas_force 
