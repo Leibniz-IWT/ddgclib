@@ -229,8 +229,11 @@ def get_forces(HC, bV, t, params):
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  if total_bubble_volume != total_bubble_volume: return -1
-  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
+  if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
+  #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
+  #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
+  #gasPressure = 2*params['gamma']/RadBub * (params['initial_volume']/total_bubble_volume)**(.5)
+  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(.5)
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -508,4 +511,4 @@ def AdamsBashforthProfile(Bo, RadTop):
       if psi > np.pi/2: break
       if psi > np.pi: break
       if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
-  return Volume*RadTop**3, r*RadTop
+  return Volume*RadTop**3, r*RadTop, z*RadTop
