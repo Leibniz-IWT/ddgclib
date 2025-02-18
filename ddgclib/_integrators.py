@@ -49,19 +49,21 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
   while t <= tInit+nSteps:
     print('t',t)
     if t%10==0: save_vert_positions(t, HC)
+    get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC,minEdge,maxEdge)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     for v in HC.V:
+      x_new = -1 
       if v.x in forcePrev:
         numer=0
         denom=0
         for i in range(3):
           numer += forceDict[v.x][i] * (v.x_a[i] - posPrev[v.x][i]) 
           denom += forceDict[v.x][i] * (forceDict[v.x][i] - forcePrev[v.x][i]) 
-          x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
-      elif v.x in forceDict: x_new = tuple(v.x_a + stepSize*forceDict[v.x])
-      else: continue
+        if sum( forceDict[v.x][:]**2 ) * (numer/denom)**2 < stepSize**2: x_new = tuple(v.x_a - forceDict[v.x] * numer / denom)
+      if v.x in forceDict and x_new==-1: x_new = tuple(v.x_a + stepSize*forceDict[v.x]/maxForce)
+      if x_new==-1: continue
       posPrev[x_new] = v.x_a
       forcePrev[x_new] = forceDict[v.x]
       HC.V.move(v, tuple(x_new))
