@@ -233,7 +233,7 @@ def get_forces(HC, bV, t, params):
   #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
   #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
   #gasPressure = 2*params['gamma']/RadBub * (params['initial_volume']/total_bubble_volume)**(.5)
-  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(.5)
+  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(400)
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -292,6 +292,10 @@ def get_forces(HC, bV, t, params):
       #  gas_force *= 2/gasByInter**.5
       net_gas_force += gas_force
       net_liq_force += liq_force
+      if v.x_a[2]>.00302:
+        print('liquidPressure',liquidPressure)
+        print('gasPressure',gasPressure)
+        print('HNdA_i_Cij',HNdA_i_Cij_cache[v.x])
       force = interf_force + liq_force + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
     forceDict[v.x] = force
@@ -463,7 +467,10 @@ def cone_init(RadFoot, Volume, NFoot=4, maxEdge=-1):
     V.add(v)
   bV = V - set([v0])
   if maxEdge>0:
-    for i in range(20):
+    #from ddgclib._plotting import plot_polyscope
+    for i in range(5):
+      #print('refine',i)
+      #plot_polyscope(HC)
       v1 = list(v0.nn)[0]
       if sum((v0.x_a[:]-v1.x_a[:])**2) < maxEdge**2: break
       HC.refine_all_star()#exclude=bV)
@@ -508,7 +515,7 @@ def AdamsBashforthProfile(Bo, RadTop):
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
-      if psi > np.pi/2: break
-      if psi > np.pi: break
+      #if psi > np.pi/2: break
+      #if psi > np.pi: break
       if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
   return Volume*RadTop**3, r*RadTop, z*RadTop
