@@ -7,7 +7,7 @@ from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashforthProf
 from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearch
 
 # ### Parameters
-Bo=0.4 #Bond number
+Bo=-0.4 #Bond number
 RadTop = 1e-3 #(Bo*gamma/rho/g)**.5 # m Radius of curvature of bubble top
 prm = {}  #dictionary of parameters
 prm['gamma'] = 72.8e-3  # N/m, surface tension
@@ -29,18 +29,18 @@ maxEdge = 2*minEdge
 print('pressure length',3*RadFoot/prm['P_0']/maxEdge**2)
 print('tension length',1/prm['gamma'])
 
-t=2000
+t=1500
 if t==0: HC,bV = cone_init(RadFoot, prm['initial_volume']/5, NFoot=6, maxEdge=maxEdge)
 else: HC, bV = load_complex(t)
 plot_polyscope(HC)
 print('vol area centroid', triangle_prism_volume(HC))
 #t = Euler(HC, bV, prm, t, 50, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
 #plot_polyscope(HC)
-#minEdge = .1*RadFoot
-#maxEdge = 2*minEdge
+minEdge = .2*RadFoot
+maxEdge = 2*minEdge
 #t = Euler(HC, bV, prm, t, 50, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
 #plot_polyscope(HC)
-t = AdamsBashforth(HC, bV, prm, t, 5000, .02, maxMove=.5*minEdge)
+t = AdamsBashforth(HC, bV, prm, t, 500, .1, maxMove=.5*minEdge)
 #t = NewtonRaphson(HC, bV, prm, t, 100, .5*minEdge)
 #t = lineSearch(HC, bV, prm, t, 20, .5*minEdge)
 plot_polyscope(HC)
