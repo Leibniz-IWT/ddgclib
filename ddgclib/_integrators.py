@@ -10,7 +10,7 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
     if t%10==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
-    if minEdge>0: remesh(HC,minEdge,maxEdge)
+    if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     if not constMoveLen: maxForce=1
     for v in HC.V:
@@ -19,22 +19,25 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
   return t
   
-def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
+def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, maxMove=-1, implicitVolume=False): 
 #Reduce the interface energy by an Adams Bashforth method
 #The first iteration is Eulerian
   forcePrev = {}
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t%int(nSteps/10)==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
-    if minEdge>0: remesh(HC,minEdge,maxEdge)
+    if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     for v in HC.V:
       if v.x not in forceDict: continue
       if v.x in forcePrev: x_new = tuple(v.x_a + stepSize*(1.5*forceDict[v.x] - 0.5*forcePrev[v.x]))
       else: x_new = tuple(v.x_a + stepSize*forceDict[v.x])
+      if maxMove>0 and sum((v.x_a[:]-x_new[:])**2) > maxMove**2: 
+        print('limit move to', maxMove)
+        x_new = tuple(v.x_a + maxMove*forceDict[v.x]/sum(forceDict[v.x][:]**2)**.5)
       forcePrev[x_new] = forceDict[v.x]
       HC.V.move(v, tuple(x_new))
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
@@ -51,7 +54,7 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
     if t%10==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
-    if minEdge>0: remesh(HC,minEdge,maxEdge)
+    if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     for v in HC.V:
       x_new = -1 
@@ -80,7 +83,7 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
     print('t',t)
     if t%10==0: save_vert_positions(t, HC)
     t+=1
-    if minEdge>0: remesh(HC,minEdge,maxEdge)
+    if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     posArray = np.array([x for v in HC.V for x in v.x])
     args=(HC, bV, t, params)
     gradArray = grad_energy(posArray, *args)
