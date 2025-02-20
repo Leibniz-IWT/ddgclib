@@ -167,14 +167,15 @@ def profile():
   plt.rcdefaults()
   plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
-  col=BoColour(0)
-  fname = 'BoP4And0/pos1120.txt'
+  col=BoColour(-0.4)
+  folName = 'BoMP4/'
+  fname = folName + 'pos2000.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
   height = 0#max(df[:,2])
   ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=(0,0,0))
-  fname = 'BoP4And0/adams0.txt'
+  fname = folName + 'adams-0.4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
@@ -184,14 +185,14 @@ def profile():
   ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
   #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
   col=BoColour(4)
-  #fname = 'BoP4And0/pos1200.txt'
-  fname = 'BoP4And0/pos120.txt'
+  folName = 'BoP4TallPressureAsVolTo400/'
+  fname = folName + 'pos2500.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
   height = 0#max(df[:,2])
   ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=col)
-  fname = 'BoP4And0/adams4.txt'
+  fname = folName + 'adams0.4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
@@ -201,23 +202,23 @@ def profile():
   #print('height',height)
   ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
   #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
-  col=BoColour(-4)
-  print('col',col)
-  #fname = 'BoP4And0/pos450.txt'
-  fname = 'BoP4And0/pos140.txt'
-  with open(fname, encoding = 'utf-8') as f:
-    print('loadin ',fname)
-    df = np.loadtxt(f)
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, alpha=0.5)
-  fname = 'BoP4And0/pos210.txt'
-  with open(fname, encoding = 'utf-8') as f:
-    print('loadin ',fname)
-    df = np.loadtxt(f)
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, mfc='None', alpha=0.5)
-  fname = 'BoP4And0/adams-4.txt'
-  with open(fname, encoding = 'utf-8') as f:
-    print('loadin ',fname)
-    df = np.loadtxt(f)
+  #col=BoColour(-4)
+  #print('col',col)
+  ##fname = 'BoP4And0/pos450.txt'
+  #fname = 'BoP4And0/pos140.txt'
+  #with open(fname, encoding = 'utf-8') as f:
+  #  print('loadin ',fname)
+  #  df = np.loadtxt(f)
+  #ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, alpha=0.5)
+  #fname = 'BoP4And0/pos210.txt'
+  #with open(fname, encoding = 'utf-8') as f:
+  #  print('loadin ',fname)
+  #  df = np.loadtxt(f)
+  #ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, mfc='None', alpha=0.5)
+  #fname = 'BoP4And0/adams-4.txt'
+  #with open(fname, encoding = 'utf-8') as f:
+  #  print('loadin ',fname)
+  #  df = np.loadtxt(f)
   #for i in range(len(df[:,0])):
   #  if df[i,0] > df[i+1,0]: break
   #height = (-df[i,1] - df[i+1,1])/2
@@ -232,7 +233,7 @@ def profile():
   ax.set_aspect('equal', adjustable='box')
   #ax.text(.95, -1.05, '$Bo=0$',c=(0,0,0), fontsize=10, ha='center', va='center', rotation=0)
   #ax.text(1.07, -1.3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
-  fname = 'BoP4And0/profile.pdf'
+  fname = 'profile.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
