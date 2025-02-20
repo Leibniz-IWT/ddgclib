@@ -233,7 +233,7 @@ def get_forces(HC, bV, t, params):
   #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
   #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
   #gasPressure = 2*params['gamma']/RadBub * (params['initial_volume']/total_bubble_volume)**(.5)
-  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(400)
+  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(1000)
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -292,10 +292,10 @@ def get_forces(HC, bV, t, params):
       #  gas_force *= 2/gasByInter**.5
       net_gas_force += gas_force
       net_liq_force += liq_force
-      if v.x_a[2]>.00302:
-        print('liquidPressure',liquidPressure)
-        print('gasPressure',gasPressure)
-        print('HNdA_i_Cij',HNdA_i_Cij_cache[v.x])
+      #if v.x_a[2]>.00302:
+      #  print('liquidPressure',liquidPressure)
+      #  print('gasPressure',gasPressure)
+      #  print('HNdA_i_Cij',HNdA_i_Cij_cache[v.x])
       force = interf_force + liq_force + gas_force 
       maxForce=max( maxForce, np.linalg.norm(force) ) 
     forceDict[v.x] = force
@@ -511,11 +511,12 @@ def AdamsBashforthProfile(Bo, RadTop):
       dz = d * np.sin(psi)
       z += dz
       Volume += np.pi*r**2*dz
-      if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
+      #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
+      print(r*RadTop, -z*RadTop, file=adams_txt)
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
       #if psi > np.pi/2: break
-      #if psi > np.pi: break
+      if psi > np.pi: break
       if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
   return Volume*RadTop**3, r*RadTop, z*RadTop
