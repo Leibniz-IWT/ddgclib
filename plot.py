@@ -167,72 +167,42 @@ def profile():
   plt.rcdefaults()
   plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
-  col=BoColour(-0.4)
+  col=BoColour(-4)
   folName = 'BoMP4/'
   fname = folName + 'pos2000.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  height = 0#max(df[:,2])
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=(0,0,0))
+  height = max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', mec=col, mfc='None', mew=.2, alpha=.5)
   fname = folName + 'adams-0.4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  for i in range(len(df[:,0])):
-    if df[i,0] > df[i+1,0]: break
-  height = (-df[i,1] - df[i+1,1])/2
-  ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
-  #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
+  height = 0#-df[-1,1]
+  ax.plot(df[:,0]*1e3, (df[:,1]+height)*1e3, color=col, alpha=.5)
   col=BoColour(4)
   folName = 'BoP4TallPressureAsVolTo400/'
   fname = folName + 'pos2500.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  height = 0#max(df[:,2])
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', color=col)
+  height = max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1e3, (df[:,2]-height)*1e3, '.', mec=col, mfc='None', mew=.2, alpha=.5)
   fname = folName + 'adams0.4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  for i in range(len(df[:,0])):
-    if df[i,0] > df[i+1,0]: break
-  height = (-df[i,1] - df[i+1,1])/2
-  #print('height',height)
-  ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
-  #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]-df[i+1,1])*1e3, color=col)
-  #col=BoColour(-4)
-  #print('col',col)
-  ##fname = 'BoP4And0/pos450.txt'
-  #fname = 'BoP4And0/pos140.txt'
-  #with open(fname, encoding = 'utf-8') as f:
-  #  print('loadin ',fname)
-  #  df = np.loadtxt(f)
-  #ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, alpha=0.5)
-  #fname = 'BoP4And0/pos210.txt'
-  #with open(fname, encoding = 'utf-8') as f:
-  #  print('loadin ',fname)
-  #  df = np.loadtxt(f)
-  #ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2])*1000, '.', color=col, mfc='None', alpha=0.5)
-  #fname = 'BoP4And0/adams-4.txt'
-  #with open(fname, encoding = 'utf-8') as f:
-  #  print('loadin ',fname)
-  #  df = np.loadtxt(f)
-  #for i in range(len(df[:,0])):
-  #  if df[i,0] > df[i+1,0]: break
-  #height = (-df[i,1] - df[i+1,1])/2
-  #ax.plot(df[:i+1,0]*1e3,(df[:i+1,1]+height)*1e3, color=col)
-  ax.plot(df[:,0]*1e3,(df[:,1]-df[-1,1])*1e3, color=col)
+  height = 0#-df[-1,1]
+  ax.plot(df[:,0]*1e3, (df[:,1]+height)*1e3, color=col, alpha=.5)
   ax.tick_params(which='both', direction='in', top=True, right=True)
-  ax.set_xlabel('$r/R$', rotation=0)
+  ax.set_xlabel('$r/R$', rotation=0, labelpad=-5)
   ax.set_ylabel('$z/R$', rotation=0)
-  ax.yaxis.set_label_coords(-.15,.45)
-  ax.set_ylim([0,1.3])
+  ax.set_ylim([-3.1,0.1])
   ax.set_xlim([0,1.2])
   ax.set_aspect('equal', adjustable='box')
-  #ax.text(.95, -1.05, '$Bo=0$',c=(0,0,0), fontsize=10, ha='center', va='center', rotation=0)
-  #ax.text(1.07, -1.3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
+  ax.text(.3, -1.45, '$Bo=-0.4$',c=(1,0,0), fontsize=10, ha='center', va='center')
+  ax.text(.4, -3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
   fname = 'profile.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)

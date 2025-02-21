@@ -3,8 +3,9 @@
 
 import numpy as np
 from ddgclib._plotting import plot_polyscope
-from ddgclib._bubble import triangle_prism_volume, cone_init, AdamsBashforthProfile, load_complex
+from ddgclib._bubble import AdamsBashforthProfile, load_complex
 from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearch
+from test_cases.volume import cone_init
 
 # ### Parameters
 Bo=-0.4 #Bond number
@@ -29,7 +30,7 @@ maxEdge = 2*minEdge
 print('pressure length',3*RadFoot/prm['P_0']/maxEdge**2)
 print('tension length',1/prm['gamma'])
 
-t=1500
+t=0
 if t==0: HC,bV = cone_init(RadFoot, prm['initial_volume']/5, NFoot=6, maxEdge=maxEdge)
 else: HC, bV = load_complex(t)
 plot_polyscope(HC)
