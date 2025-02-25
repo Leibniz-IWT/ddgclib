@@ -3,7 +3,7 @@
 #Adapted from code written by Stefan Endres
 import numpy as np
 from ddgclib._curvatures import HC_curvatures_sessile, construct_HC
-from test_cases.volume import triangle_prism_volume, cross_prod
+from ddgclib._volume import triangle_prism_volume, cross_prod
 
 def save_neighbours(fname,HC):
 #Make a text file listing the vertices (id from 0) in first column,
@@ -161,11 +161,12 @@ def get_forces(HC, bV, t, params):
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
+  #print(t,'vol',total_bubble_volume)
   if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
-  #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
+  #gasPressure = params['P_in'] * (params['initial_volume']/total_bubble_volume - 1)
   #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
   #gasPressure = 2*params['gamma']/RadBub * (params['initial_volume']/total_bubble_volume)**(.5)
-  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**(1000)
+  gasPressure = params['P_in'] * (params['initial_volume']/total_bubble_volume)**5
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -200,7 +201,7 @@ def get_forces(HC, bV, t, params):
         dualNormal = outward_normal(v,H)
         dualArea = sum(C_ij_cache[v.x])
         gas_force = gasPressure * dualNormal  * dualArea
-        liquidPressure = P_0 - rho * g * v.x_a[2]
+        liquidPressure = P_out - rho * g * v.x_a[2]
         if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
         liq_force = - liquidPressure * dualNormal  * dualArea
       else:
@@ -216,7 +217,8 @@ def get_forces(HC, bV, t, params):
               #divide by 2 because vn1 and vn2 can be swapped
               #divide by 3 because each triangle contributes to 3 vertices
               gas_force += triArea*gasPressure /2 /3
-              liquidPressure = - params['rho'] * params['g'] * centroid[2] #+P_0
+              liquidPressure = - params['rho'] * params['g'] * centroid[2] + params['P_out']
+              if liquidPressure<0: raise ValueError('bubble is too tall, height =', centroid[2])
               liq_force -= triArea*liquidPressure /2 /3
       #gasByInter = sum(gas_force[:]**2) / sum(interf_force[:]**2)
       #if gasByInter>4:
@@ -232,7 +234,7 @@ def get_forces(HC, bV, t, params):
       maxForce=max( maxForce, np.linalg.norm(force) ) 
     forceDict[v.x] = force
   with open('data/vol.txt', "a") as vol_txt:
-    print(t,total_bubble_volume,gasPressure,maxForce,height,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
+    print(t,total_bubble_volume,gasPressure,maxForce,height,bubble_centroid,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
     vol_txt.flush()
   return forceDict, maxForce
 
@@ -253,7 +255,7 @@ def grad_energy(posArray, *args):
 def get_energy(HC, t, params):
 #Compute the energy of the interface
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  idealGasEn = params['P_in']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
   gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
   fname='data/energy.txt'
@@ -270,7 +272,7 @@ def get_energy_from_array(posArray, *args):
   for i, v_temp in enumerate(HC_temp.V):
     HC_temp.V.move(v_temp, tuple(posArray[i*3:(i+1)*3]))
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
-  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  idealGasEn = params['P_in']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
   gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
   fname='data/energy.txt'
@@ -299,26 +301,30 @@ def correct_the_volume(HC, bV, target_volume):
 def AdamsBashforthProfile(Bo, RadTop):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
-#Return the volume of the bubble and the radius of the contact patch.
+#Return the volume of the bubble, radius of the contact patch, height of bubble 
+#and height of the centre of mass.
   d=.0001
   psi=0
   r=0
   z=0
   Volume=0
+  centroid=0
   fname='data/adams'+str(Bo)+'.txt'
   with open(fname, "w") as adams_txt:
     print('saving',fname)
-    for i in range(int(4/d)):
+    for i in range(int(10/d)):
       r += d * np.cos(psi)
       dz = d * np.sin(psi)
       z += dz
       Volume += np.pi*r**2*dz
+      centroid += z*np.pi*r**2*dz
       #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
       print(r*RadTop, -z*RadTop, file=adams_txt)
       psi += d * (2 - Bo*z - np.sin(psi)/r)
-      #if 2 - Bo*z - np.sin(psi)/r < 0: break
+      if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
       #if psi > np.pi/2: break
       if psi > np.pi: break
       if psi < np.pi/2 and 2 - Bo*z - np.sin(psi)/r < 0: break
-  return Volume*RadTop**3, r*RadTop, z*RadTop
+  centroid /= Volume
+  return Volume*RadTop**3, r*RadTop, z*RadTop, centroid*RadTop

@@ -182,8 +182,9 @@ def profile():
   height = 0#-df[-1,1]
   ax.plot(df[:,0]*1e3, (df[:,1]+height)*1e3, color=col, alpha=.5)
   col=BoColour(4)
-  folName = 'BoP4TallPressureAsVolTo400/'
-  fname = folName + 'pos2500.txt'
+  #folName = 'BoP4TallPressureAsVolTo400/'
+  folName = 'data/'
+  fname = folName + 'pos500.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
@@ -198,7 +199,7 @@ def profile():
   ax.tick_params(which='both', direction='in', top=True, right=True)
   ax.set_xlabel('$r/R$', rotation=0, labelpad=-5)
   ax.set_ylabel('$z/R$', rotation=0)
-  ax.set_ylim([-3.1,0.1])
+  #ax.set_ylim([-3.1,0.1])
   ax.set_xlim([0,1.2])
   ax.set_aspect('equal', adjustable='box')
   ax.text(.3, -1.45, '$Bo=-0.4$',c=(1,0,0), fontsize=10, ha='center', va='center')
