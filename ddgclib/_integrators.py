@@ -4,13 +4,15 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
 #Reduce the interface energy by an Eulerian method
 #If implicitVolume, the volume is corrected at every timestep
 #If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
+  #from ddgclib._plotting import plot_polyscope
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t%10==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
+    #plot_polyscope(HC)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     if not constMoveLen: maxForce=1
     for v in HC.V:
@@ -51,7 +53,7 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
   posPrev = {}
   while t <= tInit+nSteps:
     print('t',t)
-    if t%10==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
@@ -81,7 +83,7 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t%10==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: save_vert_positions(t, HC)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     posArray = np.array([x for v in HC.V for x in v.x])
