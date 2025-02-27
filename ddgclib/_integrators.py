@@ -24,11 +24,14 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
 def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, maxMove=-1, implicitVolume=False): 
 #Reduce the interface energy by an Adams Bashforth method
 #The first iteration is Eulerian
+  from ddgclib._plotting import plot_polyscope
   forcePrev = {}
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t*10%nSteps==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: 
+      save_vert_positions(t, HC)
+      plot_polyscope(HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
