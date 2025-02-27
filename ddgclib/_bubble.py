@@ -152,6 +152,15 @@ def remesh(HC, minEdge, maxEdge, bV=set()):
   for v in HC.V:
     if len(v.nn)<2: HC.V.remove(v)
 
+def move(v, pos, HC, bV):
+#Function wrapper which preserves the list of boundary vertices
+  if v in bV: 
+    bV.remove(v)
+    HC.V.move(v, tuple(pos))
+    bV.add(v)
+  else:
+    HC.V.move(v, tuple(pos))
+
 def get_forces(HC, bV, t, params):
 #get the surface tension and pressure forces on the vertices
   RadFoot=1
@@ -193,6 +202,33 @@ def get_forces(HC, bV, t, params):
             #divide by 2 as two vertices per edge
             net_solid_force += ContactForce
           else: print('len common_neigh',len(common_neigh))
+      
+      if False:
+        K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
+        #ToDO: Adjust for other geometric approximations:
+        RadFoot = sum(v.x_a[:]**2)**.5
+        l_a = 2 * np.pi * RadFoot / len(bV)  # arc length
+        Xi = 1 #Euler characteristic of the star domain
+        #Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
+        #Note: Area should be height of spherical cap
+        #h = R - RadFoot * 4np.tan(theta_p)
+        #Approximate radius of the great shpere K = (1/R)**2:
+        R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
+        theta_p_approx = np.arccos(np.min([RadFoot / R_approx, 1]))
+        h = R_approx - RadFoot * np.tan(theta_p_approx)
+        A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
+        kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx) #boundary integral of gaussian curvature
+        #ToDO: This is NOT the correct arc length (wrong angle)
+        ds = 2 * np.pi * RadFoot  # Arc length of whole spherical cap
+        k_g = kg_ds / ds  # / 2.0
+        phi_est = np.arctan(R_approx * k_g)
+        # Compute boundary forces N m-1
+
+      ##COMPUTE CONTAC ANGLE WITH CONTACTFORCE
+      print('phi_est',phi_est)
+      gamma_bt = params['gamma'] * (np.cos(phi_est) - np.cos(theta_p)) * v.x_a / RadFoot
+      force += gamma_bt * l_a  # N
+      
     else:
       H = HNdA_i_cache[v.x]
       interf_force = params['gamma'] * H
