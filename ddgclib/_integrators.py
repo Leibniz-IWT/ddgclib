@@ -1,23 +1,24 @@
-from ddgclib._bubble import save_vert_positions, get_forces, correct_the_volume, grad_energy, get_energy_from_array, get_energy, remesh
+from ddgclib._bubble import save_vert_positions, get_forces, correct_the_volume, grad_energy, get_energy_from_array, get_energy, remesh, move
 
 def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False, constMoveLen=False):
 #Reduce the interface energy by an Eulerian method
 #If implicitVolume, the volume is corrected at every timestep
 #If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
-  #from ddgclib._plotting import plot_polyscope
+  from ddgclib._plotting import plot_polyscope
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
-    if t*10%nSteps==0: save_vert_positions(t, HC)
+    if t*10%nSteps==0: 
+      save_vert_positions(t, HC)
+      plot_polyscope(HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
-    #plot_polyscope(HC)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     if not constMoveLen: maxForce=1
     for v in HC.V:
       if v.x in forceDict:
-        HC.V.move(v, tuple(v.x_a + stepSize*forceDict[v.x]/maxForce))
+        move(v, v.x_a + stepSize*forceDict[v.x]/maxForce, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
   return t
   
