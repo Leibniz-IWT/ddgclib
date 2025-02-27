@@ -7,7 +7,7 @@ from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearc
 from ddgclib._volume import cone_init, spherical_cap_init
 
 #Parameters
-Bo=0.4 #Bond number
+Bo=.4 #Bond number
 RadTop = 1e-3 #(Bo*gamma/rho/g)**.5 # m Radius of curvature of bubble top
 prm = {}  #dictionary of parameters
 prm['gamma'] = 72.8e-3  # N/m, surface tension
@@ -16,30 +16,30 @@ prm['rho'] = Bo*prm['gamma']/prm['g']/RadTop**2 #998.2071 - 1.225 # kg/m3, densi
 print('rho',prm['rho'])
 prm['initial_volume'], RadFoot, height, centroid = AdamsBashforthProfile(Bo, RadTop)
 print(f'RadFoot = {RadFoot}')
-#prm['initial_volume'] *= 2
+prm['initial_volume'] *= 2
 print('initial_volume',prm['initial_volume'])
 print('height',height)
 print('centroid',centroid)
-prm['P_out'] = prm['rho']*prm['g']*4*RadTop #101.325e3 # Pa, Ambient pressure at base
-prm['P_in'] = prm['P_out'] + 2*prm['gamma']/RadTop #101.325e3 # Pa, Ambient pressure at base
-print('P_in',prm['P_in'])
-minEdge = .5*RadFoot
+prm['P_0'] = 2*prm['gamma']/RadTop #101.325e3 # Pa, Ambient pressure at base
+print('P_0',prm['P_0'])
+minEdge = .2*RadFoot
 maxEdge = 2*minEdge
-print('pressure length',3*RadFoot/prm['P_in']/maxEdge**2)
+print('pressure length',3*RadFoot/prm['P_0']/maxEdge**2)
 print('tension length',1/prm['gamma'])
 
-t=0
+t=545
 if t==0: 
-  HC,bV = spherical_cap_init(RadFoot, prm['initial_volume'], maxEdge=maxEdge)
+  HC,bV = spherical_cap_init(RadFoot, prm['initial_volume'], maxEdge=.5*maxEdge)
   plot_polyscope(HC)
-  t = Euler(HC, bV, prm, t, 100, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
-  plot_polyscope(HC)
-  minEdge = .2*RadFoot
-  maxEdge = 2*minEdge
-  t = Euler(HC, bV, prm, t, 100, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
+  t = Euler(HC, bV, prm, t, 500, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
+  #plot_polyscope(HC)
+  #minEdge = .2*RadFoot
+  #maxEdge = 2*minEdge
+  #t = Euler(HC, bV, prm, t, 500, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
 else: 
   HC, bV = load_complex(t)
-plot_polyscope(HC)
-#t = Euler(HC, bV, prm, t, 200, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
-t = AdamsBashforth(HC, bV, prm, t, 500, 1, maxMove=.5*minEdge)
+#plot_polyscope(HC)
+#t = Euler(HC, bV, prm, t, 500, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
+#plot_polyscope(HC)
+t = AdamsBashforth(HC, bV, prm, t, 10, 1, maxMove=.5*minEdge, minEdge=minEdge, maxEdge=maxEdge)
 plot_polyscope(HC)
