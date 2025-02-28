@@ -4,13 +4,13 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
 #Reduce the interface energy by an Eulerian method
 #If implicitVolume, the volume is corrected at every timestep
 #If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
-  from ddgclib._plotting import plot_polyscope
+  #from ddgclib._plotting import plot_polyscope
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: 
       save_vert_positions(t, HC)
-      plot_polyscope(HC)
+      #plot_polyscope(HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
@@ -25,14 +25,14 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
 def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, maxMove=-1, implicitVolume=False): 
 #Reduce the interface energy by an Adams Bashforth method
 #The first iteration is Eulerian
-  from ddgclib._plotting import plot_polyscope
+  #from ddgclib._plotting import plot_polyscope
   forcePrev = {}
   t = tInit
   while t <= tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: 
       save_vert_positions(t, HC)
-      plot_polyscope(HC)
+      #plot_polyscope(HC)
     get_energy(HC, t, params)
     t+=1
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
@@ -45,7 +45,7 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
         print('limit move to', maxMove)
         x_new = tuple(v.x_a + maxMove*forceDict[v.x]/sum(forceDict[v.x][:]**2)**.5)
       forcePrev[x_new] = forceDict[v.x]
-      HC.V.move(v, tuple(x_new))
+      move(v, x_new, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
   return t
   
@@ -75,7 +75,7 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
       if x_new==-1: continue
       posPrev[x_new] = v.x_a
       forcePrev[x_new] = forceDict[v.x]
-      HC.V.move(v, tuple(x_new))
+      move(v, x_new, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
   return t
 
@@ -105,7 +105,7 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
       alpha = ret[0]
       print('alpha',alpha)
     for i, v in enumerate(HC.V):
-      HC.V.move(v, tuple(posArray[3*i:3*(i+1)] - alpha*gradArray[3*i:3*(i+1)]))
+      move(v, posArray[3*i:3*(i+1)] - alpha*gradArray[3*i:3*(i+1)], HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
   return t
  

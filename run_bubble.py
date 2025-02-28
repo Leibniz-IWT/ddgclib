@@ -23,12 +23,12 @@ print('height',height)
 print('centroid',centroid)
 prm['P_0'] = 2*prm['gamma']/RadTop #101.325e3 # Pa, Ambient pressure at base
 print('P_0',prm['P_0'])
-minEdge = .2*RadFoot
+minEdge = .1*RadFoot
 maxEdge = 2*minEdge
 print('pressure length',3*RadFoot/prm['P_0']/maxEdge**2)
 print('tension length',1/prm['gamma'])
 
-t=0
+t=100
 if t==0: 
   HC,bV = spherical_cap_init(RadFoot, prm['initial_volume'], maxEdge=.5*maxEdge)
   plot_polyscope(HC)
@@ -39,8 +39,8 @@ if t==0:
   #t = Euler(HC, bV, prm, t, 500, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
 else: 
   HC, bV = load_complex(t)
-#plot_polyscope(HC)
+plot_polyscope(HC)
 #t = Euler(HC, bV, prm, t, 500, .5*minEdge, minEdge=minEdge, maxEdge=maxEdge, implicitVolume=True, constMoveLen=True)
 #plot_polyscope(HC)
-t = AdamsBashforth(HC, bV, prm, t, 100, 1, maxMove=.5*minEdge, minEdge=minEdge, maxEdge=maxEdge)
+t = AdamsBashforth(HC, bV, prm, t, 100, .2, maxMove=.5*minEdge, minEdge=minEdge, maxEdge=maxEdge)
 plot_polyscope(HC)
