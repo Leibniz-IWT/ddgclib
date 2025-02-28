@@ -193,38 +193,43 @@ def get_forces(HC, bV, t, params):
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
         if vn in bV:
-          RadFoot = sum(v.x_a[:]**2)**.5
-          cLineLen = np.linalg.norm(v.x_a - vn.x_a)
           common_neigh = list(v.nn.intersection(vn.nn))
-          if len(common_neigh)==1:
-            midpoint = .5*v.x_a + .5*vn.x_a
-            pullDirection = midpoint - common_neigh[0].x_a
-            ContactForce = params['gamma'] * cLineLen * pullDirection / np.linalg.norm(pullDirection) / 2
-            #divide by 2 as two vertices per edge
-            net_solid_force += ContactForce
-          else: print('len common_neigh',len(common_neigh))
+          if len(common_neigh)!=1:
+            print('boundary vertices have', len(common_neigh), 'common_neigh')
+            continue
+          norm = cross_prod(common_neigh[0].x_a - v.x_a, common_neigh[0].x_a - vn.x_a)
+          norm /= sum(norm[:]**2)**.5
+          #divide by 2 as two vertices per edge
+          ContactForce = params['gamma'] * cross_prod(v.x_a-vn.x_a, norm) / 2
+          net_solid_force += ContactForce
+          force += ContactForce*[1,1,0]
+          pullDir = cross_prod(v.x_a-vn.x_a, [0,0,1])
+          if sum(pullDir*v.x_a)<0: pullDir *= -1
+          solidForce = params['gamma']*np.cos(theta_p) * pullDir / 2
+          force += solidForce
       
-      K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
-      #ToDO: Adjust for other geometric approximations:
-      Xi = 1 #Euler characteristic of the star domain
-      #Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
-      #Note: Area should be height of spherical cap
-      #h = R - RadFoot * 4np.tan(theta_p)
-      #Approximate radius of the great shpere K = (1/R)**2:
-      R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
-      theta_p_approx = np.arcsin(np.min([RadFoot / R_approx, 1]))
-      h = R_approx - RadFoot * np.tan(theta_p_approx)
-      A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
-      kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx) #boundary integral of gaussian curvature
-      #ToDO: This is NOT the correct arc length (wrong angle)
-      ds = 2 * np.pi * RadFoot  # Arc length of whole spherical cap
-      k_g = kg_ds / ds  # / 2.0
-      phi_est = np.arctan(R_approx * k_g)
-      # Compute boundary forces N m-1
-      #print('phi_est',phi_est,'v.x_a',v.x_a,'len(v.nn)',len(list(v.nn)),'K_H_dA',K_H_dA)
-      gamma_bt = params['gamma'] * (np.cos(phi_est) - np.cos(theta_p)) * v.x_a / RadFoot
-      l_a = 2 * np.pi * RadFoot / len(bV)  # arc length
-      force += gamma_bt * l_a  # N
+      if False: 
+        K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
+        #ToDO: Adjust for other geometric approximations:
+        Xi = 1 #Euler characteristic of the star domain
+        #Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
+        #Note: Area should be height of spherical cap
+        #h = R - RadFoot * 4np.tan(theta_p)
+        #Approximate radius of the great shpere K = (1/R)**2:
+        R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
+        theta_p_approx = np.arcsin(np.min([RadFoot / R_approx, 1]))
+        h = R_approx - RadFoot * np.tan(theta_p_approx)
+        A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
+        kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx) #boundary integral of gaussian curvature
+        #ToDO: This is NOT the correct arc length (wrong angle)
+        ds = 2 * np.pi * RadFoot  # Arc length of whole spherical cap
+        k_g = kg_ds / ds  # / 2.0
+        phi_est = np.arctan(R_approx * k_g)
+        # Compute boundary forces N m-1
+        #print('phi_est',phi_est,'v.x_a',v.x_a,'len(v.nn)',len(list(v.nn)),'K_H_dA',K_H_dA)
+        gamma_bt = params['gamma'] * (np.cos(phi_est) - np.cos(theta_p)) * v.x_a / RadFoot
+        l_a = 2 * np.pi * RadFoot / len(bV)  # arc length
+        force += gamma_bt * l_a  # N
       
     else:
       H = HNdA_i_cache[v.x]
