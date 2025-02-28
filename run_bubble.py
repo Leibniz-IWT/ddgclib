@@ -7,7 +7,7 @@ from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearc
 from ddgclib._volume import cone_init, spherical_cap_init
 
 #Parameters
-Bo=.4 #Bond number
+Bo=0 #Bond number
 RadTop = 1e-3 #(Bo*gamma/rho/g)**.5 # m Radius of curvature of bubble top
 prm = {}  #dictionary of parameters
 prm['gamma'] = 72.8e-3  # N/m, surface tension
