@@ -29,11 +29,14 @@ def save_neighbours(fname,HC):
 
 def save_vert_positions(t,HC):
 #Save the xyz position of all vertices in a text file.
+  total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
+  bubble_centroid[2] = 0
   fname='data/pos'+str(t)+'.txt'
   with open(fname, "w") as pos_txt:
     print('saving',fname)
     for v in HC.V:
-      print(*v.x,file=pos_txt)
+      pos = v.x - bubble_centroid
+      print(*pos,file=pos_txt)
   save_neighbours('data/nei'+str(t)+'.txt',HC)
 
 def load_complex(t):
@@ -52,19 +55,20 @@ def load_complex(t):
     if abs(v.x[2]) < 1e-9: bV.add(v)
   return HC, bV
 
-def refine_edges(HC, dist):
-#Put vertices on edges longer than dist.
+def refine_edges(HC, bV, dist):
+#Add vertices to edges which are longer than dist.
 #Like fig 2a of Unverdi and Tryggvason J comp. phys. 1992.
 #Neighbouring edges are not refined.
   to_split_1D=[]
   to_split=[]
   for i, v1 in enumerate(HC.V):
     if v1 in to_split_1D: continue
+    if v1 in bV: continue
     for v2 in v1.nn:
       if v2 in to_split_1D: continue
       if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
         common_neigh = list(v1.nn.intersection(v2.nn))
-        #Only refine if the vertices are in a planar region
+        #Only refine if the vertices are in a planar region. This will exclude boundaries
         if len(common_neigh) != 2: continue
         if any(n in to_split_1D for n in common_neigh): continue
         to_split.append((v1,v2,*common_neigh))
@@ -116,7 +120,7 @@ def refine_boundaries(HC, bV, dist):
   return len(to_split)
 
 def reconnect_long_diagonals(HC, bV):
-#Find bisected quadrilaterals and
+#Find bisected quadrilaterals and put the bisection between the closer pair of vertices.
 #Like fig 2c of Unverdi and Tryggvason J comp. phys. 1992.
 #Neighbouring edges are not refined.
   to_reconnect=[]
@@ -137,6 +141,9 @@ def reconnect_long_diagonals(HC, bV):
         to_reconnect.append((v1,v2,v3,v4))
   if len(to_reconnect)==0: return 0
   for (v1, v2, v3, v4) in to_reconnect:
+    if v1 in bV and v2 in bV: 
+      print('skip reconnecting boundary',v2.x)
+      continue
     v1.disconnect(v2)
     v3.connect(v4)
   return len(to_reconnect)
@@ -145,7 +152,7 @@ def remesh(HC, minEdge, maxEdge, bV=set()):
 #Remesh into roughly equilateral triangles with a size between minEdge and maxEdge
 #Using the method in fig 2 of Unverdi and Tryggvason J comp. phys. 1992.
   HC.V.merge_nn(cdist=minEdge, exclude=bV)
-  refine_edges(HC, maxEdge)
+  refine_edges(HC, bV, maxEdge)
   refine_boundaries(HC, bV, maxEdge)
   reconnect_long_diagonals(HC, bV)
   #Remove vertices that get disconnected due to merging
@@ -164,13 +171,12 @@ def move(v, pos, HC, bV):
 def get_forces(HC, bV, t, params):
 #get the surface tension and pressure forces on the vertices
   RadFoot=1
-  theta_p=np.pi/4
+  theta_p=np.pi/20
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  #print(t,'vol',total_bubble_volume)
   if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
   #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
   #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
@@ -186,9 +192,28 @@ def get_forces(HC, bV, t, params):
   height = max([v.x_a[2] for v in HC.V])
   for v in HC.V:
     force = np.array([0.0,0.0,0.0])
-    #height = max(height,v.x_a[2])
-    # Compute boundary movements
-    # Note: boundaries are fixed for now, this is legacy:
+    H = HNdA_i_cache[v.x]
+    interf_force = params['gamma'] * H
+    net_interf_force += interf_force
+    gas_force = 0
+    liq_force = 0
+    for vn1 in v.nn:
+      for vn2 in v.nn:
+        if vn2 in vn1.nn:
+          triArea = .5*cross_prod(vn1.x_a-v.x_a, vn2.x_a-v.x_a)
+          #set the area vector pointing away from the z axis
+          centroid = ( v.x_a + vn1.x_a + vn2.x_a )/3
+          if sum( triArea[:3] * centroid[:3] ) < 0: triArea = - triArea
+          #divide by 2 because vn1 and vn2 can be swapped
+          #divide by 3 because each triangle contributes to 3 vertices
+          gas_force += triArea*gasPressure /2 /3
+          liquidPressure = params['rho'] * params['g'] * (height - centroid[2]) #+ params['P_0']
+          if liquidPressure<0: raise ValueError('bubble is too tall, height =', centroid[2])
+          liq_force -= triArea*liquidPressure /2 /3
+    force = interf_force + liq_force + gas_force 
+    net_gas_force += gas_force
+    net_liq_force += liq_force
+    #Compute force on boundary
     if v in bV:
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
@@ -207,72 +232,11 @@ def get_forces(HC, bV, t, params):
           if sum(pullDir*v.x_a)<0: pullDir *= -1
           solidForce = params['gamma']*np.cos(theta_p) * pullDir / 2
           force += solidForce
-      
-      if False: 
-        K_H_dA = K_H_i_cache[v.x] * np.sum(C_ij_cache[v.x])
-        #ToDO: Adjust for other geometric approximations:
-        Xi = 1 #Euler characteristic of the star domain
-        #Gauss-Bonnet: int_M K dA + int_dM kg ds = 2 pi Xi
-        #Note: Area should be height of spherical cap
-        #h = R - RadFoot * 4np.tan(theta_p)
-        #Approximate radius of the great shpere K = (1/R)**2:
-        R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
-        theta_p_approx = np.arcsin(np.min([RadFoot / R_approx, 1]))
-        h = R_approx - RadFoot * np.tan(theta_p_approx)
-        A_approx = 2 * np.pi * R_approx * h  # Area of spherical cap
-        kg_ds = 2 * np.pi * Xi - K_H_i_cache[v.x] * (A_approx) #boundary integral of gaussian curvature
-        #ToDO: This is NOT the correct arc length (wrong angle)
-        ds = 2 * np.pi * RadFoot  # Arc length of whole spherical cap
-        k_g = kg_ds / ds  # / 2.0
-        phi_est = np.arctan(R_approx * k_g)
-        # Compute boundary forces N m-1
-        #print('phi_est',phi_est,'v.x_a',v.x_a,'len(v.nn)',len(list(v.nn)),'K_H_dA',K_H_dA)
-        gamma_bt = params['gamma'] * (np.cos(phi_est) - np.cos(theta_p)) * v.x_a / RadFoot
-        l_a = 2 * np.pi * RadFoot / len(bV)  # arc length
-        force += gamma_bt * l_a  # N
-      
-    else:
-      H = HNdA_i_cache[v.x]
-      interf_force = params['gamma'] * H
-      net_interf_force += interf_force
-      if False:
-        dualNormal = outward_normal(v,H)
-        dualArea = sum(C_ij_cache[v.x])
-        gas_force = gasPressure * dualNormal  * dualArea
-        liquidPressure = P_0 - rho * g * v.x_a[2]
-        if liquidPressure<0: print('bubble is too tall, liquidPressure=',liquidPressure)
-        liq_force = - liquidPressure * dualNormal  * dualArea
-      else:
-        gas_force = 0
-        liq_force = 0
-        for vn1 in v.nn:
-          for vn2 in v.nn:
-            if vn2 in vn1.nn:
-              triArea = .5*cross_prod(vn1.x_a-v.x_a, vn2.x_a-v.x_a)
-              #set the area vector pointing away from the z axis
-              centroid = ( v.x_a + vn1.x_a + vn2.x_a )/3
-              if sum( triArea[:3] * centroid[:3] ) < 0: triArea = - triArea
-              #divide by 2 because vn1 and vn2 can be swapped
-              #divide by 3 because each triangle contributes to 3 vertices
-              gas_force += triArea*gasPressure /2 /3
-              liquidPressure = params['rho'] * params['g'] * (height - centroid[2]) #+ params['P_0']
-              if liquidPressure<0: raise ValueError('bubble is too tall, height =', centroid[2])
-              liq_force -= triArea*liquidPressure /2 /3
-      #gasByInter = sum(gas_force[:]**2) / sum(interf_force[:]**2)
-      #if gasByInter>4:
-      #  #print('gasByInter',gasByInter)
-      #  gas_force *= 2/gasByInter**.5
-      net_gas_force += gas_force
-      net_liq_force += liq_force
-      #if v.x_a[2]>.00302:
-      #  print('liquidPressure',liquidPressure)
-      #  print('gasPressure',gasPressure)
-      #  print('HNdA_i_Cij',HNdA_i_Cij_cache[v.x])
-      force = interf_force + liq_force + gas_force 
-      maxForce=max( maxForce, np.linalg.norm(force) ) 
+      force *= [1,1,0]
+    maxForce=max( maxForce, np.linalg.norm(force) ) 
     forceDict[v.x] = force
   with open('data/vol.txt', "a") as vol_txt:
-    print(t,total_bubble_volume,gasPressure,maxForce,height,bubble_centroid,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
+    print(t,total_bubble_volume,gasPressure,maxForce,height,*bubble_centroid,*net_interf_force,*net_gas_force,*net_liq_force,*net_solid_force,file=vol_txt)
     vol_txt.flush()
   return forceDict, maxForce
 
@@ -295,7 +259,7 @@ def get_energy(HC, t, params):
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
-  gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
+  gravityEn = - params['rho']*params['g']*bubble_centroid[2]*total_bubble_volume
   fname='data/energy.txt'
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
@@ -312,7 +276,7 @@ def get_energy_from_array(posArray, *args):
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
   idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
-  gravityEn = - params['rho']*params['g']*bubble_centroid*total_bubble_volume
+  gravityEn = - params['rho']*params['g']*bubble_centroid[2]*total_bubble_volume
   fname='data/energy.txt'
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
@@ -357,12 +321,12 @@ def AdamsBashforthProfile(Bo, RadTop):
       Volume += np.pi*r**2*dz
       centroid += z*np.pi*r**2*dz
       #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
-      print(r*RadTop, -z*RadTop, file=adams_txt)
+      print(r*RadTop, -z*RadTop, psi, file=adams_txt)
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
       #if psi > np.pi/2: break
       if psi > np.pi: break
-      if psi < .4*np.pi and 2 - Bo*z - np.sin(psi)/r < 0: break
+      if psi < .5*np.pi and 2 - Bo*z - np.sin(psi)/r < 0: break
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop
