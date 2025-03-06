@@ -42,8 +42,11 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
       if v.x in forcePrev: x_new = tuple(v.x_a + stepSize*(1.5*forceDict[v.x] - 0.5*forcePrev[v.x]))
       else: x_new = tuple(v.x_a + stepSize*forceDict[v.x])
       if maxMove>0 and sum((v.x_a[:]-x_new[:])**2) > maxMove**2: 
-        print('limit move to', maxMove)
-        x_new = tuple(v.x_a + maxMove*forceDict[v.x]/sum(forceDict[v.x][:]**2)**.5)
+        stepSize /= 2
+        print('reduce stepSize to', stepSize)
+        t-=1
+        break
+        #x_new = tuple(v.x_a + maxMove*forceDict[v.x]/sum(forceDict[v.x][:]**2)**.5)
       forcePrev[x_new] = forceDict[v.x]
       move(v, x_new, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])

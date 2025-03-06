@@ -63,13 +63,16 @@ def refine_edges(HC, bV, dist):
   to_split=[]
   for i, v1 in enumerate(HC.V):
     if v1 in to_split_1D: continue
-    if v1 in bV: continue
+    #if v1 in bV: continue
     for v2 in v1.nn:
       if v2 in to_split_1D: continue
-      if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
+      sep = sum( (v1.x_a[:]-v2.x_a[:])**2 )
+      if v1 in bV or v2 in bV: sep*=16
+      if sep > dist**2: 
         common_neigh = list(v1.nn.intersection(v2.nn))
-        #Only refine if the vertices are in a planar region. This will exclude boundaries
-        if len(common_neigh) != 2: continue
+        #Only refine if the vertices are in a planar region. 
+        #This will exclude boundaries
+        if len(common_neigh) > 2: continue
         if any(n in to_split_1D for n in common_neigh): continue
         to_split.append((v1,v2,*common_neigh))
         to_split_1D.extend((v1,v2,*common_neigh))
@@ -94,12 +97,12 @@ def refine_boundaries(HC, bV, dist):
   to_connect=[]
   for i, v1 in enumerate(bV):
     for v2 in v1.nn:
-      if v2 not in bV: continue
+      #if v2 not in bV: continue
       if (v2,v1) in to_split: continue
       if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
         common_neigh = list(v1.nn.intersection(v2.nn))
         #Only refine if the vertices are in a planar region
-        if len(common_neigh) != 1: continue
+        #if len(common_neigh) != 1: continue
         #if any(n in to_split_1D for n in common_neigh): continue
         if any(n in bV for n in common_neigh): continue
         to_split.append((v1,v2))
@@ -116,7 +119,7 @@ def refine_boundaries(HC, bV, dist):
     v_new.connect(v1)
     v_new.connect(v2)
     v_new.connect(n)
-    bV.add(v_new)
+    if v1 in bV and v2 in bV: bV.add(v_new)
   return len(to_split)
 
 def reconnect_long_diagonals(HC, bV):
@@ -151,9 +154,13 @@ def reconnect_long_diagonals(HC, bV):
 def remesh(HC, minEdge, maxEdge, bV=set()):
 #Remesh into roughly equilateral triangles with a size between minEdge and maxEdge
 #Using the method in fig 2 of Unverdi and Tryggvason J comp. phys. 1992.
-  HC.V.merge_nn(cdist=minEdge, exclude=bV)
+  bVneigh = list(bV)
+  for v in bV:
+    for vn in v.nn:
+      bVneigh.append(vn)
+  HC.V.merge_nn(cdist=minEdge, exclude=bVneigh)
   refine_edges(HC, bV, maxEdge)
-  refine_boundaries(HC, bV, maxEdge)
+  #refine_boundaries(HC, bV, .2*maxEdge)
   reconnect_long_diagonals(HC, bV)
   #Remove vertices that get disconnected due to merging
   for v in HC.V:
@@ -171,11 +178,10 @@ def move(v, pos, HC, bV):
 def get_forces(HC, bV, t, params):
 #get the surface tension and pressure forces on the vertices
   RadFoot=1
-  theta_p=np.pi/20
   # Compute interior curvatures
   (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
-    Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
+    Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, params['contactAng'], printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
   #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
@@ -215,6 +221,7 @@ def get_forces(HC, bV, t, params):
     net_liq_force += liq_force
     #Compute force on boundary
     if v in bV:
+      #force *= 0
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
         if vn in bV:
@@ -222,15 +229,16 @@ def get_forces(HC, bV, t, params):
           if len(common_neigh)!=1:
             print('boundary vertices have', len(common_neigh), 'common_neigh')
             continue
-          norm = cross_prod(common_neigh[0].x_a - v.x_a, common_neigh[0].x_a - vn.x_a)
-          norm /= sum(norm[:]**2)**.5
-          #divide by 2 as two vertices per edge
-          ContactForce = params['gamma'] * cross_prod(v.x_a-vn.x_a, norm) / 2
+          localNormal = cross_prod(common_neigh[0].x_a - v.x_a, common_neigh[0].x_a - vn.x_a)
+          localNormal /= sum(localNormal[:]**2)**.5
+          #Interface force on the contact line, divide by 2 as two vertices per edge
+          ContactForce = params['gamma'] * cross_prod(v.x_a-vn.x_a, localNormal) / 2
           net_solid_force += ContactForce
           force += ContactForce*[1,1,0]
           pullDir = cross_prod(v.x_a-vn.x_a, [0,0,1])
           if sum(pullDir*v.x_a)<0: pullDir *= -1
-          solidForce = params['gamma']*np.cos(theta_p) * pullDir / 2
+          #Solid force on the contact line, divide by 2 as two vertices per edge
+          solidForce = params['gamma']*np.cos(params['contactAng']) * pullDir / 2
           force += solidForce
       force *= [1,1,0]
     maxForce=max( maxForce, np.linalg.norm(force) ) 
@@ -300,7 +308,7 @@ def correct_the_volume(HC, bV, target_volume):
       HC.V.move(v, tuple(v.x_a + dualNormal*shift))
   return 
 
-def AdamsBashforthProfile(Bo, RadTop):
+def AdamsBashforthProfile(Bo, RadTop, contactAng=-1):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
@@ -325,7 +333,7 @@ def AdamsBashforthProfile(Bo, RadTop):
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
-      #if psi > np.pi/2: break
+      if contactAng>0 and psi > contactAng: break
       if psi > np.pi: break
       if psi < .5*np.pi and 2 - Bo*z - np.sin(psi)/r < 0: break
   centroid /= Volume
