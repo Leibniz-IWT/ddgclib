@@ -2,12 +2,12 @@
 #from CoolProp.CoolProp import PropsSI
 # Imports and physical parameters
 import numpy as np
-import scipy
+#import scipy
 #from matplotlib import pyplot as plt
 import matplotlib.image as mpimg
-from skimage import data, io
+#from skimage import data, io
 import sys
-import skimage
+#import skimage
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import FancyArrowPatch
