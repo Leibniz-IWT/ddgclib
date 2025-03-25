@@ -164,12 +164,12 @@ def save_vert_positions(t):
     t : int or str
         The time step or identifier used in the filename.
     """
-    fname = 'data/pos' + str(t) + '.txt'
+    fname = '../data/pos' + str(t) + '.txt'
     with open(fname, "w") as pos_txt:
         print('saving', fname)
         for v in HC.V:
             print(*v.x, file=pos_txt)
-    save_neighbours('data/nei' + str(t) + '.txt')
+    save_neighbours('../data/nei' + str(t) + '.txt')
 
 
 def load_complex(t):
@@ -187,11 +187,11 @@ def load_complex(t):
         HC : The constructed complex.
         bV : set of vertices that are considered boundary vertices.
     """
-    fname = 'data/pos' + str(t) + '.txt'
+    fname = '../data/pos' + str(t) + '.txt'
     with open(fname) as f:
         print('loading', fname)
         pos = [[float(x) for x in line.split()] for line in f]
-    fname = 'data/nei' + str(t) + '.txt'
+    fname = '../data/nei' + str(t) + '.txt'
     with open(fname) as f:
         print('loading', fname)
         nn = [[int(x) for x in line.split()[1:]] for line in f]
@@ -540,7 +540,7 @@ def get_energy(HC):
     idealGasEn = P_0 * initial_volume * np.log(initial_volume / total_bubble_volume)
     interfaceEn = gamma * total_bubble_area
     gravityEn = -rho * g * bubble_centroid * total_bubble_volume
-    fname = 'data/energy.txt'
+    fname = '../data/energy.txt'
     with open(fname, "a") as en_txt:
         print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
         en_txt.flush()
@@ -738,7 +738,7 @@ psi = 0
 r = 0
 z = 0
 Volume = 0
-fname = 'data/adams' + str(Bo) + '.txt'
+fname = '../data/adams' + str(Bo) + '.txt'
 with open(fname, "w") as adams_txt:
     print('saving', fname)
     for i in range(int(4 / d)):
@@ -776,7 +776,7 @@ pastE = [np.nan] * 10
 prevE = [np.nan] * 10
 constMove = False
 initial_volume = Volume
-fname = 'data/vol.txt'
+fname = '../data/vol.txt'
 with open(fname, "a") as vol_txt:
     print('saving', fname)
     # Surface energy minimisation
