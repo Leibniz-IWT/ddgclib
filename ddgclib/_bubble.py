@@ -67,7 +67,7 @@ def refine_edges(HC, bV, dist):
     for v2 in v1.nn:
       if v2 in to_split_1D: continue
       sep = sum( (v1.x_a[:]-v2.x_a[:])**2 )
-      if v1 in bV or v2 in bV: sep*=16
+      #if v1 in bV or v2 in bV: sep*=16
       if sep > dist**2: 
         common_neigh = list(v1.nn.intersection(v2.nn))
         #Only refine if the vertices are in a planar region. 
@@ -81,7 +81,11 @@ def refine_edges(HC, bV, dist):
     v1.disconnect(v2)
     # Compute vertex on centre of edge:
     v_pos = 0.5*v1.x_a + 0.5*v2.x_a
+    if v1 in bV and v2 in bV: v_pos *= ( sum(v1.x_a**2) / sum(v_pos**2) )**.5
     v_new = HC.V[tuple(v_pos)]
+    if v1 in bV and v2 in bV: 
+      radPos = v_new.x_a*sum(v1.x_a**2)/sum(v_pos**2)
+      bV.add(v_new)
     # Connect to original 2 vertices to the new centre vertex
     v_new.connect(v1)
     v_new.connect(v2)
@@ -240,7 +244,7 @@ def get_forces(HC, bV, t, params):
           #Solid force on the contact line, divide by 2 as two vertices per edge
           solidForce = params['gamma']*np.cos(params['contactAng']) * pullDir / 2
           force += solidForce
-      force *= [1,1,0]
+      force *= 0#[1,1,0]
     maxForce=max( maxForce, np.linalg.norm(force) ) 
     forceDict[v.x] = force
   with open('data/vol.txt', "a") as vol_txt:
@@ -333,8 +337,8 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1):
       psi += d * (2 - Bo*z - np.sin(psi)/r)
       #if 2 - Bo*z - np.sin(psi)/r < 0: break
       #if z < -.4: break
-      if contactAng>0 and psi > contactAng: break
-      if psi > np.pi: break
-      if psi < .5*np.pi and 2 - Bo*z - np.sin(psi)/r < 0: break
+      #if contactAng>0 and psi > contactAng: break
+      if psi > contactAng: break
+      if psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop

@@ -167,44 +167,83 @@ def profile():
   plt.rcdefaults()
   plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
-  col=BoColour(-4)
-  folName = 'BoMP4/'
-  fname = folName + 'pos2000.txt'
-  with open(fname, encoding = 'utf-8') as f:
-    print('loadin ',fname)
-    df = np.loadtxt(f)
-  height = max(df[:,2])
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1000, (df[:,2]-height)*1000, '.', mec=col, mfc='None', mew=.2, alpha=.5)
-  fname = folName + 'adams-0.4.txt'
-  with open(fname, encoding = 'utf-8') as f:
-    print('loadin ',fname)
-    df = np.loadtxt(f)
-  height = 0#-df[-1,1]
-  ax.plot(df[:,0]*1e3, (df[:,1]+height)*1e3, color=col, alpha=.5)
   col=BoColour(4)
-  #folName = 'BoP4TallPressureAsVolTo400/'
-  folName = 'data/'
-  fname = folName + 'pos500.txt'
+  folName = 'radTopBy1/'
+  fname = folName + 'pos1500.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  height = max(df[:,2])
-  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2)*1e3, (df[:,2]-height)*1e3, '.', mec=col, mfc='None', mew=.2, alpha=.5)
+  height = 0#max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2), (df[:,2]-height), '.', mec=col, mfc='None', mew=.2, markersize=100/1, alpha=.5)
   fname = folName + 'adams0.4.txt'
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
     df = np.loadtxt(f)
-  height = 0#-df[-1,1]
-  ax.plot(df[:,0]*1e3, (df[:,1]+height)*1e3, color=col, alpha=.5)
+  height = -df[-1,1]
+  ax.plot(df[:,0], (df[:,1]+height), color=col, alpha=.5)
+  col=BoColour(4)
+  folName = 'radTopBy2/'
+  fname = folName + 'pos2000.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = 0#max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2), (df[:,2]-height), '.', mec=col, mfc='None', mew=.2, markersize=100/2, alpha=.5)
+  folName = 'radTopBy4/'
+  fname = folName + 'pos1000.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = 0#max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2), (df[:,2]-height), '.', mec=col, mfc='None', mew=.2, markersize=100/4, alpha=.5)
+  folName = 'radTopBy8/'
+  fname = folName + 'pos1000.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = 0#max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2), (df[:,2]-height), '.', mec=col, mfc='None', mew=.2, markersize=100/8, alpha=.5)
+  folName = 'radTopBy16/'
+  fname = folName + 'pos10000.txt'
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f)
+  height = 0#max(df[:,2])
+  ax.plot(np.sqrt(df[:,0]**2 + df[:,1]**2), (df[:,2]-height), '.', mec=col, mfc='None', mew=.2, markersize=100/16, alpha=.5)
   ax.tick_params(which='both', direction='in', top=True, right=True)
-  ax.set_xlabel('$r/R$', rotation=0, labelpad=-5)
-  ax.set_ylabel('$z/R$', rotation=0)
-  #ax.set_ylim([-3.1,0.1])
+  ax.set_xlabel('$r/R$')#, rotation=0, labelpad=-5)
+  ax.set_ylabel('$z/R$')#, rotation=0)
+  ax.set_ylim([0,1.5])
   ax.set_xlim([0,1.2])
   ax.set_aspect('equal', adjustable='box')
-  ax.text(.3, -1.45, '$Bo=-0.4$',c=(1,0,0), fontsize=10, ha='center', va='center')
-  ax.text(.4, -3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
-  fname = 'profile.pdf'
+  #ax.text(.3, -1.45, '$Bo=-0.4$',c=(1,0,0), fontsize=10, ha='center', va='center')
+  #ax.text(.4, -3, '$Bo=0.4$',c=(0,0,1), fontsize=10, ha='center', va='center')
+  fname = 'data/profile.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def centroidVsGridSize(): 
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)
+  ABcentroid = 0.4728934922628638
+  col=BoColour(4)
+  for res in (1,2,4,8,16):
+    fname = 'radTopBy'+str(res)+'/vol.txt'
+    print('open',fname)
+    with open(fname) as f:
+      for line in f:
+        pass
+    centroid = float(line.split()[7])
+    print(centroid)
+    ax.plot(res, centroid/ABcentroid-1, '.', markersize=100/res, mec=col, mfc='None')#, mew=.2, alpha=.5)
+  ax.set_xlabel('$R/l$', rotation=0, labelpad=-5)
+  #ax.set_ylabel('$\\frac{\\langle z_l\\rangle-\\langle z_0\\rangle}{\\langle z_0\\rangle}$', rotation=0, size=20)
+  ax.set_ylabel('$\\langle z_l\\rangle/\\langle z_0\\rangle-1$')
+  ax.set_xscale('log')
+  ax.set_yscale('log')
+  fname = 'data/centroidVsGridSize.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
@@ -215,4 +254,5 @@ def profile():
 #height()
 #vol()
 profile()
+centroidVsGridSize()
 
