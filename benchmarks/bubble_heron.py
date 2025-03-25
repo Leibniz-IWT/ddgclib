@@ -9,6 +9,7 @@ import polyscope as ps
 # Local library imports
 from ddgclib import *
 from ddgclib._curvatures import HC_curvatures_sessile
+from ddgclib._curvatures_heron import hndA_i
 from ddgclib._complex import *
 from ddgclib._sphere import *
 from ddgclib._sessile import *
@@ -424,9 +425,9 @@ def get_forces(HC, bV):
             maxForce : float
                 The maximum force magnitude encountered.
     """
-    (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
-     HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
-     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
+   # (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+    # HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+    # Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, theta_p, printout=0)
     total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
     if total_bubble_volume != total_bubble_volume:
         return -1
@@ -458,8 +459,10 @@ def get_forces(HC, bV):
                     else:
                         print('len common_neigh', len(common_neigh))
         else:
-            H = HNdA_i_cache[v.x]
-            interf_force = gamma * H
+            #H = HNdA_i_cache[v.x]
+            n_i = normalized(v.x_a)[0]
+            HNdA_i, C_i = hndA_i(v, n_i=n_i)
+            interf_force = gamma * HNdA_i
             net_interf_force += interf_force
             if False:
                 dualNormal = outward_normal(v, H)
@@ -802,7 +805,10 @@ with open(fname, "a") as vol_txt:
             pastE.append(E_0)
             prevE.append(pastE.pop(0))
             prevE.pop(0)
-        forceDict, maxForce = get_forces(HC, bV)
+        try: #TODO: Investigate strange error
+            forceDict, maxForce = get_forces(HC, bV)
+        except:
+            pass
         if constMove:
             alpha = maxMove / maxForce
         else:

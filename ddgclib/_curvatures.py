@@ -1,11 +1,11 @@
 import numpy as np
 #import scipy
-from ._complex import Complex
+from ddgclib._complex import Complex
 import matplotlib.pyplot as plot
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
-from ._gauss_bonnet import *
+from ddgclib._gauss_bonnet import *
 
 import decimal
 
