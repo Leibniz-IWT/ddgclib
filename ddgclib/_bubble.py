@@ -188,10 +188,7 @@ def get_forces(HC, bV, t, params):
     Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, params['contactAng'], printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
-  #gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume - 1)
-  #RadBub = (3 * total_bubble_volume / 2 / np.pi) ** (1/3)
-  #gasPressure = 2*params['gamma']/RadBub * (params['initial_volume']/total_bubble_volume)**(.5)
-  gasPressure = params['P_0'] * (params['initial_volume']/total_bubble_volume)**5
+  gasPressure = params['targetPressure'] * (params['targetVol']/total_bubble_volume)**5
   forceDict = {}
   posDict = {}
   maxForce = 0.0
@@ -217,7 +214,7 @@ def get_forces(HC, bV, t, params):
           #divide by 2 because vn1 and vn2 can be swapped
           #divide by 3 because each triangle contributes to 3 vertices
           gas_force += triArea*gasPressure /2 /3
-          liquidPressure = params['rho'] * params['g'] * (height - centroid[2]) #+ params['P_0']
+          liquidPressure = params['density'] * params['gravity'] * (height - centroid[2]) 
           if liquidPressure<0: raise ValueError('bubble is too tall, height =', centroid[2])
           liq_force -= triArea*liquidPressure /2 /3
     force = interf_force + liq_force + gas_force 
@@ -269,9 +266,9 @@ def grad_energy(posArray, *args):
 def get_energy(HC, t, params):
 #Compute the energy of the interface
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
-  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  idealGasEn = params['targetPressure']*params['targetVol']*np.log(params['targetVol']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
-  gravityEn = - params['rho']*params['g']*bubble_centroid[2]*total_bubble_volume
+  gravityEn = - params['density']*params['gravity']*bubble_centroid[2]*total_bubble_volume
   fname='data/energy.txt'
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
@@ -286,9 +283,9 @@ def get_energy_from_array(posArray, *args):
   for i, v_temp in enumerate(HC_temp.V):
     HC_temp.V.move(v_temp, tuple(posArray[i*3:(i+1)*3]))
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC_temp)
-  idealGasEn = params['P_0']*params['initial_volume']*np.log(params['initial_volume']/total_bubble_volume)
+  idealGasEn = params['targetPressure']*params['targetVol']*np.log(params['targetVol']/total_bubble_volume)
   interfaceEn = params['gamma']*total_bubble_area
-  gravityEn = - params['rho']*params['g']*bubble_centroid[2]*total_bubble_volume
+  gravityEn = - params['density']*params['gravity']*bubble_centroid[2]*total_bubble_volume
   fname='data/energy.txt'
   with open(fname, "a") as en_txt:
     print(t, idealGasEn, interfaceEn, gravityEn, file=en_txt)
