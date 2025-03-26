@@ -7,12 +7,8 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
   #from ddgclib._plotting import plot_polyscope
   t = tInit
   while t < tInit+nSteps:
-    print('t',t)
-    if t*10%nSteps==0: 
-      save_vert_positions(t, HC)
-      #plot_polyscope(HC)
-    get_energy(HC, t, params)
     t+=1
+    print('t',t)
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     if not constMoveLen: maxForce=1
@@ -20,6 +16,9 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
       if v.x in forceDict:
         move(v, v.x_a + stepSize*forceDict[v.x]/maxForce, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+    if t*10%nSteps==0: 
+      save_vert_positions(t, HC)
+    get_energy(HC, t, params)
   return t
   
 def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, maxMove=-1, implicitVolume=False): 
@@ -29,12 +28,8 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
   forcePrev = {}
   t = tInit
   while t < tInit+nSteps:
-    print('t',t)
-    if t*10%nSteps==0: 
-      save_vert_positions(t, HC)
-      #plot_polyscope(HC)
-    get_energy(HC, t, params)
     t+=1
+    print('t',t)
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     for v in HC.V:
@@ -50,6 +45,9 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
       forcePrev[x_new] = forceDict[v.x]
       move(v, x_new, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+    if t*10%nSteps==0: 
+      save_vert_positions(t, HC)
+    get_energy(HC, t, params)
   return t
   
 def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False): 
@@ -59,10 +57,8 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
   forcePrev = {}
   posPrev = {}
   while t < tInit+nSteps:
-    print('t',t)
-    if t*10%nSteps==0: save_vert_positions(t, HC)
-    get_energy(HC, t, params)
     t+=1
+    print('t',t)
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     forceDict, maxForce = get_forces(HC, bV, t, params)
     for v in HC.V:
@@ -80,6 +76,8 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
       forcePrev[x_new] = forceDict[v.x]
       move(v, x_new, HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+    if t*10%nSteps==0: save_vert_positions(t, HC)
+    get_energy(HC, t, params)
   return t
 
 def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, implicitVolume=False):
@@ -89,9 +87,8 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
   import numpy as np
   t = tInit
   while t < tInit+nSteps:
-    print('t',t)
-    if t*10%nSteps==0: save_vert_positions(t, HC)
     t+=1
+    print('t',t)
     if minEdge>0: remesh(HC, minEdge, maxEdge, bV)
     posArray = np.array([x for v in HC.V for x in v.x])
     args=(HC, bV, t, params)
@@ -110,5 +107,6 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
     for i, v in enumerate(HC.V):
       move(v, posArray[3*i:3*(i+1)] - alpha*gradArray[3*i:3*(i+1)], HC, bV)
     if implicitVolume: correct_the_volume(HC, bV, params['initial_volume'])
+    if t*10%nSteps==0: save_vert_positions(t, HC)
   return t
  
