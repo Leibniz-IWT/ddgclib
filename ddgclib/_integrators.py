@@ -6,7 +6,7 @@ def Euler(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, impli
 #If constMoveLen, the step is adapted so that the maximum distance moved is equal to stepSize
   #from ddgclib._plotting import plot_polyscope
   t = tInit
-  while t <= tInit+nSteps:
+  while t < tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: 
       save_vert_positions(t, HC)
@@ -28,7 +28,7 @@ def AdamsBashforth(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=
   #from ddgclib._plotting import plot_polyscope
   forcePrev = {}
   t = tInit
-  while t <= tInit+nSteps:
+  while t < tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: 
       save_vert_positions(t, HC)
@@ -58,7 +58,7 @@ def NewtonRaphson(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-
   t = tInit
   forcePrev = {}
   posPrev = {}
-  while t <= tInit+nSteps:
+  while t < tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: save_vert_positions(t, HC)
     get_energy(HC, t, params)
@@ -88,7 +88,7 @@ def lineSearch(HC, bV, params, tInit, nSteps, stepSize, minEdge=-1, maxEdge=-1, 
   from scipy.optimize import line_search
   import numpy as np
   t = tInit
-  while t <= tInit+nSteps:
+  while t < tInit+nSteps:
     print('t',t)
     if t*10%nSteps==0: save_vert_positions(t, HC)
     t+=1
