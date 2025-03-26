@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# coding: utf-8
+#Ianto Cannon 2025 Mar 26. Find the profile of a bubble with Bond number 0.4
 import numpy as np
 from ddgclib._plotting import plot_polyscope, plot_profile, plot_centroid_vs_iteration
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
