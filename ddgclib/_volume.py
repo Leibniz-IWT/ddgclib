@@ -94,7 +94,8 @@ def spherical_cap_contact_angle(RadFoot, vol):
   for i in range(100):
     height = height*(1-alpha) + alpha* 6*vol / np.pi / (3*RadFoot**2 + height**2)
   RadSphere = ( RadFoot**2 + height**2 ) / 2 / height
-  contacAng = np.atan2( RadFoot, RadSphere - height )
+  #contacAng = np.atan2( RadFoot, RadSphere - height )
+  contacAng = np.arctan2( RadFoot, RadSphere - height )
   if False:
     foundVol = np.pi/3 * ( RadFoot / np.sin(contacAng) )**3 * ( 2 + np.cos(contacAng) ) * ( 1 - np.cos(contacAng) )**2
     print('cap vol error', (foundVol - vol)/vol)
