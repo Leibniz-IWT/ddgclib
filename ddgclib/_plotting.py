@@ -221,9 +221,10 @@ def plot_centroid_vs_iteration(height):
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
   fname = 'data/vol.txt'
+  print(f'fname = {fname}')
   with open(fname, encoding = 'utf-8') as f:
     print('loadin ',fname)
-    df = np.loadtxt(f)
+    df = np.loadtxt(f, usecols=range(18))
   ax.plot(df[:,0],df[:,7], '.', mec=col, mfc='None', mew=.2, alpha=.5)
   ax.plot([df[0,0],df[-1,0]],[height,height], color=col, alpha=.5)#ls='dashed')
   ax.tick_params(which='both', direction='in', top=True, right=True)
