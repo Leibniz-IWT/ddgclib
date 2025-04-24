@@ -27,7 +27,7 @@ def save_neighbours(fname,HC):
       vNum+=1
   return
 
-def save_vert_positions(t,HC):
+def save_vert_positions(t, HC):
 #Save the xyz position of all vertices in a text file.
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   bubble_centroid[2] = 0
