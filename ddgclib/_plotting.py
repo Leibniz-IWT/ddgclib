@@ -237,6 +237,35 @@ def plot_centroid_vs_iteration(height):
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
+def plot_centroid_vs_iteration_compare(height): 
+  plt.rcdefaults()
+  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
+  fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
+  col=BoColour(4)
+  fname = 'oneProc/vol.txt'
+  print(f'fname = {fname}')
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f, usecols=range(18))
+  ax.plot(df[:,0],df[:,7], '.', mec='None', mfc=col, mew=.2, alpha=.5)
+  ax.plot([df[0,0],df[-1,0]],[height,height], color=col, alpha=.5)#ls='dashed')
+  fname = 'data/vol.txt'
+  print(f'fname = {fname}')
+  with open(fname, encoding = 'utf-8') as f:
+    print('loadin ',fname)
+    df = np.loadtxt(f, usecols=range(18))
+  ax.plot(df[:,0],df[:,7], '.', mec=col, mfc='None', mew=.2, alpha=.5)
+  ax.plot([df[0,0],df[-1,0]],[height,height], color=col, alpha=.5)#ls='dashed')
+  ax.tick_params(which='both', direction='in', top=True, right=True)
+  ax.set_xlabel('$n$', rotation=0)
+  #ax.set_ylabel('$\\langle z \\rangle/R$')#, rotation=0)
+  ax.set_ylabel('$\\frac{\\langle z \\rangle}{R}$', rotation=0, size=20, labelpad=10)
+  ax.set_xlim([df[0,0],df[-1,0]])
+  fname = 'data/centroid_vs_iteration.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
 def plot_vol(): 
   plt.rcdefaults()
   plt.rcParams.update({"text.usetex": True,'font.size' : 12,})

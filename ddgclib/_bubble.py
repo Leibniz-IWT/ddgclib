@@ -2,7 +2,8 @@
 #Functions for calculating the interface shape of bubbles on surfaces
 #Adapted from code written by Stefan Endres
 import numpy as np
-from ddgclib._curvatures import HC_curvatures_sessile, construct_HC
+from ddgclib._curvatures import construct_HC#, HC_curvatures_sessile 
+from ddgclib._curvatures_heron import hndA_i
 from ddgclib._volume import triangle_prism_volume, cross_prod
 
 def save_neighbours(fname,HC):
@@ -183,9 +184,9 @@ def get_forces(HC, bV, t, params):
 #get the surface tension and pressure forces on the vertices
   RadFoot=1
   # Compute interior curvatures
-  (HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
-    HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
-    Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, params['contactAng'], printout=0)
+  #(HN_i, C_ij, K_H_i, HNdA_i_Cij, Theta_i,
+  #  HNdA_i_cache, HN_i_cache, C_ij_cache, K_H_i_cache, HNdA_i_Cij_cache,
+  #  Theta_i_cache) = HC_curvatures_sessile(HC, bV, RadFoot, params['contactAng'], printout=0)
   total_bubble_volume, total_bubble_area, bubble_centroid = triangle_prism_volume(HC)
   if total_bubble_volume != total_bubble_volume: raise ValueError('The bubble volume is not a number')
   gasPressure = params['targetPressure'] * (params['targetVol']/total_bubble_volume)**5
@@ -199,8 +200,15 @@ def get_forces(HC, bV, t, params):
   height = max([v.x_a[2] for v in HC.V])
   for v in HC.V:
     force = np.array([0.0,0.0,0.0])
-    H = HNdA_i_cache[v.x]
-    interf_force = params['gamma'] * H
+    #H = HNdA_i_cache[v.x]
+    #interf_force = params['gamma'] * H
+    #print('H',H)
+    HNdA_i, C_i = hndA_i(v)#, n_i=n_i)
+    #print('v.x',v.x)
+    #print('HNdA_i',HNdA_i)
+    #print('HNdA_i/H',HNdA_i/H)
+    #print(' ')
+    interf_force = - params['gamma'] * HNdA_i
     net_interf_force += interf_force
     gas_force = 0
     liq_force = 0
