@@ -317,7 +317,7 @@ def correct_the_volume(HC, bV, target_volume):
       HC.V.move(v, tuple(v.x_a + dualNormal*shift))
   return 
 
-def AdamsBashforthProfile(Bo, RadTop, contactAng=-1):
+def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
@@ -328,22 +328,24 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1):
   z=0
   Volume=0
   centroid=0
-  fname='data/adams'+str(Bo)+'.txt'
-  with open(fname, "w") as adams_txt:
+  #fname='data/adams'+str(Bo)+'.txt'
+  if fname: 
+    adams_txt = open(fname, "w") 
     print('saving',fname)
-    for i in range(int(10/d)):
-      r += d * np.cos(psi)
-      dz = d * np.sin(psi)
-      z += dz
-      Volume += np.pi*r**2*dz
-      centroid += z*np.pi*r**2*dz
-      #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
-      print(r*RadTop, -z*RadTop, psi, file=adams_txt)
-      psi += d * (2 - Bo*z - np.sin(psi)/r)
-      #if 2 - Bo*z - np.sin(psi)/r < 0: break
-      #if z < -.4: break
-      #if contactAng>0 and psi > contactAng: break
-      if psi > contactAng: break
-      if psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
+  for i in range(int(10/d)):
+    r += d * np.cos(psi)
+    dz = d * np.sin(psi)
+    z += dz
+    Volume += np.pi*r**2*dz
+    centroid += z*np.pi*r**2*dz
+    #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
+    if fname: print(r*RadTop, -z*RadTop, psi, file=adams_txt)
+    psi += d * (2 - Bo*z - np.sin(psi)/r)
+    #if 2 - Bo*z - np.sin(psi)/r < 0: break
+    #if z < -.4: break
+    if contactAng>0 and psi > contactAng: break
+    if contactAng<0 and 2-Bo*z-np.sin(psi)/r < 0: break
+    #if psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
+  if fname: close(adams_txt)
   centroid /= Volume
-  return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop
+  return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, psi
