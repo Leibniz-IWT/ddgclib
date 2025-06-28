@@ -343,9 +343,9 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
     psi += d * (2 - Bo*z - np.sin(psi)/r)
     #if 2 - Bo*z - np.sin(psi)/r < 0: break
     #if z < -.4: break
-    if contactAng>0 and psi > contactAng: break
+    #if contactAng>0 and psi > contactAng: break
     if contactAng<0 and 2-Bo*z-np.sin(psi)/r < 0: break
-    #if psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
+    if contactAng>0 and psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
   if fname: close(adams_txt)
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, psi
