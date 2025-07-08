@@ -3,7 +3,6 @@ import numpy as np
 import meshio
 import pandas as pd
 from scipy.optimize import root
-from scipy.integrate import quad
 import multiprocessing
 import time
 
@@ -53,28 +52,39 @@ def patch_area_and_volume(V0, V1, V2, coeffs):
     volume = sum(tet_volume(np.array(tet)) for tet in tets)
     return area, volume
 
-def adaptive_patch_integrate(V0, V1, V2, coeffs, tol=1e-5, depth=0, max_depth=8):
-    area, volume = patch_area_and_volume(V0, V1, V2, coeffs)
-    if area < 1e-14:
-        return [(area, volume)]
-    mid01 = (V0 + V1) / 2
-    mid12 = (V1 + V2) / 2
-    mid20 = (V2 + V0) / 2
-    Pm01 = normal_projection_to_surface(mid01, coeffs)
-    Pm12 = normal_projection_to_surface(mid12, coeffs)
-    Pm20 = normal_projection_to_surface(mid20, coeffs)
-    flat_mids = [mid01, mid12, mid20]
-    curved_mids = [Pm01, Pm12, Pm20]
-    err = max(np.linalg.norm(cm - fm) for cm, fm in zip(curved_mids, flat_mids))
-    if (area > tol or err > tol*5) and depth < max_depth:
-        return (
-            adaptive_patch_integrate(V0, mid01, mid20, coeffs, tol, depth+1, max_depth) +
-            adaptive_patch_integrate(mid01, V1, mid12, coeffs, tol, depth+1, max_depth) +
-            adaptive_patch_integrate(mid20, mid12, V2, coeffs, tol, depth+1, max_depth) +
-            adaptive_patch_integrate(mid01, mid12, mid20, coeffs, tol, depth+1, max_depth)
-        )
-    else:
-        return [(area, volume)]
+def adaptive_integral_patch(A, B, C, coeffs, tol=1e-5, max_depth=8):
+    """
+    Adaptive Integral Patch:
+    Computes the curved patch volume for triangle ABC on an implicit surface
+    using recursive adaptive subdivision.
+    Returns (patch_area, patch_volume).
+    """
+    def _recursive(V0, V1, V2, coeffs, tol, depth, max_depth):
+        area, volume = patch_area_and_volume(V0, V1, V2, coeffs)
+        if area < 1e-14:
+            return [(area, volume)]
+        mid01 = (V0 + V1) / 2
+        mid12 = (V1 + V2) / 2
+        mid20 = (V2 + V0) / 2
+        Pm01 = normal_projection_to_surface(mid01, coeffs)
+        Pm12 = normal_projection_to_surface(mid12, coeffs)
+        Pm20 = normal_projection_to_surface(mid20, coeffs)
+        flat_mids = [mid01, mid12, mid20]
+        curved_mids = [Pm01, Pm12, Pm20]
+        err = max(np.linalg.norm(cm - fm) for cm, fm in zip(curved_mids, flat_mids))
+        if (area > tol or err > tol*5) and depth < max_depth:
+            return (
+                _recursive(V0, mid01, mid20, coeffs, tol, depth+1, max_depth) +
+                _recursive(mid01, V1, mid12, coeffs, tol, depth+1, max_depth) +
+                _recursive(mid20, mid12, V2, coeffs, tol, depth+1, max_depth) +
+                _recursive(mid01, mid12, mid20, coeffs, tol, depth+1, max_depth)
+            )
+        else:
+            return [(area, volume)]
+    result = _recursive(A, B, C, coeffs, tol, 0, max_depth)
+    total_area = sum(x[0] for x in result)
+    total_volume = sum(x[1] for x in result)
+    return total_area, total_volume
 
 def sample_points_triangle(A, B, C, n_samples=5):
     points = []
@@ -93,7 +103,6 @@ def cylinder_angle(x, y, R):
     return angle if angle >= 0 else angle + 2*np.pi
 
 def extend_arc_point_to_z(P1, P2, z_target, R):
-    """Extend arc on cylinder from P1 to P2 to reach z_target (linear in z, arc in angle)."""
     theta1 = cylinder_angle(P1[0], P1[1], R)
     theta2 = cylinder_angle(P2[0], P2[1], R)
     dz = P2[2] - P1[2]
@@ -105,12 +114,13 @@ def extend_arc_point_to_z(P1, P2, z_target, R):
     y = R * np.sin(theta)
     return np.array([x, y, z_target])
 
-def wedge_volume_geodesic_ABCD(A, B, C, R):
+def solid_angle_patch(A, B, C, coeffs):
     """
-    Returns the volume correction for ABC, with D at z(C), D on geodesic AB (on the cylinder).
-    Vcorrection = (V_cylinder - area_COD * h_full) / splittimes, where splittimes = 2pi / theta_CD * 2
+    Solid Angle Patch:
+    Returns the analytical patch volume for triangle ABC using the solid angle/wedge formula,
+    where the surface is a cylinder given by coeffs.
     """
-    # Sort points so A=top, B=bottom, C=middle
+    R = 1 / np.sqrt(coeffs[0]) if coeffs[0] != 0 else 1.0
     zvals = [A[2], B[2], C[2]]
     idxs = np.argsort(zvals)
     top = [A, B, C][idxs[2]]
@@ -119,37 +129,46 @@ def wedge_volume_geodesic_ABCD(A, B, C, R):
     A, B, C = top, bot, mid
     EPS = 1e-10
     h_full = abs(A[2] - B[2])
-    # D is on AB geodesic at z = C[2]
     D = extend_arc_point_to_z(A, B, C[2], R)
-
-    # Get angles (relative to center O)
     theta_C = cylinder_angle(C[0], C[1], R)
     theta_D = cylinder_angle(D[0], D[1], R)
-
-    # Ensure theta_CD is always the minor arc [0, pi)
     theta_CD = (theta_D - theta_C) % (2 * np.pi)
     if theta_CD >= np.pi:
         theta_CD = 2 * np.pi - theta_CD
-    # Triangle area COD (sector formula for triangle from center)
-    #triangle_area_COD = 0.5 * R*np.cos(theta_CD/2) * np.sin(theta_CD/2)*R*2
     triangle_area_COD = 0.5 * R**2 * np.sin(theta_CD)
     V_t = h_full * np.pi * R**2
     splittimes = 2 * np.pi / theta_CD
-    Vcorrection = (V_t/splittimes- triangle_area_COD * h_full)/2 
+    Vcorrection = (V_t/splittimes - triangle_area_COD * h_full) / 2
 
-    # Special case: C at same z as A
     if abs(C[2] - A[2]) < EPS:
         theta_CA = (cylinder_angle(C[0], C[1], R) - cylinder_angle(A[0], A[1], R)) % (2 * np.pi)
         if theta_CA >= np.pi:
             theta_CA = 2 * np.pi - theta_CA
         triangle_area_COA = 0.5 * R**2 * np.sin(theta_CA)
         splittimes = 2 * np.pi / theta_CA
+        h_full = abs(C[2] - B[2])
         V_t = h_full * np.pi * R**2
-        Vcorrection = (V_t/splittimes - triangle_area_COA * h_full)/2 
-        print(f"*theta_CD: {theta_CD:.6f}, triangle_area_COD: {triangle_area_COA:.6f}, Vcorrection: {Vcorrection:.6f},splittimes: {splittimes:.6f}, h_full: {h_full:.6f}")
-        #return Vcorrection
+        Vcorrection = (V_t / splittimes - triangle_area_COA * h_full) / 2
+        O = np.array([0.0, 0.0, (B[2] + A[2]) / 2])
+        mat = np.vstack([A - O, B - O, C - O])
+        V_OCAB = abs(np.linalg.det(mat)) / 6
+        Vpatch = (V_t - V_OCAB * splittimes * 2 - triangle_area_COA * splittimes * h_full / 3) / splittimes / 2
+        return Vpatch
+    if abs(C[2] - B[2]) < EPS:
+        theta_CB = (cylinder_angle(C[0], C[1], R) - cylinder_angle(B[0], B[1], R)) % (2 * np.pi)
+        if theta_CB >= np.pi:
+            theta_CB = 2 * np.pi - theta_CB
+        triangle_area_COB = 0.5 * R**2 * np.sin(theta_CB)
+        splittimes = 2 * np.pi / theta_CB
+        h_full = abs(A[2] - B[2])
+        V_t = h_full * np.pi * R**2
+        Vcorrection = (V_t / splittimes - triangle_area_COB * h_full) / 2
+        O = np.array([0.0, 0.0, (B[2] + A[2]) / 2])
+        mat = np.vstack([A - O, B - O, C - O])
+        V_OCAB = abs(np.linalg.det(mat)) / 6
+        Vpatch = (V_t - V_OCAB * splittimes * 2 - triangle_area_COB * splittimes * h_full / 3) / splittimes / 2
+        return Vpatch
 
-    print(f"theta_CD: {theta_CD:.6f}, triangle_area_COD: {triangle_area_COD:.6f}, Vcorrection: {Vcorrection:.6f},splittimes: {splittimes:.6f}, h_full: {h_full:.6f}")
     return Vcorrection
 
 def get_surface_triangle_set_from_msh(mesh_name):
@@ -176,25 +195,25 @@ def adaptive_triangle_worker(args):
     idx, tri, surf_points, coeffs, tol, max_depth, surface_tris = args
     is_surface_triangle = frozenset(tri) in surface_tris
     A, B, C = surf_points[tri]
-    result = adaptive_patch_integrate(A, B, C, coeffs, tol, max_depth=max_depth)
-    total_area = sum(x[0] for x in result)
-    total_volume = sum(x[1] for x in result)
+    # Adaptive Integral Patch (modular)
+    patch_area, patch_volume = adaptive_integral_patch(A, B, C, coeffs, tol, max_depth)
+    # Flat tetrahedron volume (reference)
     V_flat = abs(np.dot(A, np.cross(B, C))) / 6
-    correction = total_volume - V_flat
+    correction = patch_volume - V_flat
     flat_area = np.linalg.norm(np.cross(B - A, C - A)) / 2
-    Vcorrection = wedge_volume_geodesic_ABCD(A, B, C, R)
-
+    # Solid Angle Patch (modular, analytical)
+    Vcorrection = solid_angle_patch(A, B, C, coeffs)
     row = {
         'triangle_id': idx,
-        'curved_patch_volume': total_volume,
+        'curved_patch_volume': patch_volume,
         'Vcorrection': Vcorrection,
         'flat_volume': V_flat,
         'correction': correction,
-        'patch_area': total_area,
+        'patch_area': patch_area,
         'flat_area': flat_area,
         'surface_triangle': is_surface_triangle,
     }
-    return row, total_volume
+    return row, patch_volume
 
 if __name__ == "__main__":
     mesh = meshio.read(mesh_name)
@@ -218,9 +237,8 @@ if __name__ == "__main__":
         pts4 = points[tet]
         V_piecewise += tet_volume(pts4)
 
-    all_faces = surf_faces  # or set to all triangles you want to process
+    all_faces = surf_faces
     surface_tris = get_surface_triangle_set_from_msh(mesh_name)
-
     tol = 1e-4
     max_depth = 6
     args_list = [(idx, tri, points, coeffs, tol, max_depth, surface_tris) for idx, tri in enumerate(all_faces)]
@@ -235,8 +253,6 @@ if __name__ == "__main__":
     V_patch_sum = 0.0
     for row, volume in results:
         csv_rows.append(row)
-        # print(f"Triangle {row['triangle_id']}: Patch volume = {row['curved_patch_volume']:.8f}, Correction = {row['correction']:.8f}, "
-        #       f"Vcorrection = {row['Vcorrection']:.8f}, Surface: {row['surface_triangle']}")
         V_patch_sum += volume
 
     df = pd.DataFrame(csv_rows)
