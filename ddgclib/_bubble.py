@@ -322,7 +322,7 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
-  d=.0001
+  d=.001*min(1./Bo,1)
   psi=0
   r=0
   z=0
@@ -332,7 +332,7 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
   if fname: 
     adams_txt = open(fname, "w") 
     print('saving',fname)
-  for i in range(int(10/d)):
+  for i in range(int(1e5)):#10/d)):
     r += d * np.cos(psi)
     dz = d * np.sin(psi)
     z += dz
@@ -341,11 +341,14 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
     #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
     if fname: print(r*RadTop, -z*RadTop, psi, file=adams_txt)
     psi += d * (2 - Bo*z - np.sin(psi)/r)
-    #if 2 - Bo*z - np.sin(psi)/r < 0: break
     #if z < -.4: break
-    #if contactAng>0 and psi > contactAng: break
-    if contactAng<0 and 2-Bo*z-np.sin(psi)/r < 0: break
-    if contactAng>0 and psi < contactAng and 2-Bo*z-np.sin(psi)/r < 0: break
-  if fname: close(adams_txt)
+    if 2-Bo*z-np.sin(psi)/r < 0:
+      if contactAng<0: break
+      elif psi < contactAng: break
+    #if contactAng>0 and 2-Bo*z-np.sin(psi)/r < 0 and psi < contactAng: 
+    #  print('brea i',i, 'psi',psi)
+    #  break
+  if i>int(1e5-2): print('i',i, 'contactAng', contactAng)
+  #if fname: close(adams_txt)
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, psi

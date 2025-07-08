@@ -8,6 +8,8 @@ from matplotlib.widgets import Slider
 from matplotlib.widgets import Slider
 import polyscope as ps
 from ddgclib._misc import *  # coldict is neeeded
+plt.rcdefaults()
+plt.rcParams.update({"text.usetex": True,'font.size' : 14,})
 
 # Polyscope
 def plot_polyscope(HC):
@@ -107,8 +109,6 @@ def pplot_surface(HC):
     return ps
 
 def plot_Adam_Bash(): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   root =  'data/'
   #for inFile in sorted(os.listdir(root)):
@@ -158,8 +158,6 @@ def plot_Adam_Bash():
   return
 
 def plot_bubble_coords(): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   fname = 'data/adams0.txt'
   with open(fname, encoding = 'utf-8') as f:
@@ -196,8 +194,6 @@ def plot_bubble_coords():
 
 def plot_cone(): 
   import matplotlib.image as mpimg
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)
   root =  'data/'
   fname = root + 'cone.png'
@@ -216,8 +212,6 @@ def plot_cone():
   return
 
 def plot_centroid_vs_iteration(height): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
   fname = 'data/vol.txt'
@@ -238,8 +232,6 @@ def plot_centroid_vs_iteration(height):
   return
 
 def plot_centroid_vs_iteration_compare(height): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
   fname = 'oneProc/vol.txt'
@@ -267,8 +259,6 @@ def plot_centroid_vs_iteration_compare(height):
   return
 
 def plot_vol(): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   fname = 'Bo0/vol.txt'
   V0 = 2*np.pi*1e-9/3
@@ -295,8 +285,6 @@ def BoColour(Bo):
   return (r,g,b)
 
 def plot_profile(t): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
   folName = 'data/'
@@ -324,8 +312,6 @@ def plot_profile(t):
   return
 
 def plot_profile_with_grid_resolution(): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
   folName = 'radTopBy1/'
@@ -384,8 +370,6 @@ def plot_profile_with_grid_resolution():
   return
 
 def plot_centroid_vs_grid_size(): 
-  plt.rcdefaults()
-  plt.rcParams.update({"text.usetex": True,'font.size' : 12,})
   fig, ax = plt.subplots(1)
   ABcentroid = 0.4728934922628638
   col=BoColour(4)
@@ -404,6 +388,38 @@ def plot_centroid_vs_grid_size():
   ax.set_xscale('log')
   ax.set_yscale('log')
   fname = 'data/centroidVsGridSize.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def plot_detach_radius_vs_cont_angle(): 
+  fig, ax = plt.subplots(1)
+  col=BoColour(4)
+  fname = 'data/fritz.txt'
+  print('open',fname)
+  with open(fname) as f:
+    df = np.loadtxt(f)
+  ax.plot(df[:,1], df[:,2])#, c=col)#, mew=.2, alpha=.5)
+  ax.plot(df[:,1], 3**.5*np.sin(df[:,1])/2**.166/(2+np.cos(df[:,1]))**.166/(1-np.cos(df[:,1]))**.333 )#, c=col)#, mew=.2, alpha=.5)
+  ax.set_xlabel('$\\phi$', rotation=0)
+  ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
+  fname = 'data/detachRadVsContAngle.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def plot_detach_radius_vs_cont_radius(): 
+  fig, ax = plt.subplots(1)
+  col=BoColour(4)
+  fname = 'data/fritz.txt'
+  print('open',fname)
+  with open(fname) as f:
+    df = np.loadtxt(f)
+  ax.plot(df[:,4], df[:,5])#, c=col)#, mew=.2, alpha=.5)
+  ax.plot(df[:,4], (1.5*df[:,4])**(1./3) )#, c=col)#, mew=.2, alpha=.5)
+  ax.set_xlabel('$\\frac{r_{cont}}{\\lambda}$', rotation=0, size=22, labelpad=15)
+  ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
+  fname = 'data/detachRadVsContRad.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
