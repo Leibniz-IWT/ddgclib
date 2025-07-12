@@ -31,7 +31,7 @@ Choose R_top, and lambda, use Adams Bashforth integration to get V, R_bubble, an
 """
 
 import numpy as np
-from ddgclib._plotting import plot_polyscope, plot_profile, plot_detach_radius_vs_cont_angle, plot_detach_radius_vs_cont_radius
+from ddgclib._plotting import plot_polyscope, plot_detach_profile, plot_detach_radius_vs_cont_angle, plot_detach_radius_vs_cont_radius
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
 
 def bubbleProfile(capLen, RadTop, contactAng=-1, fname=None):
@@ -75,16 +75,21 @@ prm['contactAng'] = -1 #radians, angle inside the spherical cap. Set negative fo
 prm['gamma'] = 1 # N/m, surface tension
 prm['gravity'] = 1 # m/s^2 gravitational acceleration
 fname='data/fritz.txt'
+anglePrev=0
 if False:
  with open(fname, "w") as fritz_txt:
   print('saving',fname)
-  for b, Bo in enumerate(np.logspace(-4,3,num=1000)):  #range(1,1000):
+  #for b, Bo in enumerate(np.logspace(-10, 10, num=1001, base=2)):  #range(1,1000):
+  for b, Bo in enumerate(np.logspace(np.log2(.59), np.log2(.61), num=1001, base=2)):  #range(1,1000):
     #Bo=b*.01*10**(b/1.)
     #Bo=.001*b
-    if b%100==0: 
-      print('b',b,'Bo',Bo)
-      spreadName=f'data/spread{b:03}.txt'
-      pinName=f'data/pin{b:03}.txt'
+    #if b%100==0: 
+    if not np.log2(Bo)%1: 
+      print('b',b,'Bo',Bo,'1/Bo',1/Bo)
+      #spreadName=f'data/spread{2*int(np.log10(Bo))}.txt'
+      #pinName=f'data/pin{2*int(np.log10(Bo))}.txt'
+      spreadName=f'data/spread{b}.txt'
+      pinName=f'data/pin{b}.txt'
     else:
       spreadName=None
       pinName=None
@@ -95,6 +100,14 @@ if False:
     RadPin = (3*VPin/4/np.pi)**(1/3)
     VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(Bo, RadTop, fname=spreadName)
     RadSpread = (3*VSpr/4/np.pi)**(1/3)
+    if False and (anglePrev-np.pi/2)*(angleSpr-np.pi/2) < 0:
+      AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=f'data/pin{b}.txt')
+      AdamsBashforthProfile(Bo, RadTop, fname=f'data/spread{b}.txt')
+      AdamsBashforthProfile(BoPrev, RadTop, .5*np.pi, fname=f'data/pin{b-1}.txt')
+      AdamsBashforthProfile(BoPrev, RadTop, fname=f'data/spread{b-1}.txt')
+    anglePrev = angleSpr 
+    BoPrev = Bo
     print(Bo, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
 plot_detach_radius_vs_cont_angle()
 plot_detach_radius_vs_cont_radius()
+plot_detach_profile()
