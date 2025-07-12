@@ -338,8 +338,7 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
     z += dz
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
-    #if i*d*100%1 == 0: print(r*RadTop, -z*RadTop, file=adams_txt)
-    if fname: print(r*RadTop, -z*RadTop, psi, file=adams_txt)
+    if fname and not i%10: print(r*RadTop, -z*RadTop, psi, Bo, file=adams_txt)
     psi += d * (2 - Bo*z - np.sin(psi)/r)
     #if z < -.4: break
     if 2-Bo*z-np.sin(psi)/r < 0:
@@ -351,4 +350,4 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
   if i>int(1e5-2): print('i',i, 'contactAng', contactAng)
   #if fname: close(adams_txt)
   centroid /= Volume
-  return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, psi
+  return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, np.pi-psi
