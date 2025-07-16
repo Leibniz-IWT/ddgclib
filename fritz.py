@@ -39,35 +39,38 @@ prm = {} # dictionary of parameters
 prm['contactAng'] = -1 #radians, angle inside the spherical cap. Set negative for pinned contact line
 prm['gamma'] = 1 # N/m, surface tension
 prm['gravity'] = 1 # m/s^2 gravitational acceleration
+BoProfiles = [.566,.607,1.28]
+print('BoProfiles',BoProfiles)
 anglePrev=0
 RadMax=0
 BoMax=1
-if True:
-  fname='data/fritz0.txt'
-  with open(fname, "w") as fritz_txt:
-    print('saving',fname)
-    for Bo in [.56,0.6064,1.27,2**14]:
-      #AdamsBashforthProfile(BoPrev, RadTop, .5*np.pi, fname=f'data/pin{b-1}.txt')
-      #AdamsBashforthProfile(BoPrev, RadTop, fname=f'data/spread{b-1}.txt')
-      VPin, RadFootPin, heightPin, centroidPin, anglePin = AdamsBashforthProfile(BoT, RadTop, .5*np.pi, fname=f'data/pin{BoT}.txt')
-      RadPin = (3*VPin/4/np.pi)**(1/3)
-      VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(BoT, RadTop, fname=f'data/spread{BoT}.txt')
-      RadSpread = (3*VSpr/4/np.pi)**(1/3)
-      print(BoT, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
-      #AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=f'data/pin{b}.txt')
-      #AdamsBashforthProfile(Bo, RadTop, fname=f'data/spread{b}.txt')
 if False:
   fname='data/fritz.txt'
   with open(fname, "w") as fritz_txt:
     print('saving',fname)
-    for b, Bo in enumerate(np.logspace(-10, 10, num=1001, base=2)):
-    #for b, Bo in enumerate(np.logspace(np.log2(1.25), np.log2(1.32), num=1001, base=2)):
+    #for b, Bo in enumerate(np.logspace(-10, 30, num=1001, base=2)):
+    for b in range(10001):
+      Bo = 2**(b*100/10000-30)
+      for BoP in BoProfiles.copy():
+        if Bo>BoP:
+          BoProfiles.remove(BoP)
+          prm['density'] = BoP*prm['gamma']/prm['gravity']/RadTop**2 # kg/m3, bubble density difference
+          capiLen = ( prm['gamma'] / prm['density'] / prm['gravity'] )**.5
+          VPin, RadFootPin, heightPin, centroidPin, anglePin = AdamsBashforthProfile(BoP, RadTop, .5*np.pi, fname=f'data/pin{b:05}.txt')
+          RadPin = (3*VPin/4/np.pi)**(1/3)
+          VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(BoP, RadTop, fname=f'data/spread{b:05}.txt')
+          RadSpread = (3*VSpr/4/np.pi)**(1/3)
+          print(BoP, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
+          if RadMax < RadPin/capiLen and angleSpr < np.pi/2:
+            RadMax = RadPin/capiLen
+            BoMax = BoP
       spreadName=None
       pinName=None
       if not np.log2(Bo)%1: 
         print('b',b,'Bo',Bo,'1/Bo',1/Bo)
-        spreadName=f'data/spread{b}.txt'
-        pinName=f'data/pin{b}.txt'
+        spreadName=f'data/spread{b:05}.txt'
+        pinName=f'data/pin{b:05}.txt'
+      elif abs(np.log2(Bo))>8: continue
       prm['density'] = Bo*prm['gamma']/prm['gravity']/RadTop**2 # kg/m3, bubble density difference
       capiLen = ( prm['gamma'] / prm['density'] / prm['gravity'] )**.5
       VPin, RadFootPin, heightPin, centroidPin, anglePin = AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=pinName)
@@ -75,17 +78,26 @@ if False:
       VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(Bo, RadTop, fname=spreadName)
       RadSpread = (3*VSpr/4/np.pi)**(1/3)
       if False and (anglePrev-np.pi/2)*(angleSpr-np.pi/2) < 0:
-        AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=f'data/pin{b}.txt')
-        AdamsBashforthProfile(Bo, RadTop, fname=f'data/spread{b}.txt')
-        AdamsBashforthProfile(BoPrev, RadTop, .5*np.pi, fname=f'data/pin{b-1}.txt')
-        AdamsBashforthProfile(BoPrev, RadTop, fname=f'data/spread{b-1}.txt')
+        AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=f'data/pin{b:05}.txt')
+        AdamsBashforthProfile(Bo, RadTop, fname=f'data/spread{b:05}.txt')
+        AdamsBashforthProfile(BoPrev, RadTop, .5*np.pi, fname=f'data/pin{b-1:05}.txt')
+        AdamsBashforthProfile(BoPrev, RadTop, fname=f'data/spread{b-1:05}.txt')
       anglePrev = angleSpr 
       BoPrev = Bo
       print(Bo, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
-      if RadMax < RadSpread/capiLen:
-        RadMax = RadSpread/capiLen
+      if RadMax < RadPin/capiLen and angleSpr < np.pi/2:
+        RadMax = RadPin/capiLen
         BoMax = Bo
     #AdamsBashforthProfile(BoMax, RadTop, fname=f'data/pin_spreadMax.txt')
+    #print('BoMax',BoMax)
+    for BoP in BoProfiles:
+      prm['density'] = BoP*prm['gamma']/prm['gravity']/RadTop**2 # kg/m3, bubble density difference
+      capiLen = ( prm['gamma'] / prm['density'] / prm['gravity'] )**.5
+      VPin, RadFootPin, heightPin, centroidPin, anglePin = AdamsBashforthProfile(BoP, RadTop, .5*np.pi, fname=f'data/pin{BoP:05}.txt')
+      RadPin = (3*VPin/4/np.pi)**(1/3)
+      VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(BoP, RadTop, fname=f'data/spread{BoP:05}.txt')
+      RadSpread = (3*VSpr/4/np.pi)**(1/3)
+      print(BoP, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
 plot_detach_radius_vs_cont_angle()
 plot_detach_radius_vs_cont_radius()
 plot_detach_profile()

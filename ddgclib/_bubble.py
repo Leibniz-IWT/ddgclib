@@ -322,7 +322,7 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
-  d=1e-4*min( abs(Bo)**.5, 1 )
+  d=1e-4*min( 1/abs(Bo)**.5, 1 )
   psi=0
   r=0
   z=0

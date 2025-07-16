@@ -210,6 +210,16 @@ def plot_cone():
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
+def BoColour(Bo):
+  r=0
+  g=0
+  b=0
+  #if Bo<0: r=min( (-Bo/4)**.5, 1)
+  #if Bo>0: b=min( (Bo/4)**.5, 1)
+  if Bo<0: r = -2*np.arctan(4*Bo)/np.pi
+  if Bo>0: b = 2*np.arctan(4*Bo)/np.pi
+  return (r,g,b)
+
 def plot_centroid_vs_iteration(height): 
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   col=BoColour(4)
@@ -274,14 +284,6 @@ def plot_vol():
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
-
-def BoColour(Bo):
-  r=0
-  g=0
-  b=0
-  if Bo<0: r=min( (-Bo/4)**.5, 1)
-  if Bo>0: b=min( (Bo/4)**.5, 1)
-  return (r,g,b)
 
 def plot_profile(t): 
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
@@ -378,8 +380,8 @@ def plot_detach_profile():
       if cont not in fname: continue
       with open(folName+fname, encoding = 'utf-8') as f:
         df = np.loadtxt(f)
-      if 'spread' in cont and df[0,-1]==.56: continue
-      col=BoColour(np.log10(df[0,-1]))
+      if 'spread' in cont and df[0,-1]==.566: continue
+      col=BoColour(df[0,-1])
       ax.plot(df[:,0], df[:,1], color=col)#, alpha=.9)
       logBo = int(np.log2(df[-1,-1]))
       if logBo==-2: 
@@ -394,7 +396,8 @@ def plot_detach_profile():
       #diff = df[-1,:2] - df[-2,:2]
       #diff *= .1 / np.sqrt( diff[0]**2 + diff[1]**2 )
       #diff += df[-1,:2]
-      ax.text(*df[-1,:2], f'$Bo={df[-1,-1]:.3g}$', ha='left', va='center')
+      #ax.text(*df[-1,:2], f'$Bo={df[-1,-1]:.3g}$', ha='left', va='center')
+      ax.text(*df[-1,:2], f'$Bo={df[-1,-1]:.4g}$', ha='left', va='center')
     ax.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_xlabel('$r/R$')
     ax.set_ylabel('$\\frac{z}{R}$',rotation=0,size=22)
@@ -438,25 +441,22 @@ def plot_detach_radius_vs_cont_angle():
     if 'txt' not in fname: continue
     with open(folName+fname, encoding = 'utf-8') as f:
       BoProfile.append(float(f.readline().strip().split()[-1]))
-  BoProfile.remove(.56)
-  print('BoProfile',BoProfile)
+  BoProfile.remove(0.566)
   fig, ax = plt.subplots(1)
   fname = 'data/fritz.txt'
   print('open',fname)
   with open(fname) as f:
     df = np.loadtxt(f)
-  #x=df[:,1]/np.pi
-  #y=df[:,2]
   x=np.concatenate(([0],df[:,1]/np.pi,[1]))
   y=np.concatenate(([0],df[:,2],[0]))
-  ax.plot(x, y, c='k', alpha=.5)
-  ax.plot(x, .0104*180*x, '--', c='k')#, mew=.2, alpha=.5)
+  ax.plot(x, y, c='k')
+  ax.plot(x, .0104*180*x, '--', c='k')
   R = lambda p: 3**.5 * np.sin(p) / 2**(1/6.) / (1-np.cos(p)) / (2+np.cos(p))**.5 
   ax.plot(1-x, R(x*np.pi), linestyle='dotted', c='k')
   for i in range(len(df[:,0])):
     if df[i,0] in BoProfile:
-      logBo = np.log2(df[i,0]) 
-      ax.plot(df[i,1]/np.pi, df[i,2], 'o', mec=BoColour(2+logBo*2/10), mfc='None')
+      #logBo = np.log2(df[i,0]) 
+      ax.plot(df[i,1]/np.pi, df[i,2], 'o', mec=BoColour(df[i,0]), mfc='None', clip_on=False)
       va='top'
       xShift=0
       if df[i,0]>65: continue
@@ -496,20 +496,23 @@ def plot_detach_radius_vs_cont_radius():
     df = np.loadtxt(f)
   x=np.concatenate(([0],df[:,4],[df[-1,4]]))
   y=np.concatenate(([0],df[:,5],[0]))
-  #x=df[:,4]
-  #y=df[:,5]
-  ax.plot(x, y, c='k', alpha=0.5)
+  ax.plot(x, y, c='k')
   ax.plot(x, (1.5*x)**(1./3), linestyle='dotted', c='k')
   for i in range(len(df[:,0])):
     if df[i,0] in BoProfile:
       logBo = int(np.log2(df[i,0]))
-      ax.plot(df[i,4], df[i,5], 'o', mec=BoColour(2+logBo*2/10), mfc='None', clip_on=False )
+      ax.plot(df[i,4], df[i,5], 'o', mec=BoColour(df[i,0]), mfc='None', clip_on=False )
+      va='top'
+      yShift=-.015
       if logBo>6: continue
       elif logBo<-4: continue
       elif logBo<-1: ha='left'
       elif logBo>3: ha='right'
       else: ha='center'
-      ax.text(df[i,4], df[i,5]-.015, f'${df[i,0]:.4g}$', ha=ha, va='top')
+      if df[i,0]==0.566: 
+        va='bottom'
+        yShift=0.005
+      ax.text(df[i,4], df[i,5]+yShift, f'${df[i,0]:.4g}$', ha=ha, va=va)
   ax.tick_params(which='both', direction='in', top=True, right=True)
   ax.set_xlabel('$r_{cont}/\\lambda$')
   ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
