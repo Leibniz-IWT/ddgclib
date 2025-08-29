@@ -7,6 +7,41 @@ show how loops can be constructed.
 
 import numpy as np
 from scipy.sparse import coo_matrix
+from benchmarks._1_coeffs_computing import compute_rimsafe_alltri
+# benchmarks/_benchmark_toy_methods.py
+import os
+
+def compute_coeffs_rimsafe(msh_path,
+                           out_csv=None,
+                           min_pts=10,
+                           theta_max_deg=35.0,
+                           plane_rel=1e-3,
+                           plane_abs=1e-9,
+                           irls=0,
+                           snap_rel=5e-6,
+                           snap_abs=1e-9,
+                           canonize_abc=True,
+                           debug_j=False):
+    from benchmarks._1_coeffs_computing import compute_rimsafe_alltri
+
+    msh_path = str(msh_path)
+    if out_csv is None:
+        base = os.path.splitext(os.path.basename(msh_path))[0]
+        out_csv = os.path.join(os.path.dirname(msh_path), f"{base}_COEFFS.csv")
+
+    df, total_tris, skipped_flat = compute_rimsafe_alltri(
+        msh_path, out_csv,
+        min_pts=min_pts,
+        theta_max_deg=theta_max_deg,
+        plane_rel_tol=plane_rel,
+        plane_abs_tol=plane_abs,
+        irls_iters=irls,
+        snap_rel=snap_rel,
+        snap_abs=snap_abs,
+        canonize_abc=canonize_abc,
+        debug_j=debug_j,
+    )
+    return df, dict(total_tris=total_tris, skipped_flat=skipped_flat, out_csv=out_csv)
 
 def compute_laplace_beltrami(points, simplices):
     n = len(points)

@@ -1,12 +1,76 @@
+# benchmarks/_benchmark_cases.py
 import numpy as np
 from scipy.spatial import Delaunay
-from ._benchmark_classes import GeometryBenchmarkBase
+from pathlib import Path
 
-import numpy as np
-from scipy.spatial import Delaunay
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from ._benchmark_classes import GeometryBenchmarkBase
+from benchmarks._benchmark_classes import GeometryBenchmarkBase
+
+# Optional plotting – skip gracefully if matplotlib isn't installed
+try:
+    import matplotlib.pyplot as plt  # noqa: F401
+except Exception:
+    plt = None  # plotting skipped if matplotlib isn't present
+
+
+class QuadricCoeffsFromMsh(GeometryBenchmarkBase):
+    """
+    Part-1 only benchmark case: fits quadric coeffs on a .msh and writes <mesh>_COEFFS.csv,
+    then runs Part-2 to produce <mesh>_COEFFS_Transformed.csv.
+    Uses GeometryBenchmarkBase so you keep the common summary/timing interface,
+    but it does not compute area/volume/curvature.
+    """
+    def __init__(self, msh_path, method=None):
+        # Provide harmless, valid method names so the base class doesn't error,
+        # but we won't actually use those computations here.
+        safe_method = dict(method or {})
+        try:
+            from ddgclib._method_wrappers import (
+                _curvature_i_methods, _area_methods, _volume_methods
+            )
+            safe_method.setdefault("curvature_i_method", next(iter(_curvature_i_methods)))
+            safe_method.setdefault("area_method",       next(iter(_area_methods)))
+            safe_method.setdefault("volume_method",     next(iter(_volume_methods)))
+        except Exception:
+            # If registries aren't available, still proceed; base may ignore them.
+            pass
+
+        super().__init__(
+            name=f"QuadricCoeffs[{Path(msh_path).stem}]",
+            method=safe_method,
+            complex_dtype="msh"
+        )
+        self.msh_path = str(msh_path)
+        self.coeffs_df = None
+        self.coeffs_meta = {}
+
+    def run_benchmark(self):
+        # Take Part-1 knobs (if provided) from method["coeffs_kwargs"]
+        kwargs = self.method.get("coeffs_kwargs", {})
+        # Part-1: compute coeffs & write <mesh>_COEFFS.csv
+        self.run_coeffs_stage(self.msh_path, **kwargs)
+        # Part-2: transform to canonical space & write <mesh>_COEFFS_Transformed.csv
+        self.run_transform_stage()
+
+        # Keep base interface fields defined (not used for Part-1/2)
+        self.area_computed = 0.0
+        self.volume_computed = 0.0
+        self.H_computed = 0.0
+        self.analytical_values()
+
+    def analytical_values(self):
+        self.area_analytical = 0.0
+        self.volume_analytical = 0.0
+        self.H_analytical = 0.0
+
+    def summary(self):
+        base = super().summary()
+        base.update({
+            "Total surface triangles": (self.coeffs_meta.get("total_tris", 0), 0),
+            "Skipped planar (flat guard)": (self.coeffs_meta.get("skipped_flat", 0), 0),
+            "CSV path": (self.coeffs_meta.get("out_csv", ""), 0),
+        })
+        return base
+
 
 class TorusBenchmark(GeometryBenchmarkBase):
     def __init__(self, R_major=2.0, r_minor=1.0, n_u=30, n_v=30, **kwargs):
@@ -69,18 +133,6 @@ class TorusBenchmark(GeometryBenchmarkBase):
     def dA(self, uv_i, uv_j, uv_k, n_samples=3):
         """
         Integrate surface area over a triangle in (u,v)-space.
-
-        Parameters
-        ----------
-        uv_i, uv_j, uv_k : array-like
-            Triangle corners in (u,v) coordinates.
-        n_samples : int
-            Number of barycentric samples.
-
-        Returns
-        -------
-        float
-            Integrated surface area.
         """
         pts, weights = self._barycentric_samples(uv_i, uv_j, uv_k, n_samples)
         area = 0.0
@@ -96,18 +148,6 @@ class TorusBenchmark(GeometryBenchmarkBase):
     def HNdA(self, uv_i, uv_j, uv_k, n_samples=3):
         """
         Integrate mean curvature times area over a triangle in (u,v)-space.
-
-        Parameters
-        ----------
-        uv_i, uv_j, uv_k : array-like
-            Triangle corners in (u,v) coordinates.
-        n_samples : int
-            Number of barycentric samples.
-
-        Returns
-        -------
-        float
-            Integrated mean curvature over area.
         """
         pts, weights = self._barycentric_samples(uv_i, uv_j, uv_k, n_samples)
         integral = 0.0
@@ -139,6 +179,8 @@ class TorusBenchmark(GeometryBenchmarkBase):
 
     def plot_uv_triangulation(self):
         """Plot the triangulation in the (u,v) parametric plane."""
+        if plt is None:
+            return
         plt.figure(figsize=(6, 6))
         for tri in self.simplices:
             uv_coords = np.array([self.u[tri], self.v[tri]]).T
@@ -152,6 +194,10 @@ class TorusBenchmark(GeometryBenchmarkBase):
 
     def plot_surface_mesh(self):
         """Plot the 3D simplicial complex mesh."""
+        if plt is None:
+            return
+        # Import here so the file still loads without matplotlib installed
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: WPS433 (deliberate local import)
         fig = plt.figure(figsize=(8, 6))
         ax = fig.add_subplot(111, projection='3d')
         mesh = Poly3DCollection(self.points[self.simplices], alpha=0.5)
