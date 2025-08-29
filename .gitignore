@@ -2,3 +2,10 @@ ddgclib/__pycache__
 .ipynb_checkpoints
 *.DS_Store
 *.ini
+
+# generated
+*.csv
+*.msh
+__pycache__/
+.venv/
+.ipynb_checkpoints/
