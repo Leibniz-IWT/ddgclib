@@ -1,12 +1,39 @@
 import numpy as np
 from scipy.spatial import Delaunay
-from ._benchmark_classes import GeometryBenchmarkBase
-
-import numpy as np
-from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from ._benchmark_classes import GeometryBenchmarkBase
+# benchmarks/_benchmark_cases.py
+from pathlib import Path
+
+# ------------------------- Generic “just a mesh” case -------------------------
+class MshCase(GeometryBenchmarkBase):
+    """
+    Loads a mesh from a .msh file and sets analytical values to NaN.
+    Use this to run the benchmark framework with an arbitrary mesh; the
+    actual algorithm is chosen via the registry (e.g., method={"volume_method": "curved_volume"}).
+    """
+    def __init__(self, msh_path, **kwargs):
+        super().__init__(name=f"Msh[{Path(msh_path).stem}]", **kwargs)
+        self.msh_path = str(msh_path)
+
+    def generate_mesh(self):
+        # Prefer the project helper if available
+        try:
+            from ._benchmark_plotting_utils import read_gmsh_tri
+        except Exception as e:
+            raise ImportError(
+                "read_gmsh_tri not available. Ensure benchmarks/_benchmark_plotting_utils.py exists "
+                "or replace this call with your own .msh reader that returns (points, simplices)."
+            ) from e
+        self.points, self.simplices = read_gmsh_tri(self.msh_path)
+
+    def analytical_values(self):
+        # Unknown / not applicable -> NaN (not 0.0)
+        self.area_analytical = np.nan
+        self.volume_analytical = np.nan
+        self.H_analytical = np.nan
+
 
 class TorusBenchmark(GeometryBenchmarkBase):
     def __init__(self, R_major=2.0, r_minor=1.0, n_u=30, n_v=30, **kwargs):

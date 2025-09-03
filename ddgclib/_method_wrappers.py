@@ -3,8 +3,16 @@ import logging
 
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '../benchmarks'))
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+# Ensure the repo's benchmarks/ folder is importable when running from the library
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+_bench_path = os.path.join(_repo_root, "benchmarks")
+if os.path.isdir(_bench_path) and _bench_path not in sys.path:
+    sys.path.append(_bench_path)
+    
 from benchmarks._benchmark_toy_methods import (
     compute_laplace_beltrami,
     compute_area_vertex_default,
@@ -60,6 +68,15 @@ class Curvature_i:
             return self._func(HC)
         else:
             raise ValueError("Unknown complex_dtype")
+        
+def _volume_curved(HC, complex_dtype="vf", **kwargs):
+    # Lazy import so missing deps (meshio, pandas) don't break import-time
+    from ._curved_volume import curved_volume
+    return curved_volume(HC, complex_dtype=complex_dtype, **kwargs)
+
+# Make the entry visible in the registry unconditionally; the lazy import
+# inside _volume_curved will raise if dependencies are missing at call time.
+_volume_methods["curved_volume"] = _volume_curved
 
 class Curvature_ijk:
     """Triangle-based curvature estimator (not yet implemented)."""
@@ -156,22 +173,13 @@ class Volume:
 
     def __call__(self, HC, complex_dtype="vf"):
         """
-        Parameters
-        ----------
-        HC : tuple
-            (points, simplices)
-        complex_dtype : str
-            Must be 'vf'.
-
-        Returns
-        -------
-        float
-            Enclosed volume.
+        HC : tuple -> (points, simplices)
+        complex_dtype : must be 'vf'
         """
         if complex_dtype != "vf":
             raise NotImplementedError("Volume only supported for 'vf' complexes")
-        points, simplices = HC
-        return self._func(points, simplices)
+        # Pass the whole tuple and the dtype as a keyword:
+        return float(self._func(HC, complex_dtype=complex_dtype))
 
 # --- Example instantiation ---
 curvature_i = Curvature_i()
