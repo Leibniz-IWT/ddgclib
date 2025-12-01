@@ -317,12 +317,12 @@ def correct_the_volume(HC, bV, target_volume):
       HC.V.move(v, tuple(v.x_a + dualNormal*shift))
   return 
 
-def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
+def AdaptiveProfile(Bo, RadTop, contactAng=-1, fname=None):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
-  d=1e-4*min( 1/abs(Bo)**.5, 1 )
+  d = 1e-4 * min( 1/abs(Bo)**.5, 1 )
   psi=0
   r=0
   z=0
@@ -333,32 +333,19 @@ def AdamsBashforthProfile(Bo, RadTop, contactAng=-1, fname=None):
     adams_txt = open(fname, "w") 
     print('saving',fname)
   for i in range(int(1e6)):
-    dr = d * np.cos(psi)
-    dz = d * np.sin(psi)
-    if i==0: 
-      r += dr
-      z += dz
-    else: 
-      r += 1.5*dr - 0.5*drPrev
-      z += 1.5*dz - 0.5*dzPrev
-    drPrev = dr
-    dzPrev = dz
-    
-    dPsi = d * (2 - Bo*z - np.sin(psi)/r)
-    if i==0: psi += dPsi
-    else: psi += 1.5*dPsi - 0.5*dPsiPrev
-    dPsiPrev = dPsi
-    
+    ds = d * min( 1/abs( 2 - Bo*z - np.sin(psi)/r ) , 1)
+    dr = ds * np.cos(psi)
+    dz = ds * np.sin(psi)
+    r += dr
+    z += dz
+    psi += ds * (2 - Bo*z - np.sin(psi)/r)
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
     if fname and not i%100: print(r*RadTop, -z*RadTop, psi, Bo, file=adams_txt)
-    
     if 2-Bo*z-np.sin(psi)/r < 0:
       if contactAng<0: break
       elif psi < contactAng: break
-  
   if i>int(1e6-2): print('i',i, 'contactAng', contactAng)
-  #if fname: close(adams_txt)
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, np.pi-psi
 
@@ -393,3 +380,100 @@ def bubbleProfile(capLen, RadTop, contactAng=-1, fname=None):
   if fname: close(adams_txt)
   centroid /= Volume
   return Volume*capLen**3, r*capLen, z*capLen, (z-centroid)*capLen, psi
+
+def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
+#compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
+#Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
+#Return the volume of the bubble, radius of the contact patch, height of bubble 
+#and height of the centre of mass.
+  capLen = RadTop / capLen**.5
+  ds = min( 1e-3*abs(capLen), 1e-2 )
+  psi=0
+  r=0
+  z=0
+  Volume=0
+  VolPrev=0
+  centroid=0
+  dPsiPrev=0
+  if fname: adams_txt = open(fname, "w") 
+  for i in range(int(1e6)):
+    #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
+    #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
+    if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
+    #ds = min( abs(capLen)**2, 1e-3*abs(np.pi-psi), 1e-1 )
+    #ds = 1e-4 #* min( abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
+    #ds = 1e-0 * min( abs(capLen)**2, 1e-2*abs(psi), 1e-2*abs(np.pi-psi), 1e-1 )
+    dr = ds * np.cos(psi)
+    dz = ds * np.sin(psi)
+    r += dr
+    z += dz
+    dPsi = ds * (2/RadTop - z/capLen**2 - np.sin(psi)/r)
+    psi += dPsi
+    Volume += np.pi*r**2*dz
+    centroid += z*np.pi*r**2*dz
+    if fname:
+      #if not i%100 or dPsi>1e-2: 
+      print(r, -z, psi, dPsi, capLen, file=adams_txt)
+    if contactAng>0 and Volume*r**-3<VolPrev: break
+    if contactAng<0 and dPsi<0: break
+    #if contactAng>0 and dPsi<0 and psi<contactAng: break
+    VolPrev = Volume*r**-3
+  if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
+  if fname: print('saved',fname,'capLen',capLen,'i',i)
+  centroid /= Volume
+  return Volume, r, z, z-centroid, np.pi-psi
+
+def AdamsBashforthBoProfile(Bo, RadTop, contactAng=-1, fname=None):
+#compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
+#Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
+#Return the volume of the bubble, radius of the contact patch, height of bubble 
+#and height of the centre of mass.
+  d = 1e-2 * min( 1/abs(Bo)**.5, abs(Bo)**.5, 1e-2 )
+  psi=0
+  r=0
+  z=0
+  Volume=0
+  VolPrev=0
+  centroid=0
+  dPsiPrev=0
+  if fname: 
+    adams_txt = open(fname, "w") 
+    print('saving',fname)
+  for i in range(int(1e4)):
+    dr = d * np.cos(psi)
+    dz = d * np.sin(psi)
+    if i==0: 
+      r += dr
+      z += dz
+    else: 
+      r += 1.5*dr - 0.5*drPrev
+      z += 1.5*dz - 0.5*dzPrev
+    drPrev = dr
+    dzPrev = dz
+    
+    dPsi = d * (2 - Bo*z - np.sin(psi)/r)
+    if i==0: psi += dPsi
+    else: psi += 1.5*dPsi - 0.5*dPsiPrev
+    dPsiPrev = dPsi
+    
+    Volume += np.pi*r**2*dz
+    centroid += z*np.pi*r**2*dz
+    if fname:
+      #if not i%100 or dPsi>1e-2: print(r*RadTop, -z*RadTop, psi, Bo, file=adams_txt)
+      if not i%100: print(r*RadTop, -z*RadTop, psi, Bo, file=adams_txt)
+    
+    #if contactAng<0 and Volume*r**-3<VolPrev: 
+      #print('breakVol',i)
+      #break
+    #VolPrev = Volume*r**-3
+    
+    #if 2-Bo*z-np.sin(psi)/r < 0:
+      #if contactAng<0: break
+      #if contactAng<0: a=1
+      #elif psi < contactAng: break
+      #if contactAng>0 and psi < contactAng: break
+    
+  #if i>int(1e6-2): print('i',i, 'contactAng', contactAng)
+  #if fname: close(adams_txt)
+  centroid /= Volume
+  return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, np.pi-psi

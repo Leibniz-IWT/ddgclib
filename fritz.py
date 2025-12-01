@@ -66,8 +66,8 @@ if False:
             BoMax = BoP
       spreadName=None
       pinName=None
-      if not np.log2(Bo)%1: 
-        print('b',b,'Bo',Bo,'1/Bo',1/Bo)
+      if not np.log2(Bo)%2: 
+        #print('b',b,'Bo',Bo,'1/Bo',1/Bo)
         spreadName=f'data/spread{b:05}.txt'
         pinName=f'data/pin{b:05}.txt'
       elif abs(np.log2(Bo))>8: continue

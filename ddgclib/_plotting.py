@@ -380,28 +380,29 @@ def plot_detach_profile():
       if cont not in fname: continue
       with open(folName+fname, encoding = 'utf-8') as f:
         df = np.loadtxt(f)
+      if df.ndim<2: continue
       if 'spread' in cont and df[0,-1]==.566: continue
+      #print('plot_detach_profile',fname)
       col=BoColour(df[0,-1])
-      ax.plot(df[:,0], df[:,1], color=col)#, alpha=.9)
+      ax.plot(df[:,0]/df[-1,0], (df[:,1]-df[-1,1])/df[-1,0], color=col)#, alpha=.9)
       logBo = int(np.log2(df[-1,-1]))
-      if logBo==-2: 
+      if False:#logBo==-2: 
         if 'spread' in cont:
           ax.plot([df[-1,0],df[-1,0]+.15], [df[-1,1],df[-1,1]], color='k', linestyle='dashed')
           ax.text(df[-1,0]+.15, df[-1,1]+.1, f'$\\phi$', ha='center', va='center')
         elif 'pin' in cont:
           ax.plot([df[-1,0],0], [df[-1,1],df[-1,1]], color='k', linestyle='dashed')
-          ax.text(df[-1,0]/2, df[-1,1]+.1, '$r_{cont}$', ha='center', va='center')
+          ax.text(df[-1,0]/2, df[-1,1]+.1, '$r_\\mathrm{con}$', ha='center', va='center')
       if logBo>2: continue
       if logBo<-1: continue
-      #diff = df[-1,:2] - df[-2,:2]
-      #diff *= .1 / np.sqrt( diff[0]**2 + diff[1]**2 )
-      #diff += df[-1,:2]
-      #ax.text(*df[-1,:2], f'$Bo={df[-1,-1]:.3g}$', ha='left', va='center')
-      ax.text(*df[-1,:2], f'$Bo={df[-1,-1]:.4g}$', ha='left', va='center')
+      #ax.text(*df[-1,:2], f'${df[-1,-1]**.5:.4g}$', ha='left', va='center')
     ax.tick_params(which='both', direction='in', top=True, right=True)
-    ax.set_xlabel('$r/R$')
-    ax.set_ylabel('$\\frac{z}{R}$',rotation=0,size=22)
-    ax.set_ylim([-3,0])
+    #ax.set_xlabel('$r/R_\\mathrm{top}$')
+    ax.set_xlabel('$r/r_\\mathrm{con}$')
+    #ax.set_ylabel('$\\frac{ z-z_\\mathrm{top} }{ R_\\mathrm{top} }$',rotation=0,size=22)
+    ax.set_ylabel('$\\frac{ z }{ r_\\mathrm{con} }$',rotation=0,size=22,labelpad=15)
+    #ax.set_ylim([-3,0])
+    ax.set_ylim([0,1])
     ax.set_xlim([0,2])
     ax.set_aspect('equal', adjustable='box')
     fname = folName+'profile_'+cont+'.pdf'
@@ -441,22 +442,24 @@ def plot_detach_radius_vs_cont_angle():
     if 'txt' not in fname: continue
     with open(folName+fname, encoding = 'utf-8') as f:
       BoProfile.append(float(f.readline().strip().split()[-1]))
-  BoProfile.remove(0.566)
+  try: BoProfile.remove(0.566)
+  except ValueError as e: print(f"Could not remove 0.566: {e}")
   fig, ax = plt.subplots(1)
   fname = 'data/fritz.txt'
   print('open',fname)
   with open(fname) as f:
     df = np.loadtxt(f)
-  x=np.concatenate(([0],df[:,1]/np.pi,[1]))
-  y=np.concatenate(([0],df[:,2],[0]))
-  ax.plot(x, y, c='k')
-  ax.plot(x, .0104*180*x, '--', c='k')
+  #x=np.concatenate(([0],df[:,1]/np.pi,[1]))
+  #y=np.concatenate(([0],df[:,2],[0]))
+  x=df[:,1]/np.pi*180
+  y=df[:,2]
+  ax.plot(x, y, c='k', clip_on=False)
+  ax.plot(x, .0104*x, '--', c='k')
   R = lambda p: 3**.5 * np.sin(p) / 2**(1/6.) / (1-np.cos(p)) / (2+np.cos(p))**.5 
-  ax.plot(1-x, R(x*np.pi), linestyle='dotted', c='k')
+  #ax.plot(180-x, R(x*np.pi/180), linestyle='dotted', c='k')
   for i in range(len(df[:,0])):
     if df[i,0] in BoProfile:
-      #logBo = np.log2(df[i,0]) 
-      ax.plot(df[i,1]/np.pi, df[i,2], 'o', mec=BoColour(df[i,0]), mfc='None', clip_on=False)
+      ax.plot(df[i,1]/np.pi*180, df[i,2], 'o', mec=BoColour(df[i,0]), mfc='None', clip_on=False)
       va='top'
       xShift=0
       if df[i,0]>65: continue
@@ -464,17 +467,22 @@ def plot_detach_radius_vs_cont_angle():
       elif df[i,0]<1:
         ha='left'
         va='center'
-        xShift=.015
+        xShift=.015*180
       elif df[i,0]>8: ha='right'
       else: ha='center'
       if 1.2<df[i,0] and df[i,0]<1.3:  xShift=.015
-      ax.text(df[i,1]/np.pi+xShift, df[i,2]-.015, f'${df[i,0]:.4g}$', ha=ha, va=va)
+      ax.text(df[i,1]/np.pi*180+xShift, df[i,2]-.015, f'${df[i,0]:.4g}$', ha=ha, va=va)
   ax.tick_params(which='both', direction='in', top=True, right=True)
-  ax.set_xlabel('$\\phi/\\pi$', rotation=0)
-  ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
-  ax.set_xlim([0,1])
+  ax.set_xlabel('$\\phi$', rotation=0)
+  #ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
+  ax.set_ylabel('$R_\\mathrm{det}\\sqrt\\frac{\\rho g}{\\sigma}$')#, rotation=0, size=22, labelpad=15)
+  ax.set_xlim([0,180])
   ax.set_ylim([0,1])
-  ax.set_xticks([0,0.25,0.5,0.75,1])
+  #ax.set_xscale('log')
+  #ax.set_yscale('log')
+  degrees = [0, 30, 60, 90, 120, 150, 180]
+  ax.set_xticks(degrees)
+  ax.set_xticklabels([f"{d}°" for d in degrees])
   fname = 'data/detachRadVsContAngle.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
@@ -494,10 +502,12 @@ def plot_detach_radius_vs_cont_radius():
   print('open',fname)
   with open(fname) as f:
     df = np.loadtxt(f)
-  x=np.concatenate(([0],df[:,4],[df[-1,4]]))
-  y=np.concatenate(([0],df[:,5],[0]))
-  ax.plot(x, y, c='k')
-  ax.plot(x, (1.5*x)**(1./3), linestyle='dotted', c='k')
+  #x=np.concatenate(([0],df[:,4],[df[-1,4]]))
+  #y=np.concatenate(([0],df[:,5],[0]))
+  x=df[:,4]
+  y=df[:,5]
+  ax.plot(x, y, c='k', clip_on=False)
+  #ax.plot(x, (1.5*x)**(1./3), linestyle='dotted', c='k')
   for i in range(len(df[:,0])):
     if df[i,0] in BoProfile:
       logBo = int(np.log2(df[i,0]))
@@ -513,11 +523,25 @@ def plot_detach_radius_vs_cont_radius():
         va='bottom'
         yShift=0.005
       ax.text(df[i,4], df[i,5]+yShift, f'${df[i,0]:.4g}$', ha=ha, va=va)
+  if False:
+    fname = 'LesageVolVsContRadSq.txt'
+    print('open',fname)
+    with open(fname) as f:
+      df = np.loadtxt(f)
+    for i in range(len(df[:,0])):
+      if df[i,2]>1:continue
+      ax.plot(df[i,0]**.5, (.75*df[i,1]/np.pi)**(1/3)*df[i,0]**.5, 's', mec=(0,0,df[i,2]/3), mfc='None', clip_on=False)
+    fname = 'MoriVolByContCubeVsContSqByCapSq.txt'
+    print('open',fname)
+    with open(fname) as f:
+      df = np.loadtxt(f)
+    ax.plot(.5/df[:,0]**.5, (.75*df[:,1]/np.pi)**(1/3)/df[:,0]**.5, 'd', mec=(0,0,0), mfc='None', clip_on=False)
   ax.tick_params(which='both', direction='in', top=True, right=True)
-  ax.set_xlabel('$r_{cont}/\\lambda$')
-  ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
-  ax.set_xlim([0,2])
-  ax.set_ylim([0,1])
+  ax.set_xlabel('$r_\\mathrm{con}\\sqrt\\frac{\\rho g}{\\sigma} $')
+  #ax.set_ylabel('$R_\\mathrm{det}\\sqrt\\frac{\\rho g}{\\sigma}$', rotation=0, size=22, labelpad=15)
+  ax.set_ylabel('$R_\\mathrm{det}\\sqrt\\frac{\\rho g}{\\sigma}$')#, rotation=0, size=22, labelpad=15)
+  ax.set_xlim([0,2.5])
+  ax.set_ylim([0,1.3])
   fname = 'data/detachRadVsContRad.pdf'
   print('savin ',fname)
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
