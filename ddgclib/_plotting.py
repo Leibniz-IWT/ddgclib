@@ -370,10 +370,10 @@ def plot_profile_with_grid_resolution():
   fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
-def plot_detach_profile(): 
+def plot_drop_profile(name='pin spread'): 
   import os
   folName = 'data/'
-  for cont in 'pin spread'.split():
+  for cont in name.split():
     fig, ax = plt.subplots(1)
     for fname in sorted(os.listdir(folName)):
       if 'txt' not in fname: continue
@@ -382,9 +382,10 @@ def plot_detach_profile():
         df = np.loadtxt(f)
       if df.ndim<2: continue
       if 'spread' in cont and df[0,-1]==.566: continue
-      #print('plot_detach_profile',fname)
       col=BoColour(df[0,-1])
-      ax.plot(df[:,0]/df[-1,0], (df[:,1]-df[-1,1])/df[-1,0], color=col)#, alpha=.9)
+      #ax.plot(df[:,0]/df[-1,0], (df[:,1]-df[-1,1])/df[-1,0], 'o', color=col)#, alpha=.9)
+      ax.plot(df[0,0], df[0,1], '+', color=col)#, alpha=.9)
+      ax.plot(df[:,0], df[:,1], color=col)#, alpha=.9)
       logBo = int(np.log2(df[-1,-1]))
       if False:#logBo==-2: 
         if 'spread' in cont:
@@ -398,12 +399,14 @@ def plot_detach_profile():
       #ax.text(*df[-1,:2], f'${df[-1,-1]**.5:.4g}$', ha='left', va='center')
     ax.tick_params(which='both', direction='in', top=True, right=True)
     #ax.set_xlabel('$r/R_\\mathrm{top}$')
-    ax.set_xlabel('$r/r_\\mathrm{con}$')
+    #ax.set_xlabel('$r/r_\\mathrm{con}$')
+    ax.set_xlabel('$r/\\lambda$')
     #ax.set_ylabel('$\\frac{ z-z_\\mathrm{top} }{ R_\\mathrm{top} }$',rotation=0,size=22)
-    ax.set_ylabel('$\\frac{ z }{ r_\\mathrm{con} }$',rotation=0,size=22,labelpad=15)
-    #ax.set_ylim([-3,0])
-    ax.set_ylim([0,1])
-    ax.set_xlim([0,2])
+    #ax.set_ylabel('$\\frac{ z }{ r_\\mathrm{con} }$',rotation=0,size=22,labelpad=15)
+    ax.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22)
+    ax.set_ylim([-2,2])
+    #ax.set_ylim([0,1])
+    ax.set_xlim([0,1])
     ax.set_aspect('equal', adjustable='box')
     fname = folName+'profile_'+cont+'.pdf'
     print('savin ',fname)

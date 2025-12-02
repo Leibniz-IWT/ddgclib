@@ -328,7 +328,6 @@ def AdaptiveProfile(Bo, RadTop, contactAng=-1, fname=None):
   z=0
   Volume=0
   centroid=0
-  dPsiPrev=0
   if fname: 
     adams_txt = open(fname, "w") 
     print('saving',fname)
@@ -394,7 +393,6 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
   Volume=0
   VolPrev=0
   centroid=0
-  dPsiPrev=0
   if fname: adams_txt = open(fname, "w") 
   for i in range(int(1e6)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
@@ -477,3 +475,51 @@ def AdamsBashforthBoProfile(Bo, RadTop, contactAng=-1, fname=None):
   #if fname: close(adams_txt)
   centroid /= Volume
   return Volume*RadTop**3, r*RadTop, z*RadTop, (z-centroid)*RadTop, np.pi-psi
+
+def spinning_drop_profile(rot_len, rad_top, height, fname=None):
+  ds = 1e-3
+  psi=0
+  r=0
+  z=height
+  Volume=0
+  centroid=0
+  if fname: adams_txt = open(fname, "w") 
+  for i in range(int(5/ds)):
+    dr = ds * np.cos(psi)
+    dz = ds * np.sin(psi)
+    r += dr
+    z -= dz
+    dPsi = ds * (2/rad_top + z**2/2/rot_len**3 - np.sin(psi)/r)
+    psi += dPsi
+    Volume += np.pi*r**2*dz
+    centroid += z*np.pi*r**2*dz
+    if fname and not i%int(.01/ds):
+      print(r, z, psi, dPsi, rot_len, file=adams_txt)
+    if psi>np.pi:break
+  if fname: print('saved',fname,'rot_len',rot_len,'i',i)
+  centroid /= Volume
+  return Volume, r, z, z-centroid, np.pi-psi
+
+def spinning_drop_from_neck(rot_len, rad_neck, rad_c_neck, fname=None):
+  ds = -1e-3
+  psi=np.pi/2
+  r=rad_neck
+  z=0
+  Volume=0
+  centroid=0
+  if fname: adams_txt = open(fname, "w") 
+  for i in range(int(-10/ds)):
+    dr = ds * np.cos(psi)
+    dz = - ds * np.sin(psi)
+    r += dr
+    z += dz
+    dPsi = ds * (1/rad_neck + 1/rad_c_neck + z**2/2/rot_len**3 - np.sin(psi)/r)
+    psi += dPsi
+    Volume += np.pi*r**2*dz
+    centroid += z*np.pi*r**2*dz
+    if fname and not i%int(-.01/ds):
+      print(r, z, psi, dPsi, rot_len, file=adams_txt)
+  if fname: print('saved',fname,'rot_len',rot_len,'i',i)
+  centroid /= Volume
+  return Volume, r, z, z-centroid, np.pi-psi
+

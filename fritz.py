@@ -30,7 +30,7 @@ Can I get a good fit without the foot pressure?
 Choose R_top, and lambda, use Adams Bashforth integration to get V, R_bubble, and r with contact and angle 90. 
 """
 import numpy as np
-from ddgclib._plotting import plot_polyscope, plot_detach_profile, plot_detach_radius_vs_cont_angle, plot_detach_radius_vs_cont_radius
+from ddgclib._plotting import plot_polyscope, plot_drop_profile, plot_detach_radius_vs_cont_angle, plot_detach_radius_vs_cont_radius
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
 
 #Parameters
@@ -100,4 +100,4 @@ if False:
       print(BoP, angleSpr, RadSpread/capiLen, RadFootSpr/capiLen, RadFootPin/capiLen, RadPin/capiLen, file=fritz_txt)
 plot_detach_radius_vs_cont_angle()
 plot_detach_radius_vs_cont_radius()
-plot_detach_profile()
+plot_drop_profile('pin spread')
