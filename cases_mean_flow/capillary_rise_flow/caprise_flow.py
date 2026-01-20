@@ -1,3 +1,7 @@
+# moved from ddgclib
+# caprise_flow.py
+
+
 import copy
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
@@ -9,14 +13,17 @@ from interruptingcow import timeout
 # ddg imports
 from ddgclib import *
 from ddgclib._complex import *
-from ddgclib._curvatures import *
-from ddgclib._capillary_rise_flow import *
+from ddgclib._curvatures import HC_curvatures
+from ddgclib._capillary_rise_flow import mean_flow
+from droplet import incr
+from ddgclib._capillary_rise import cap_rise_init_N, analytical_cap
+from ddgclib._plotting import plot_polyscope
 from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
 
 
-# FLAGS (toggle features here)
+# Flags (toggle features here)
 RUN_SIMULATION = False       # run time evolution loop
 PLOT_MATPLOTLIB = False      # plot using matplotlib
 PLOT_PLOTLY = False          # plot using plotly
@@ -44,9 +51,8 @@ r = np.array(r, dtype=np.longdouble)
 theta_p = np.array(theta_p, dtype=np.longdouble)
 
 
-# -----------------------------
 # Core numerical update
-# -----------------------------
+
 def mean_flow(HC, bV, params, tau, print_out=False):
     """
     Move vertices according to surface tension + gravity forces.
@@ -163,9 +169,8 @@ def plot_polyscope(HC):
     ps.show()
 
 
-# -----------------------------
-# INITIALIZATION
-# -----------------------------
+# Initialize geometry
+
 # Analytical curvature for a spherical cap
 H_f, K_f, dA, k_g_f, dC = analytical_cap(r, theta_p)
 h_jurin = 2 * gamma * np.cos(theta_p) / (rho * g * r)
@@ -179,9 +184,9 @@ params = (gamma, rho, g, r, theta_p, K_f, h)
 HC.V.merge_all(cdist=cdist)
 
 
-# -----------------------------
-# MAIN ACTIONS (controlled by flags)
-# -----------------------------
+
+# Main actions (controlled by flags)
+
 if RUN_SIMULATION:
     steps = 800
     for i in range(steps):
