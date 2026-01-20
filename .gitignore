@@ -1,22 +1,29 @@
-ddgclib/__pycache__
+# Ignore Python cache
+*.pyc
+__pycache__/
+ddgclib/__pycache__/
+
+# Jupyter
 .ipynb_checkpoints
+.ipynb_checkpoints/
+
+# OS / misc
 *.DS_Store
+.DS_Store*
 *.ini
-ddgclib/.idea/*
-.idea/*
-.gitignore
-.idea/*
+
+# Project-specific
+cases_mean_flow/_AR1.05_*.py
 
 dev*.py
 _tgo.py
 htmlcov
 min_map_dev.py
-.ipynb_checkpoints/
 node_modules
 shgo/patch
 models
 
- Editor temporary/working/backup files #
+# Editor temporary/working/backup files #
 #########################################
 .#*
 [#]*#
@@ -109,7 +116,6 @@ site.cfg
 ######################
 .directory
 .fseventsd
-.DS_Store*
 .gdb_history
 .VolumeIcon.icns
 ehthumbs.db

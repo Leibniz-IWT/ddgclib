@@ -3,6 +3,7 @@ from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from ._benchmark_classes import GeometryBenchmarkBase
+import pandas as pd
 # benchmarks/_benchmark_cases.py
 from pathlib import Path
 
@@ -33,6 +34,63 @@ class MshCase(GeometryBenchmarkBase):
         self.area_analytical = np.nan
         self.volume_analytical = np.nan
         self.H_analytical = np.nan
+
+class EllipsoidMshBenchmark(MshCase):
+    def __init__(self, msh_path="test_cases/Ellip_0_sub0_full.msh",
+                 ax=1.5, ay=1.0, az=0.8,
+                 complex_dtype="vf",
+                 workdir="benchmarks_out/ellipsoid",
+                 method=None, **kwargs):
+        if method is None:
+            method = {"volume_method": "curved_volume", "curvature_i_method": "laplace-beltrami"}
+        super().__init__(msh_path=msh_path, method=method, complex_dtype=complex_dtype, **kwargs)
+
+        self.ax, self.ay, self.az = float(ax), float(ay), float(az)
+        self.workdir = str(workdir)
+        self._workdir_path = Path(self.workdir)
+
+        self.V_theory = self.V_flat = self.V_sum = self.V_total = self.rel_err_percent = None
+
+    def _compute_V_theory(self):
+        return (4.0/3.0) * np.pi * self.ax * self.ay * self.az
+
+    def _read_Vsum_from_csv(self):
+        stem = Path(self.msh_path).stem
+        csv_path = self._workdir_path / f"{stem}_COEFFS_Transformed_DualVolume.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Expected CSV not found: {csv_path}")
+
+        vdf = pd.read_csv(csv_path)
+        if "Vcorrection" in vdf.columns:
+            return float(np.nansum(vdf["Vcorrection"].to_numpy(dtype=float)))
+        if "DualVolume" in vdf.columns:
+            return float(np.nansum(vdf["DualVolume"].to_numpy(dtype=float)))
+        raise ValueError(f"CSV missing Vcorrection/DualVolume columns: {csv_path}")
+
+    def run(self):
+        self.V_theory = self._compute_V_theory()
+
+        # ensure method passes workdir into curved pipeline (depends on your base-class implementation)
+        self.method = dict(self.method)
+        self.method["workdir"] = self.workdir
+        self.method["msh_path"] = self.msh_path   # IMPORTANT: ensures CSV uses <stem> not "mesh"
+        self._workdir_path.mkdir(parents=True, exist_ok=True)
+
+        # curved run (produces CSV)
+        self.run_benchmark()
+
+        # piecewise-linear flat volume
+        flat_method = {"volume_method": "default", "curvature_i_method": "laplace-beltrami"}
+        flat = MshCase(msh_path=self.msh_path, method=flat_method, complex_dtype=self.complex_dtype)
+        flat.run_benchmark()
+        self.V_flat = float(flat.volume_computed)
+
+        self.V_sum = self._read_Vsum_from_csv()
+        self.V_total = self.V_flat + self.V_sum
+
+        # standard sign: computed - theory
+        self.rel_err_percent = (self.V_total - self.V_theory) / self.V_theory * 100.0
+        return self
 
 class TorusBenchmark(GeometryBenchmarkBase):
     def __init__(self, R_major=2.0, r_minor=1.0, n_u=30, n_v=30, **kwargs):

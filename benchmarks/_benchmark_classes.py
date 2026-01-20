@@ -78,7 +78,10 @@ class GeometryBenchmarkBase:
     def compute_volume(self):
         if self.complex_dtype == "vf":
             HC = (self.points, self.simplices)
-            self.volume_computed = self.volume(HC, complex_dtype=self.complex_dtype)
+            vol_kwargs = {k: v for k, v in self.method.items()
+                        if not k.endswith("_method")}
+            self.volume_computed = self.volume(HC, complex_dtype=self.complex_dtype, **vol_kwargs)
+
 
     def compute_curvature(self):
         HC = (self.points, self.simplices) if self.complex_dtype == "vf" else self.points
