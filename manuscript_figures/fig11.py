@@ -46,7 +46,8 @@ Nmax = 21
 refinement = 1
 phi = 2
 r = 0.5e-3  # m, Radius of the capillary tube
-theta_p = 20.001 * np.pi / 180.0  # Three phase contact angle
+#theta_p = 20.001 * np.pi / 180.0  # Three phase contact angle
+theta_p = 45 * np.pi / 180.0  # Three phase contact angle
 R = r / np.cos(theta_p)  # = R at theta = 0
 
 # Note the capillary rise systems can be visualized with this code at any N/refinement:
@@ -80,7 +81,8 @@ for N in range(5, Nmax + 1):
             if v2 in bV:
                 a = v.x_a
                 b = v2.x_a
-                ern = 0.5 * numpy.linalg.norm(a - b) ** 2 / (12 * (2)**2)
+               # ern = 0.5 * numpy.linalg.norm(a - b) ** 2 / (12 * (2)**2)
+                ern = 2 * numpy.linalg.norm(a - b) ** 2 / (12 * (2)**2)
                 max_int_e += ern
 
     erange.append( (max_int_e/r)/len(bV) )
@@ -113,7 +115,7 @@ p = numpy.poly1d(z)
 p = np.poly1d(z)
 # the line equation:
 print("y=%.6fx+(%.6f)" % (z[0], z[1]))
-ax2.set_ylim([1e-15, 1e-12])
+ax2.set_ylim([1e-15, 1e-13])
 lns = ln1 + ln2
 labs = [l.get_label() for l in lns]
 ax.legend(lns, labs, loc=0)
@@ -125,6 +127,8 @@ ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
 ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
 
 plt.tick_params(axis='y', which='minor')
+
+plt.savefig('fig10.png', bbox_inches='tight', dpi=600)
 
 plt.show()
 

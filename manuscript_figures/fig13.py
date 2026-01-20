@@ -22,6 +22,24 @@ from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
+if 0:
+    plt.rcParams.update({
+        "text.usetex": True,
+        #"font.family": "sans-serif",
+        #"font.sans-serif": ["Calibri"]
+    })
+    # for Palatino and other serif fonts use:
+    plt.rcParams.update({
+        "text.usetex": True,
+        #"font.family": "serif",
+        #"font.serif": ["Calibri"],
+    })
+    # It's also possible to use the reduced notation by directly setting font.family:
+    plt.rcParams.update({
+        "text.usetex": True,
+        #"font.family": "Calibri",
+        #'font.size': 14
+    })
 
 
 # Parameters for a water droplet in air at standard laboratory conditions
@@ -133,7 +151,7 @@ if 1:
             label=keyslabel[key]['label'], alpha=0.7)
 
     plot.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
-    plot.ylabel(r'Gaussian curvature ($m^{-2}$)')
+    plot.ylabel(r'Gaussian curvature ($m^{-2})$ $10^{-6})$')
 
     ax2 = ax.twinx()
 
@@ -178,7 +196,7 @@ if 1:
     #g = lambda x, pos: "${}$".format(f._formatSciNotation('%1.10e' % x))
     #plt.gca().yaxis.set_major_formatter(mticker.FuncFormatter(g))
 
-
+plt.savefig('fig12_x10.png', bbox_inches='tight', dpi=600)
 plt.show()
 
 

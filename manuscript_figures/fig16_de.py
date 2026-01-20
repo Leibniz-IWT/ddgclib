@@ -66,6 +66,8 @@ from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
 
+matplotlib.rcParams['font.size'] = 16
+
 # Parameters for a water droplet in air at standard laboratory conditions
 gamma = 0.0728  # N/m, surface tension of water at 20 deg C
 rho = 1000  # kg/m3, density
@@ -564,20 +566,20 @@ if 0:
 if 1:
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    ax2 = ax.twinx()
-    ln1 = ax2.loglog(Nlist, np.abs(lp_error), 'x', color='tab:blue',
-                 label='Capillary force error: $(F_{cap} - \hat{F_{cap}}) / F_{cap} $')
+    #ax2 = ax.twinx()
+    ln1 = ax.loglog(Nlist, np.abs(lp_error), 'x', color='tab:blue',
+                 label=r'Kapillarkraftfehler: $(F_{cap} - \hat{F_{cap}}) / F_{cap} $')
 
-    ax2.set_ylabel(r'Capillary force error (%)')
-    ax.set_xlabel(r'$n$ (number of boundary vertices)')
+    ax2.set_ylabel(r'Kapillarkraftfehler (%)')
+    ax.set_xlabel(r'$n$ (Anzahl der Scheitelpunkte)')
 
-    ln2 = ax.loglog(Nlist, geo_error, 'X', color='tab:orange',
-              label='Integration error (p-normed trapezoidal rule $O(h^2)$)')
+    #ln2 = ax.loglog(Nlist, geo_error, 'X', color='tab:orange',
+    #          label='Integration error (p-normed trapezoidal rule $O(h^2)$)')
 
     ax.set_ylabel(r'Integration error (%)')
 
-    ax2.set_ylim([1e-15, 1e-18])
-    lns = ln1 + ln2
+    ax.set_ylim([1e-15, 1e-18])
+    lns = ln1# + ln2
     labs = [l.get_label() for l in lns]
     ax.legend(lns, labs, loc=0)
     plt.tick_params(axis='y', which='minor')
@@ -593,7 +595,7 @@ if 1:
     # the line equation:
     print("y=%.6fx+(%.6f)" % (z[0], z[1]))
 
-    lns = ln1 + ln2
+    lns = ln1 #+ ln2
     labs = [l.get_label() for l in lns]
     ax.legend(lns, labs, loc=1
               )
@@ -603,7 +605,7 @@ if 1:
         from matplotlib import pyplot as plt, ticker as mticker
 
         ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
-        ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+        #ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
         # ax.xaxis.get_major_formatter().set_scientific(False)
         # ax2.xaxis.get_major_formatter().set_scientific(False)
         # ax.tic
@@ -611,6 +613,7 @@ if 1:
    # fig.set_size_inches(10,6)
 
     p#lt.savefig('fig15.png', dpi=600)
+    plt.tight_layout()
     plt.savefig('fig15.png', bbox_inches='tight', dpi=600)
     plt.show()
 
@@ -643,10 +646,10 @@ def plot_polyscope(HC):
     # `verts` is a Nx3 numpy array of vertex positions
     # `faces` is a Fx3 array of indices, or a nested list
     surface = ps.register_surface_mesh("my mesh", verts, faces,
-                             color=do,
-                             edge_width=1.0,
-                             edge_color=(0.0, 0.0, 0.0),
-                             smooth_shade=False)
+                                         color=do,
+                                         edge_width=1.0,
+                                         edge_color=(0.0, 0.0, 0.0),
+                                         smooth_shade=False)
 
     # Add a scalar function and a vector function defined on the mesh
     # vertex_scalar is a length V numpy array of values
@@ -807,19 +810,19 @@ if 0:
     # Plot the final results
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    ax2 = ax.twinx()
-    ln1 = ax2.loglog(Nlist, np.abs(lp_error), 'x', color='tab:blue',
+    #ax2 = ax.twinx()
+    ln1 = ax.loglog(Nlist, np.abs(lp_error), 'x', color='tab:blue',
                  label='Capillary force error: $(F_{cap} - \hat{F_{cap}}) / F_{cap} $')
 
-    ax2.set_ylabel(r'Capillary force error (%)')
-    ax.set_xlabel(r'$n$ (number of boundary vertices)')
+   # ax2.set_ylabel(r'Capillary force error (%)')
+    ax.set_xlabel(r'$n$ (Anzahl der Scheitelpunkte)')
 
-    ln2 = ax.loglog(Nlist, geo_error, 'X', color='tab:orange',
-              label='Integration error (p-normed trapezoidal rule $O(h^2)$)')
+   # ln2 = ax.loglog(Nlist, geo_error, 'X', color='tab:orange',
+    #          label='Integration error (p-normed trapezoidal rule $O(h^2)$)')
 
-    ax.set_ylabel(r'Integration error (%)')
+    ax.set_ylabel(r'Young-Laplace Fehler (%)')
 
-    ax2.set_ylim([1e-15, 1e-18])
+    ax.set_ylim([1e-15, 1e-18])
     lns = ln1 + ln2
     labs = [l.get_label() for l in lns]
     ax.legend(lns, labs, loc=0)
@@ -835,7 +838,7 @@ if 0:
     # the line equation:
     print("y=%.6fx+(%.6f)" % (z[0], z[1]))
 
-    lns = ln1 + ln2
+    lns = ln1# + ln2
     labs = [l.get_label() for l in lns]
     ax.legend(lns, labs, loc=0)
 
@@ -843,6 +846,9 @@ if 0:
     from matplotlib import pyplot as plt, ticker as mticker
 
     ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
-    ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+    #ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
 
+
+
+plt.tight_layout()
 plt.show()

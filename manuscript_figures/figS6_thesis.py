@@ -25,6 +25,14 @@ from ddgclib._plotting import *
 
 import matplotlib.pyplot as plt
 
+import matplotlib
+matplotlib.rcParams['font.family'] = 'serif'
+matplotlib.rcParams['font.serif'] = 'CMU Serif, Times New Roman'
+matplotlib.rcParams['font.size'] = 11
+matplotlib.rcParams["mathtext.fontset"]= 'cm'  # ValueError: Key mathtext.fontset: 'serif' is not a valid value for mathtext.fontset; supported values are ['dejavusans', 'dejavuserif', 'cm', 'stix', 'stixsans', 'custom']
+matplotlib.rcParams["mathtext.default"] = 'it'
+
+
 if 0:
     plt.rcParams.update({
         "text.usetex": True,
@@ -248,7 +256,22 @@ if 1:
 
 fig.set_size_inches(10,6)
 
-plt.savefig('figs6.png', dpi=600)
+plt.tick_params(axis='y', which='minor')
+
+#ax2.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+
+# ax2.set_ylim([1e-15, 1e-13])
+# ax.set_ylim([1e-20, 1e4])
+#    ax2.set_ylim([1e-20, 1e4])
+
+plt.tick_params(axis='y', which='minor')
+plt.tick_params(axis='x', which='major', reset=True)
+#  ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+#print(help(plt.tick_params))
+#ax2.set_ylabel(r'Young-Laplace error (%)')
+
+    #plt.savefig('./fig/errors.png', bbox_inches='tight', dpi=600)
+plt.savefig('./figs6_thesis.pdf', bbox_inches='tight', dpi=600)
 plt.show()
 
 
