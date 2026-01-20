@@ -28,7 +28,8 @@ from ddgclib._complex import *
 from ddgclib._curvatures import HC_curvatures_sessile, normalized
 # from ddgclib._sessile import *
 # from ddgclib._capillary_rise_flow import *
-from ddgclib._capillary_rise import analytical_cap, cap_rise_init_N, sphere_N
+from ddgclib._capillary_rise import analytical_cap, cap_rise_init_N
+from ddgclib._sphere import sphere_N
 from ddgclib._plotting import *
 
 
