@@ -120,3 +120,6 @@ Thumbs.db
 #################################
 doc/frontpage/build
 doc/source/generated
+dev_notebooks/Curvature-Willmore flow case iii Sessile droplet-Copy1.ipynb
+dev_notebooks/Curvature-Willmore flow case iii Sessile droplet.ipynb
+dev_notebooks/barycentric_hydrostatic/Barycentric hydrostatic p. i.ipynb
