@@ -192,3 +192,25 @@ class TorusBenchmark(GeometryBenchmarkBase):
         ax.auto_scale_xyz(self.points[:, 0], self.points[:, 1], self.points[:, 2])
         plt.tight_layout()
         plt.show()
+
+class SphereBenchmark(GeometryBenchmarkBase):
+    def __init__(self, radius=1.0, n_points=1000, **kwargs):
+        super().__init__(name="Sphere", **kwargs)
+        self.radius = radius
+        self.n_points = n_points
+
+    def generate_mesh(self):
+        phi = np.arccos(1 - 2 * np.random.rand(self.n_points))
+        theta = 2 * np.pi * np.random.rand(self.n_points)
+        x = self.radius * np.sin(phi) * np.cos(theta)
+        y = self.radius * np.sin(phi) * np.sin(theta)
+        z = self.radius * np.cos(phi)
+        self.points = np.vstack((x, y, z)).T
+        tri = Delaunay(self.points[:, :2])
+        self.simplices = tri.simplices
+
+    def analytical_values(self):
+        r = self.radius
+        self.area_analytical = 4 * np.pi * r**2
+        self.volume_analytical = (4/3) * np.pi * r**3
+        self.H_analytical = np.full(len(self.points), 1 / r)
