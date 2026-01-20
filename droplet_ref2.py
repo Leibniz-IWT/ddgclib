@@ -72,7 +72,7 @@ def local_compressive_forces(v, r):
     else:
         return np.array([0.0, 0.0, 0.0])
 
-def mean_flow(HC, bV, params, tau, print_out=False, fix_xy=False):
+def mean_flow(HC, bV, params, tau, print_out=False):
     (gamma, rho, g, r, theta_p, K_f, h) = params
     if print_out:
         print('.')
@@ -172,7 +172,7 @@ def mean_flow(HC, bV, params, tau, print_out=False, fix_xy=False):
                 #  Weak compressibility and gravity for solver stability
                 if 1:
                     #dc = 1e-1 * dc  #
-                    dc = 1e3*dc  #
+                    dc = dc  #
                     #dg = 1e-3 * dg  #
                 if print_out:
                     print(f' dc = {dc}')
@@ -253,7 +253,7 @@ def mean_flow(HC, bV, params, tau, print_out=False, fix_xy=False):
             if 1:
                 pass
                 #dc = 1e-1 * dc  #
-                dc = 1e3* dc  # Unit correction?
+                dc = 1e2* dc  # Unit correction?
                 # dc = 2e2* dc  # Unit correction?
                 #dg = 1e-3 * dg  #
                 #dg = 1e-9 * dg  #  Unit correction?
@@ -274,7 +274,7 @@ def mean_flow(HC, bV, params, tau, print_out=False, fix_xy=False):
             #f_k = v.x_a + df #+ dc
             f_k[2] = np.max([f_k[2], 0.0])  # Floor constraint
             # Fix interior vertices constriants (avoid flow-over)
-            if fix_xy: # Off: results in singular matrix error
+            if 0: # Off: results in singular matrix error
                 f_k[0] = v.x_a[0]  # constraint
                 f_k[1] = v.x_a[1]  # constraint
 
@@ -302,7 +302,7 @@ def mean_flow(HC, bV, params, tau, print_out=False, fix_xy=False):
 
     return HC, bV_new
 
-def incr(HC, bV, params, tau=1e-5, plot=False, verbosity=1, fix_xy=False):
+def incr(HC, bV, params, tau=1e-5, plot=False, verbosity=1):
     HC.dim = 3  # Rest in case visualization has changed
 
     if verbosity == 2:
@@ -310,7 +310,7 @@ def incr(HC, bV, params, tau=1e-5, plot=False, verbosity=1, fix_xy=False):
     else:
         print_out = False
     # Update the progress
-    HC, bV = mean_flow(HC, bV, params, tau=tau, print_out=print_out, fix_xy=fix_xy)
+    HC, bV = mean_flow(HC, bV, params, tau=tau, print_out=print_out)
 
     # Compute progress of Capillary rise:
     if verbosity == 1:
@@ -354,24 +354,11 @@ def ps_inc(surface, HC):
 
 # Parameters
 if 1:
-    #NOTE: To see the initial complex, set steps to 0.
-    # ref1:
-    if 1:
-        refinement = 0
-        steps = 30 # Still stable, but not for higher values
-        tau = 0.001  # 0.1 works
-    # ref2:
-    if 0:
-        refinement = 1
-        steps = 2 # Still stable for higher values, but vertices flow down to boundary>
-        tau = 0.001   # 0.1 works
-    # ref3:
-    if 0:
-        refinement = 2
-        steps = 2 # Still stable for higher values, but vertices flow down to boundary>
-        tau = 0.001  # 0.1 works
-
-    #steps = 0  # Equilibrium image
+    refinement = 1
+    steps = 1 # Still stable
+    steps = 30 # Still stable
+    steps = 2# Still stable
+    tau = 0.01  # 0.1 works
     T_0 = 273.15 + 25  # K, initial tmeperature
     P_0 = 101.325  # kPa, Ambient pressure
     gamma = IAPWS(T_0)  # N/m, surface tension of water at 20 deg C
@@ -379,7 +366,7 @@ if 1:
     rho_0 = 998.2071  # kg/m3, density, STP
     g = 9.81  # m/s2
 
-    theta_p = (63 / 75) * 20 + 30  # 46.8
+    theta_p = (63 / 75) * 20 + 30
     theta_p = theta_p * np.pi / 180.0
     r = ((44 / 58) * 0.25 + 1.0) * 1e-3  # height mm --> m  # Radius
     h = ((3 / 58) * 0.25 + 0.5) * 1e-3  # height mm --> m
@@ -951,6 +938,7 @@ if 0:
         A_cylinder =  A_cylinder + (np.pi * r**2) # not including bottom face
         print(f'A_cylinder = {A_cylinder * 1e6} mm^2')
 
+
 # Cylinder init 2 attempt:
 if 1:
     theta_p_test = 0
@@ -1103,12 +1091,17 @@ if 0:
 # Steps:
 if 1:
     for i in range(steps):  #unstable
-        if i < 2:
-            HC, bV = incr(HC, bV, params, tau=tau, plot=0, verbosity=2)
-        else:  # Avoid float off in larger systems
-            HC, bV = incr(HC, bV, params, tau=tau, plot=0, verbosity=2)
-            # Constraints don't work well...
-            #HC, bV = incr(HC, bV, params, tau=tau, plot=0, fix_xy=True)
+        #HC, bV = incr(HC, bV, params, tau=0.1, plot=0)
+        #, bV = incr(HC, bV, params, tau=0.000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.0000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.00000001, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.000000001, plot=0)
+        HC, bV = incr(HC, bV, params, tau=tau, plot=0)
+        #HC, bV = incr(HC, bV, params, tau=0.000000000001, plot=0)
+        #cdist=1e-8
+        #cdist=1e-5
+        #cdist=5e-4  # works on lowest refinement
         cdist=2e-4
         if refinement == 1:
             cdist = 1e-4
@@ -1162,98 +1155,11 @@ if 1:
             k_g = kg_ds / ds  # / 2.0
             print(f' R_approx * k_g = {R_approx * k_g}')
             phi_est = np.arctan(R_approx * k_g)
-            print(f'len(v.nn) = {len(v.nn)}')
-            if refinement == 2:  # Connectivity issue?
-                if len(v.nn) == 4:
-                    phi_est = np.arctan(R_approx/2 * k_g)
             print(f' phi_est = {phi_est * 180 / np.pi}')
             phi_est_list.append(phi_est * 180 / np.pi)
 
-    # Closest match to data point
-    minnorm_list = []
-    for v in HC.V:
-        if v in bV:
-            continue
-        else:
-            # Ensure vertex lies approx. on y=0 plane
-            if abs(v.x_a[1]) > 1e-10:
-                continue
-            #print(np.linalg.norm(data_points - v.x_a, axis=0))
-            datadist = np.linalg.norm(data_points - v.x_a, axis=1)
-            minnorm = np.min(datadist)
-            minnorm_list.append(minnorm)
-print(f'='*10)
-print(f'RESULTS:')
-print(f'='*10)
+
 print(f'phi_est_list = {phi_est_list}')
-theta_p_degrees = theta_p * 180.0 / np.pi
-
-print(f'theta_p_degrees = {theta_p_degrees}')
-#print(f'phi rel error = {((np.array(phi_est_list) - theta_p)/theta_p) / (len(phi_est_list))}')
-print(f'phi avg rel error = {np.sum(np.abs(np.array(phi_est_list) - theta_p_degrees )/theta_p_degrees ) / (len(phi_est_list))}')
-print(f'minnorm_list = {minnorm_list}')
-print(f'Avg data error = {np.sum(minnorm_list)/len(minnorm_list)}')
-print(f'HC.V.size() = {HC.V.size()}')
-print(f'len(bV) = {len(bV)}')
-print(f'='*10)
-
-# Print structure for surface evolver:
-if 0:
-    se_edge_list = []
-    se_ver_list = []
-    tver_list = []
-    table_edges = []
-    for v in HC.V:
-     #   if abs(v.x_a[1]) < 0.0:
-     #       continue  # symmetry
-        tver_list.append(v)
-
-
-    print(se_edge_list)
-    print('------------')
-    print('vertices')
-    for v in tver_list:
-        ind = tver_list.index(v) + 1
-        x1 = v.x_a[0]
-        x2 = v.x_a[1]
-        x3 = v.x_a[2]
-        out_str = f'{ind} {x1} {x2} {x3}'
-        if x3 == 0:
-            out_str += ' constraint table'
-        print(out_str)
-
-    v_last_ind = ind
-    print(f'{v_last_ind + 1} 0.5*le  3.0*le 0.0  fixed   /* for table top */')
-    print(f'{v_last_ind + 2} 0.5*le -2.0*le 0.0  fixed')
-    print(f'{v_last_ind + 3} -2.0*le -2.0*le 0.0  fixed')
-    print(f'{v_last_ind + 4} -2.0*le  3.0*le 0.0  fixed')
-    print('')
-    print('edges  /* given by endpoints and attribute */')
-    edge_ind = 1
-    for v in tver_list:
-        for vnn in v.nn:
-            #se_edge_list.append([tver_list.index(v) + 1,
-            #                     tver_list.index(vnn) + 1])
-            edge_ind
-            v1 = tver_list.index(v) + 1
-            v2 = tver_list.index(vnn) + 1
-            out_str = f'{edge_ind} {v1} {v2}'
-            if v.x_a[2] == 0 and vnn.x_a[2] == 0:
-                out_str += ' constraint table'
-            print(out_str)
-
-    for ind, e in enumerate(se_edge_list):
-        pass
-        #print(f'ind = {ind}')
-        #print(f'e = {e}')
-
-
-    print(f'{ind + 1} {v_last_ind + 1} {v_last_ind + 2} no_refine  fixed  /* for table top */')
-    print(f'{ind + 3} {v_last_ind + 2} {v_last_ind + 3} no_refine  fixed')
-    print(f'{ind + 4} {v_last_ind + 3} {v_last_ind + 4} no_refine  fixed')
-    print(f'{ind + 4} {v_last_ind + 4} {v_last_ind + 1} no_refine  fixed')
-
-    print('------------')
 """"
 RESULTS:
 
@@ -1279,10 +1185,16 @@ Avg error %-1.012169139259402e-14
 
 
 """
+avg_l = [46.799999999999992426, 46.79999999999999688, 46.79999999999999618,
+         46.79999999999998116, 46.799999999999989858, 46.79999999999999907]
 
+avg = (np.array(avg_l) - 46.8)/46.8
+print(f'avg = {np.sum(avg)/len(avg) * 100}')
+print(f'HC.V.len() = {HC.V.size()}')
+print(f'bV = {bV}')
 # Polyscope things:
 # Polyscope
-def plot_polyscope(HC, data_points, printout=False):
+def plot_polyscope(HC, data_points):
     # Initialize polyscope
     ps.init()
     ps.set_up_dir("z_up")
@@ -1293,10 +1205,9 @@ def plot_polyscope(HC, data_points, printout=False):
     HC.vertex_face_mesh()
     points = np.array(HC.vertices_fm)
     triangles = np.array(HC.simplices_fm_i)
-    if printout:
-        print(f'HC.vertices_fm = {HC.vertices_fm}')
-        print(f'HC.simplices_fm_i = {HC.simplices_fm_i}')
-        print(f'HC.V.size = {HC.V.size()}')
+    print(f'HC.vertices_fm = {HC.vertices_fm}')
+    print(f'HC.simplices_fm_i = {HC.simplices_fm_i}')
+    print(f'HC.V.size = {HC.V.size()}')
     ### Register a point cloud
     # `my_points` is a Nx3 numpy array
     my_points = points
@@ -1366,9 +1277,9 @@ if 0:
         print(f'np.random.rand(3) = { 1e-6 * np.random.rand(3)}')
         HC.V.move(v, tuple(v.x_a + 1e-4 *np.random.rand(3)))
 
-#print('-')
-#print(f'max_d = {max_d}')
-#print(f'min_d = {min_d}')
+print('-')
+print(f'max_d = {max_d}')
+print(f'min_d = {min_d}')
 if 0:
     print(f'x.size = {x.size}')
     data_points = np.zeros([x.size, 3])
@@ -1378,20 +1289,17 @@ if 0:
     print(f'data_points = {data_points}')
 
 
-if 0:
-    print(f'len(bV) = {len(bV)}')
-    print(f'HC.V.size = {HC.V.size()}')
-    print(f'len(bV) = {len(bV)}')
-    print(f'len(bV) = {len(bV)}')
-    print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
-    print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
-    print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
-    print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
-    print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
-    print(f'data_xyz[:, 2] = {data_xyz[:, 2]}')
-    print(f'data_xyz[:, 2] - np.min(data_xyz[:, 2])= {data_xyz[:, 2] - np.min(data_xyz[:, 2])}')
 
-
-print(f'gamma = {gamma}')
+print(f'len(bV) = {len(bV)}')
+print(f'HC.V.size = {HC.V.size()}')
+print(f'len(bV) = {len(bV)}')
+print(f'len(bV) = {len(bV)}')
+print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
+print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
+print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
+print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
+print(f'np.min(data_xyz[:, 2]) = {np.min(data_xyz[:, 2])}')
+print(f'data_xyz[:, 2] = {data_xyz[:, 2]}')
+print(f'data_xyz[:, 2] - np.min(data_xyz[:, 2])= {data_xyz[:, 2] - np.min(data_xyz[:, 2])}')
 plot_polyscope(HC, data_points)
 plt.show()

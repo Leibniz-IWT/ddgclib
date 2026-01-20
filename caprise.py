@@ -344,6 +344,9 @@ if 1:
     print(f'R = {R}')
     K_f = (1 / R) ** 2
     H_f = 2 / R  # 2 / R
+    print(f' K_f = { K_f}')
+    print(f' H_f = { H_f}')
+    print(f' theta_p  = { 20} deg = {theta_p} ')
 
     # Compute the interior mean normal curvatures
     # (uses  curvatures_hn_i
@@ -737,8 +740,10 @@ if 0:
 ##################################################
 # New plots:
 ##################################################
-if 0:
-    ps = pplot_surface(HC)
+if 1:
+    fn = f'r_{r}_bV_{len(bV)}'
+    ps = plot_polyscope(HC, fn=fn, up="z_up", stl=True)
+   # ps = pplot_surface(HC)
     # View the point cloud and mesh we just registered in the 3D UI
     ps.show()
 
