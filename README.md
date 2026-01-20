@@ -8,7 +8,7 @@ setup.py files are planned for a future release, currently the test cases can by
 
 `$ git clone https://github.com/Leibniz-IWT/ddgclib/`
 
-# Tutorials
+# Tutorials and Manuscript figures
 
 The tutorials progressively introduce the main functionality of the library and the most important functions in the source code, building up to show how the test cases from the manuscript can be reproduced:
 
@@ -16,8 +16,4 @@ The tutorials progressively introduce the main functionality of the library and 
 - [Tutorial 2: Particle-particle bridge](https://github.com/Leibniz-IWT/ddgclib/blob/master/tutorials/Case%20study%202%20particle-particle%20bridge.ipynb)
 - [Tutorial 3: Sessile droplet comparison](https://github.com/Leibniz-IWT/ddgclib/blob/master/tutorials/Case%20study%203%20Sessile%20droplet.ipynb)
 
-# Manuscript figures
-
-The python scripts in the [./manuscript_figures](https://github.com/Leibniz-IWT/ddgclib/tree/master/manuscript_figures) directory can be used to generate the respective figures shown in the manuscript. These can run for example using:
-
-`$ python fig11.py`
+The original code for the manuscripts are contained in the `v0.3.1-alpha` tag. Currently we are refactoring the library so that some code might be broken. The published figures can be generated using the code inside `./manuscript_figures`
