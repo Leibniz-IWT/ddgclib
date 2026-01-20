@@ -1,3 +1,5 @@
+# moved from ddgclib
+# droplet.py
 # scikit-image is used for image processing:
 from skimage import data, io
 import skimage.feature
