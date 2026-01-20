@@ -20,23 +20,37 @@ from benchmarks._benchmark_toy_methods import (
     compute_volume_default
 )
 
-# --- Method Registries ---
+# Curvature methods (dual vertex-based):
 _curvature_i_methods = {
     "laplace-beltrami": compute_laplace_beltrami,
 }
 
+# Dual vertex area methods:
 _area_i_methods = {
     "default": compute_area_vertex_default,
 }
 
+# Primal triangle area methods:
 _area_ijk_methods = {
     "default": compute_area_triangle_default,
 }
 
+# Dual triangle area methods:
 _area_methods = {
     "default": compute_area_triangle_default,
 }
 
+# Primal volume methods:
+_volume_ijkm_methods = {
+    "default": compute_volume_default,
+}
+
+# Dual volume methods:
+_volume_i_methods = {
+    "default": compute_volume_default,
+}
+
+# Total volume methods:
 _volume_methods = {
     "default": compute_volume_default,
 }
@@ -181,9 +195,37 @@ class Volume:
         # Pass the whole tuple and the dtype as a keyword:
         return float(self._func(HC, complex_dtype=complex_dtype))
 
-# --- Example instantiation ---
+class Volume_i:
+    """Dual vertex volume estimator."""
+    def __init__(self, method="default"):
+        self._func = _volume_i_methods[method]
+
+    def __call__(self, HC, complex_dtype="vv"):
+        """
+        Parameters
+        ----------
+        HC : tuple or object
+            (points, simplices) if 'vf', otherwise hyperct.Complex structure.
+        complex_dtype : str
+            'vf' or 'vv'
+
+        Returns
+        -------
+        np.ndarray
+            Volume contribution per vertex.
+        """
+        if complex_dtype == "vf":
+            points, simplices = HC
+            return self._func(points, simplices)
+        elif complex_dtype == "vv":
+            return self._func(HC)
+        else:
+            raise ValueError("Unknown complex_dtype")
+
+# Example instantiation:
 curvature_i = Curvature_i()
 area_i = Area_i()
 area_ijk = Area_ijk()
 area = Area()
 volume = Volume()
+volume_i = Volume_i()
