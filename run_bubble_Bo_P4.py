@@ -2,7 +2,7 @@
 import numpy as np
 from ddgclib._plotting import plot_polyscope, plot_profile, plot_centroid_vs_iteration_compare
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
-from ddgclib._integrators import Euler, AdamsBashforth, NewtonRaphson, lineSearch
+from ddgclib._integrators_mean_flow import Euler, AdamsBashforth, NewtonRaphson, lineSearch
 from ddgclib._volume import cone_init, spherical_cap_init, spherical_cap_contact_angle
 
 #Parameters
