@@ -34,7 +34,6 @@ class MshCase(GeometryBenchmarkBase):
         self.volume_analytical = np.nan
         self.H_analytical = np.nan
 
-
 class TorusBenchmark(GeometryBenchmarkBase):
     def __init__(self, R_major=2.0, r_minor=1.0, n_u=30, n_v=30, **kwargs):
         super().__init__(name="Torus", **kwargs)
