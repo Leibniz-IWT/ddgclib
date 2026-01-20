@@ -16,27 +16,19 @@ from ddgclib._misc import *
 from ddgclib._plotting import *
 
 
-# -----------------------------
 # FLAGS (toggle features here)
-# -----------------------------
 RUN_SIMULATION = False       # run time evolution loop
 PLOT_MATPLOTLIB = False      # plot using matplotlib
 PLOT_PLOTLY = False          # plot using plotly
 PLOT_POLYSCOPE = True        # plot using polyscope
 CHECK_CURVATURE = True       # compute curvature and print error
 
-
-# -----------------------------
 # Physical constants (water in air at 20 deg C)
-# -----------------------------
 gamma = 0.0728  # N/m, surface tension
 rho   = 1000   # kg/m3, density
 g     = 9.81   # m/s2, gravity
 
-
-# -----------------------------
 # Geometry & initial conditions
-# -----------------------------
 r = 1.4e-5                 # tube radius (m)
 h = 0.0130                 # initial film height
 theta_p = 20 * np.pi/180.0 # contact angle (radians)
