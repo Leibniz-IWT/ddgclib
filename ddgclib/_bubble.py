@@ -385,7 +385,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
-  capLen = RadTop / capLen**.5
+  #capLen = RadTop / capLen**.5
   ds = min( 1e-3*abs(capLen), 1e-2 )
   psi=0
   r=0
@@ -397,7 +397,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
   for i in range(int(1e6)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
-    if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
+    #if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
     #ds = min( abs(capLen)**2, 1e-3*abs(np.pi-psi), 1e-1 )
     #ds = 1e-4 #* min( abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = 1e-0 * min( abs(capLen)**2, 1e-2*abs(psi), 1e-2*abs(np.pi-psi), 1e-1 )
@@ -411,15 +411,15 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
     centroid += z*np.pi*r**2*dz
     if fname:
       #if not i%100 or dPsi>1e-2: 
-      print(r, -z, psi, dPsi, capLen, file=adams_txt)
-    if contactAng>0 and Volume*r**-3<VolPrev: break
+      print(r, -z, psi, dPsi, capLen, Volume, file=adams_txt)
+    #if contactAng>0 and Volume*r**-3<VolPrev: break
     if contactAng<0 and dPsi<0: break
-    #if contactAng>0 and dPsi<0 and psi<contactAng: break
+    if contactAng>0 and dPsi<0 and psi<contactAng: break
     VolPrev = Volume*r**-3
   if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
   if fname: print('saved',fname,'capLen',capLen,'i',i)
   centroid /= Volume
-  return Volume, r, z, z-centroid, np.pi-psi
+  return Volume, r, z, centroid, psi
 
 def AdamsBashforthBoProfile(Bo, RadTop, contactAng=-1, fname=None):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir

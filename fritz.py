@@ -77,7 +77,7 @@ if False:
       RadPin = (3*VPin/4/np.pi)**(1/3)
       VSpr, RadFootSpr, heightSpr, centroidSpr, angleSpr = AdamsBashforthProfile(Bo, RadTop, fname=spreadName)
       RadSpread = (3*VSpr/4/np.pi)**(1/3)
-      if False and (anglePrev-np.pi/2)*(angleSpr-np.pi/2) < 0:
+      if True and (anglePrev-np.pi/2)*(angleSpr-np.pi/2) < 0:
         AdamsBashforthProfile(Bo, RadTop, .5*np.pi, fname=f'data/pin{b:05}.txt')
         AdamsBashforthProfile(Bo, RadTop, fname=f'data/spread{b:05}.txt')
         AdamsBashforthProfile(BoPrev, RadTop, .5*np.pi, fname=f'data/pin{b-1:05}.txt')

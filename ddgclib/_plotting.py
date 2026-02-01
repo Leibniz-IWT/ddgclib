@@ -384,7 +384,7 @@ def plot_drop_profile(name='pin spread'):
       if 'spread' in cont and df[0,-1]==.566: continue
       col=BoColour(df[0,-1])
       #ax.plot(df[:,0]/df[-1,0], (df[:,1]-df[-1,1])/df[-1,0], 'o', color=col)#, alpha=.9)
-      ax.plot(df[0,0], df[0,1], '+', color=col)#, alpha=.9)
+      #ax.plot(df[0,0], df[0,1], '+', color=col)#, alpha=.9)
       ax.plot(df[:,0], df[:,1], color=col)#, alpha=.9)
       logBo = int(np.log2(df[-1,-1]))
       if False:#logBo==-2: 
@@ -404,9 +404,8 @@ def plot_drop_profile(name='pin spread'):
     #ax.set_ylabel('$\\frac{ z-z_\\mathrm{top} }{ R_\\mathrm{top} }$',rotation=0,size=22)
     #ax.set_ylabel('$\\frac{ z }{ r_\\mathrm{con} }$',rotation=0,size=22,labelpad=15)
     ax.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22)
-    ax.set_ylim([-2,2])
-    #ax.set_ylim([0,1])
-    ax.set_xlim([0,1])
+    #ax.set_ylim([-2,2])
+    #ax.set_xlim([0,1])
     ax.set_aspect('equal', adjustable='box')
     fname = folName+'profile_'+cont+'.pdf'
     print('savin ',fname)
@@ -475,12 +474,20 @@ def plot_detach_radius_vs_cont_angle():
       else: ha='center'
       if 1.2<df[i,0] and df[i,0]<1.3:  xShift=.015
       ax.text(df[i,1]/np.pi*180+xShift, df[i,2]-.015, f'${df[i,0]:.4g}$', ha=ha, va=va)
+  if True:
+    fname = 'Ling25effect.txt'
+    print('open',fname)
+    with open(fname) as f:
+      df = np.loadtxt(f)
+    for i in range(len(df[:,0])):
+      #ax.plot(df[i,2], (.75*df[i,4]/np.pi)**(1/3)/df[i,5], 's', mec=(0,0,df[i,2]/3), mfc='None', clip_on=False)
+      ax.plot(180-df[i,2], (.75*df[i,4]*1e-6/np.pi)**(1/3)/df[i,5]/1e-3, 's', mec='k', mfc='None', clip_on=False)
   ax.tick_params(which='both', direction='in', top=True, right=True)
   ax.set_xlabel('$\\phi$', rotation=0)
   #ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)
   ax.set_ylabel('$R_\\mathrm{det}\\sqrt\\frac{\\rho g}{\\sigma}$')#, rotation=0, size=22, labelpad=15)
   ax.set_xlim([0,180])
-  ax.set_ylim([0,1])
+  #ax.set_ylim([0,1])
   #ax.set_xscale('log')
   #ax.set_yscale('log')
   degrees = [0, 30, 60, 90, 120, 150, 180]
@@ -526,7 +533,7 @@ def plot_detach_radius_vs_cont_radius():
         va='bottom'
         yShift=0.005
       ax.text(df[i,4], df[i,5]+yShift, f'${df[i,0]:.4g}$', ha=ha, va=va)
-  if False:
+  if True:
     fname = 'LesageVolVsContRadSq.txt'
     print('open',fname)
     with open(fname) as f:
