@@ -125,3 +125,11 @@ def lru_cache(maxsize=255, timeout=None):
     return (lambda input_func: functools.wraps(input_func)(
         LruCacheClass(input_func, maxsize, timeout)))
 
+
+def _set_boundary(v, val=True):
+    """
+    small helper fuction to set the boundary value property for the supplied vertex.
+    :param v:
+    :return:
+    """
+    v.boundary = val

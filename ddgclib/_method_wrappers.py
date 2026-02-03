@@ -106,24 +106,16 @@ def _dual_volume_curved(points, tris, **kwargs):
         dual_csv = wd / f"{stem}_COEFFS_Transformed_DualVolume.csv"
         return _read_dualvolume_csv(dual_csv, n)
 
-
 # Register dual-volume method ONCE
 _volume_i_methods["curved_volume"] = _dual_volume_curved
 
- 
-# Total volume methods:
-def _volume_curved(HC, complex_dtype="vf", **kwargs):
-    # Lazy import so missing deps (meshio, pandas) don't break import-time
-    #from ._curved_volume import curved_volume
-    from .geometry._curved_volume import curved_volume
-    return curved_volume(HC, complex_dtype=complex_dtype, **kwargs)
 
 _volume_methods = {
     "default": compute_volume_default,
     "curved_volume": _volume_curved,
 }
 
-# --- Curvature ---
+# Curvature
 class Curvature_i:
     """Vertex-based mean curvature magnitude estimator."""
     def __init__(self, method="laplace-beltrami"):
@@ -164,7 +156,7 @@ class Curvature_ijk:
     def __call__(self, HC, complex_dtype="vv"):
         raise NotImplementedError("Triangle-level curvature not implemented yet")
 
-# --- Area ---
+# Area
 class Area_i:
     """Vertex dual area estimator."""
     def __init__(self, method="default"):
@@ -243,7 +235,7 @@ class Area:
         areas = self._func(*HC)
         return np.sum(areas)
 
-# --- Volume ---
+# Volume wrappers
 class Volume:
     """Total volume estimator."""
     def __init__(self, method="default"):
@@ -292,6 +284,13 @@ class Volume_i:
             return self._func(HC, **kwargs)
         else:
             raise ValueError("Unknown complex_dtype")
+
+# Total volume methods:
+def _volume_curved(HC, complex_dtype="vf", **kwargs):
+    # Lazy import so missing deps (meshio, pandas) don't break import-time
+    #from ._curved_volume import curved_volume
+    from .geometry._curved_volume import curved_volume
+    return curved_volume(HC, complex_dtype=complex_dtype, **kwargs)
 
 # Example instantiation:
 curvature_i = Curvature_i()

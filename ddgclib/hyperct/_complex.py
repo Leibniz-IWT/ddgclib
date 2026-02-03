@@ -41,7 +41,6 @@ FUTURE: Triangulate arbitrary domains other than n-cubes
 """
 # Std. Library
 import copy
-import collections
 import logging
 import os
 import itertools
@@ -52,8 +51,6 @@ import decimal
 #from memory_profiler import profile
 
 
-
-from abc import ABC, abstractmethod
 # Required modules:
 import numpy
 
@@ -93,8 +90,7 @@ except ImportError:  # Python 2:
 
 # Module specific imports
 from ._vertex import (VertexCacheIndex, VertexCacheField)
-from ddgclib._field import (FieldCache, ScalarFieldCache)
-from ddgclib._vertex_group import (Subgroup, Cell, Simplex)
+from ddgclib.hyperct._vertex_group import (Cell, Simplex)
 
 
 # Main complex class:
@@ -2155,7 +2151,6 @@ class Complex:
         :param exclude: set, exclude subdividing any neighbours in this set
         :return:
         """
-        import numpy as np
         # Vcopy = copy.copy(self.HC.V)
         V0l = list(self.V)
         V0nn = []
@@ -3007,7 +3002,6 @@ class Complex:
         :return:
         """
         if proj_dim == 2:
-            from matplotlib import cm
             xr = numpy.linspace(self.bounds[0][0], self.bounds[0][1], num=1000)
             fr = numpy.zeros_like(xr)
             for i in range(xr.shape[0]):
@@ -3019,7 +3013,6 @@ class Complex:
             ax.set_ylabel('$f$')
 
         if proj_dim == 3:
-            from matplotlib import cm
             xg, yg, Z = self.plot_field_grids(bounds, func, func_args)
             ax.plot_surface(xg, yg, Z, rstride=1, cstride=1,
                             # cmap=cm.coolwarm,
