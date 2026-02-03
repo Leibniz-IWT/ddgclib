@@ -9,10 +9,11 @@ db = np.array([129, 160, 189]) / 255  # Dark blue
 lb = np.array([176, 206, 234]) / 255  # Light blue
 
 # Colours
-coldict = {'lo': np.array([242, 189, 138]) / 255,  # light orange
+coldict = {'lo': np.array([242, 189, 138]) / 255,  # Light orange
            'do': np.array([235, 129, 27]) / 255,  # Dark alert orange
            'db': np.array([129, 160, 189]) / 255,  # Dark blue
-           'lb': np.array([176, 206, 234]) / 255  # Light blue
+           'lb': np.array([176, 206, 234]) / 255,  # Light blue
+           'tg': np.array([ 44, 160,  44]) / 255,   # tab:green (matplotlib)
             }
 
 

@@ -58,6 +58,184 @@ def plot_polyscope(HC):
     ps.show()
 
 
+def plot_dual(vd, HC, vector_field=None, scalar_field=None, fn='', up="x_up"
+              , stl=False, length_scale=1.0, point_radii=0.005):
+    # Reset the indices for plotting:
+    for i, v in enumerate(HC.V):
+        v.index = i
+    v1 = vd
+    # Initialize polyscope
+    ps.init()
+    ps.set_up_dir('z_up')
+    do = coldict['do']
+    lo = coldict['lo']
+    db = coldict['db']
+    lb = coldict['lb']
+    tg = coldict['tg']  # Tab:green colour
+    # %% Plot Barycentric dual mesh
+    # Loop over primary edges
+    dual_points_set = set()
+    ssets = []  # Sets of simplices
+    v1 = vd
+    for i, v2 in enumerate(v1.nn):
+        # Find the dual vertex of e12:
+        vc_12 = 0.5 * (v2.x_a - v1.x_a) + v1.x_a  # TODO: Should be done in the compute_vd function
+        vc_12 = HC.Vd[tuple(vc_12)]
+
+        # Find local dual points intersecting vertices terminating edge:
+        dset = v2.vd.intersection(v1.vd)  # Always 5 for boundaries
+        # Start with the first vertex and then build triangles, loop back to it:
+        vd_i = list(dset)[0]
+        if v1.boundary and v2.boundary:
+            # print(f'len(dset) = {len(dset)}')
+            # Remove the boundary edge which should already be in the set:
+            if not (len(vd_i.nn.intersection(dset)) == 1):
+                for vd in dset:
+                    vd_i = vd
+                    if len(vd_i.nn.intersection(dset)) == 1:
+                        break
+            # iter_len = 3
+            # The set length much be different because all interior planes
+            # are counted minus two boudary vertices which do not form triangles
+            # such as the flux planes in the bulk
+            iter_len = len(list(dset)) - 2
+        else:
+            iter_len = len(list(dset))
+
+        # Main loop
+        dsetnn = vd_i.nn.intersection(dset)  # Always 1 internal dual vertices
+        vd_j = list(dsetnn)[0]
+        # NOTE: In the boundary edges the last triangle does not have
+        #      a final vd_j
+        # print(f'dset = {dset}')
+        for _ in range(iter_len):  # For boundaries should be length 2?
+            ssets.append([vc_12, vd_i, vd_j])
+            dsetnn_k = vd_j.nn.intersection(dset)  # Always 2 internal dual vertices in interior
+            # print(f'dsetnn_k = {dsetnn_k}')
+            dsetnn_k.remove(vd_i)  # Should now be size 1
+            vd_i = vd_j
+            try:
+                # Alternatively it should produce an IndexError only when
+                # _ = 2 (end of range(3) and we are on a boundary edge
+                # so that (v1.boundary and v2.boundary) is true
+                vd_j = list(dsetnn_k)[0]  # Retrieve the next vertex
+            except IndexError:
+                pass  # Should only happen for boundary edges
+
+        # Find local dual points intersecting vertices terminating edge:
+        dset = v2.vd.intersection(v1.vd)
+        pi = []
+        for vd in dset:
+            # pi.append(vd.x + 1e-9 * np.random.rand())
+            pi.append(vd.x)
+            dual_points_set.add(vd.x)
+        pi = np.array(pi)
+        pi_2d = pi[:, :2] + 1e-9 * np.random.rand()
+
+        # Plot dual points:
+        dual_points = []
+        for vd in dual_points_set:
+            dual_points.append(vd)
+
+        dual_points = np.array(dual_points)
+        ps_cloud = ps.register_point_cloud("Dual points", dual_points)
+        ps_cloud.set_color(do)
+        ps_cloud.set_radius(point_radii)
+
+    # Build the simplices for plotting
+    faces = []
+    vdict = collections.OrderedDict()  # Ordered cache of vertices to plot
+    ind = 0
+    # Now iterate through all the constructed simplices and find indexes
+    for s in ssets:
+        f = []
+        for vd in s:
+            if not (vd.x in vdict):
+                vdict[vd.x] = ind
+                ind += 1
+
+            f.append(vdict[vd.x])
+        faces.append(f)
+
+    verts = np.array(list(vdict.keys()))
+    faces = np.array(faces)
+
+    print(f'verts = {verts}')
+    dsurface = ps.register_surface_mesh(f"Dual face", verts, faces,
+                                        color=do,
+                                        edge_width=0.0,
+                                        edge_color=(0.0, 0.0, 0.0),
+                                        smooth_shade=False)
+
+    dsurface.set_transparency(0.5)
+    # Plot primary mesh
+    HC.dim = 2  # The dimension has changed to 2 (boundary surface)
+    HC.vertex_face_mesh()
+    HC.dim = 3  # Reset the dimension to 3
+    points = np.array(HC.vertices_fm)
+    triangles = np.array(HC.simplices_fm_i)
+
+    # %% Register the primary vertices as a point cloud
+    # `my_points` is a Nx3 numpy array
+    my_points = points
+    ps_cloud = ps.register_point_cloud("Primary points", my_points)
+    ps_cloud.set_color(tuple(db))
+    ps_cloud.set_radius(point_radii)
+    # ps_cloud.set_color((0.0, 0.0, 0.0))
+    verts = my_points
+    faces = triangles
+    if stl:
+        #  msh = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+        for i, f in enumerate(faces):
+            for j in range(3):
+                pass
+                # msh.vectors[i][j] = verts[f[j], :]
+
+        # msh.save(f'{fn}.stl')
+
+    ### Plot the primary mesh
+    # `verts` is a Nx3 numpy array of vertex positions
+    # `faces` is a Fx3 array of indices, or a nested list
+    if 1:
+        surface = ps.register_surface_mesh("Primary surface", verts, faces,
+                                           color=db,
+                                           edge_width=1.0,
+                                           edge_color=(0.0, 0.0, 0.0),
+                                           smooth_shade=False)
+
+        surface.set_transparency(0.3)
+        # Add a scalar function and a vector function defined on the mesh
+        # vertex_scalar is a length V numpy array of values
+        # face_vectors is an Fx3 array of vectors per face
+
+        # Scene options (New, not working for scaling
+        # NOTE: VERY BROKEN AS IT SCALES THE DIFFERENT MESHES RELATIVELY: NEVER USE THIS:
+        #ps.set_autocenter_structures(True)
+        #ps.set_autoscale_structures(True)
+
+        # View the point cloud and mesh we just registered in the 3D UI
+        # ps.show()
+        # Plot particles
+        # Ground plane options
+        ps.set_ground_plane_mode("shadow_only")  # set +Z as up direction
+        ps.set_ground_plane_height_factor(0.1)  # adjust the plane height
+        ps.set_shadow_darkness(0.2)  # lighter shadows
+        ps.set_shadow_blur_iters(2)  # lighter shadows
+        ps.set_transparency_mode('pretty')
+        ps.set_length_scale(length_scale)
+        #ps.set_length_scale(length_scale)
+     #   ps.set_length_scale(length_scale)
+        # ps.look_at((0., -10., 0.), (0., 0., 0.))
+       # ps.look_at((1., -8., -8.), (0., 0., 0.))
+        # ps.set_ground_plane_height_factor(x, is_relative=True)
+        ps.set_screenshot_extension(".png")
+        # Take a screenshot
+        # It will be written to your current directory as screenshot_000000.jpg, etc
+        ps.screenshot(fn)
+
+    return ps, du
+
+# Plot surface mesh
 def pplot_surface(HC):
 
     HC.vertex_face_mesh()
@@ -112,6 +290,7 @@ def pplot_surface(HC):
     ps.screenshot("mesh.png")
     return ps
 
+# Plot Adam Bashforth profiles
 def plot_Adam_Bash(): 
   fig, ax = plt.subplots(1)#, figsize=[columnWid, .6*columnWid])
   root =  'data/'
@@ -525,179 +704,3 @@ def plot_detach_radius_vs_cont_radius():
   return
 
 
-def plot_dual(vd, HC, vector_field=None, scalar_field=None, fn='', up="x_up"
-              , stl=False, length_scale=1.0, point_radii=0.005):
-    # Reset the indices for plotting:
-    for i, v in enumerate(HC.V):
-        v.index = i
-    v1 = vd
-    # Initialize polyscope
-    ps.init()
-    ps.set_up_dir('z_up')
-    do = coldict['do']
-    lo = coldict['lo']
-    db = coldict['db']
-    lb = coldict['lb']
-    tg = coldict['tg']  # Tab:green colour
-    # %% Plot Barycentric dual mesh
-    # Loop over primary edges
-    dual_points_set = set()
-    ssets = []  # Sets of simplices
-    v1 = vd
-    for i, v2 in enumerate(v1.nn):
-        # Find the dual vertex of e12:
-        vc_12 = 0.5 * (v2.x_a - v1.x_a) + v1.x_a  # TODO: Should be done in the compute_vd function
-        vc_12 = HC.Vd[tuple(vc_12)]
-
-        # Find local dual points intersecting vertices terminating edge:
-        dset = v2.vd.intersection(v1.vd)  # Always 5 for boundaries
-        # Start with the first vertex and then build triangles, loop back to it:
-        vd_i = list(dset)[0]
-        if v1.boundary and v2.boundary:
-            # print(f'len(dset) = {len(dset)}')
-            # Remove the boundary edge which should already be in the set:
-            if not (len(vd_i.nn.intersection(dset)) == 1):
-                for vd in dset:
-                    vd_i = vd
-                    if len(vd_i.nn.intersection(dset)) == 1:
-                        break
-            # iter_len = 3
-            # The set length much be different because all interior planes
-            # are counted minus two boudary vertices which do not form triangles
-            # such as the flux planes in the bulk
-            iter_len = len(list(dset)) - 2
-        else:
-            iter_len = len(list(dset))
-
-        # Main loop
-        dsetnn = vd_i.nn.intersection(dset)  # Always 1 internal dual vertices
-        vd_j = list(dsetnn)[0]
-        # NOTE: In the boundary edges the last triangle does not have
-        #      a final vd_j
-        # print(f'dset = {dset}')
-        for _ in range(iter_len):  # For boundaries should be length 2?
-            ssets.append([vc_12, vd_i, vd_j])
-            dsetnn_k = vd_j.nn.intersection(dset)  # Always 2 internal dual vertices in interior
-            # print(f'dsetnn_k = {dsetnn_k}')
-            dsetnn_k.remove(vd_i)  # Should now be size 1
-            vd_i = vd_j
-            try:
-                # Alternatively it should produce an IndexError only when
-                # _ = 2 (end of range(3) and we are on a boundary edge
-                # so that (v1.boundary and v2.boundary) is true
-                vd_j = list(dsetnn_k)[0]  # Retrieve the next vertex
-            except IndexError:
-                pass  # Should only happen for boundary edges
-
-        # Find local dual points intersecting vertices terminating edge:
-        dset = v2.vd.intersection(v1.vd)
-        pi = []
-        for vd in dset:
-            # pi.append(vd.x + 1e-9 * np.random.rand())
-            pi.append(vd.x)
-            dual_points_set.add(vd.x)
-        pi = np.array(pi)
-        pi_2d = pi[:, :2] + 1e-9 * np.random.rand()
-
-        # Plot dual points:
-        dual_points = []
-        for vd in dual_points_set:
-            dual_points.append(vd)
-
-        dual_points = np.array(dual_points)
-        ps_cloud = ps.register_point_cloud("Dual points", dual_points)
-        ps_cloud.set_color(do)
-        ps_cloud.set_radius(point_radii)
-
-    # Build the simplices for plotting
-    faces = []
-    vdict = collections.OrderedDict()  # Ordered cache of vertices to plot
-    ind = 0
-    # Now iterate through all the constructed simplices and find indexes
-    for s in ssets:
-        f = []
-        for vd in s:
-            if not (vd.x in vdict):
-                vdict[vd.x] = ind
-                ind += 1
-
-            f.append(vdict[vd.x])
-        faces.append(f)
-
-    verts = np.array(list(vdict.keys()))
-    faces = np.array(faces)
-
-    print(f'verts = {verts}')
-    dsurface = ps.register_surface_mesh(f"Dual face", verts, faces,
-                                        color=do,
-                                        edge_width=0.0,
-                                        edge_color=(0.0, 0.0, 0.0),
-                                        smooth_shade=False)
-
-    dsurface.set_transparency(0.5)
-    # Plot primary mesh
-    HC.dim = 2  # The dimension has changed to 2 (boundary surface)
-    HC.vertex_face_mesh()
-    HC.dim = 3  # Reset the dimension to 3
-    points = np.array(HC.vertices_fm)
-    triangles = np.array(HC.simplices_fm_i)
-
-    # %% Register the primary vertices as a point cloud
-    # `my_points` is a Nx3 numpy array
-    my_points = points
-    ps_cloud = ps.register_point_cloud("Primary points", my_points)
-    ps_cloud.set_color(tuple(db))
-    ps_cloud.set_radius(point_radii)
-    # ps_cloud.set_color((0.0, 0.0, 0.0))
-    verts = my_points
-    faces = triangles
-    if stl:
-        #  msh = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
-        for i, f in enumerate(faces):
-            for j in range(3):
-                pass
-                # msh.vectors[i][j] = verts[f[j], :]
-
-        # msh.save(f'{fn}.stl')
-
-    ### Plot the primary mesh
-    # `verts` is a Nx3 numpy array of vertex positions
-    # `faces` is a Fx3 array of indices, or a nested list
-    if 1:
-        surface = ps.register_surface_mesh("Primary surface", verts, faces,
-                                           color=db,
-                                           edge_width=1.0,
-                                           edge_color=(0.0, 0.0, 0.0),
-                                           smooth_shade=False)
-
-        surface.set_transparency(0.3)
-        # Add a scalar function and a vector function defined on the mesh
-        # vertex_scalar is a length V numpy array of values
-        # face_vectors is an Fx3 array of vectors per face
-
-        # Scene options (New, not working for scaling
-        # NOTE: VERY BROKEN AS IT SCALES THE DIFFERENT MESHES RELATIVELY: NEVER USE THIS:
-        #ps.set_autocenter_structures(True)
-        #ps.set_autoscale_structures(True)
-
-        # View the point cloud and mesh we just registered in the 3D UI
-        # ps.show()
-        # Plot particles
-        # Ground plane options
-        ps.set_ground_plane_mode("shadow_only")  # set +Z as up direction
-        ps.set_ground_plane_height_factor(0.1)  # adjust the plane height
-        ps.set_shadow_darkness(0.2)  # lighter shadows
-        ps.set_shadow_blur_iters(2)  # lighter shadows
-        ps.set_transparency_mode('pretty')
-        ps.set_length_scale(length_scale)
-        #ps.set_length_scale(length_scale)
-     #   ps.set_length_scale(length_scale)
-        # ps.look_at((0., -10., 0.), (0., 0., 0.))
-       # ps.look_at((1., -8., -8.), (0., 0., 0.))
-        # ps.set_ground_plane_height_factor(x, is_relative=True)
-        ps.set_screenshot_extension(".png")
-        # Take a screenshot
-        # It will be written to your current directory as screenshot_000000.jpg, etc
-        ps.screenshot(fn)
-
-    return ps, du
