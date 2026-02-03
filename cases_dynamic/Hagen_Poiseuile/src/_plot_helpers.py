@@ -1,8 +1,9 @@
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-# Radial velocity profile extraction and plotting
+
 def extract_radial_profiles(HC, z_positions, dr_tol=0.05):
     """Extract u_z vs r at specified z slices."""
     profiles = {}
@@ -15,7 +16,6 @@ def extract_radial_profiles(HC, z_positions, dr_tol=0.05):
                 uz = v.u[2]
                 r_list.append(r)
                 uz_list.append(uz)
-        # Sort by radius
         if r_list:
             sort_idx = np.argsort(r_list)
             profiles[z_target] = (np.array(r_list)[sort_idx], np.array(uz_list)[sort_idx])
@@ -23,7 +23,6 @@ def extract_radial_profiles(HC, z_positions, dr_tol=0.05):
 
 
 def plot_radial_profiles(profiles, U_max, r_max, title="Radial velocity profiles"):
-    """Plot u_z(r) at different z locations + analytical parabola."""
     plt.figure(figsize=(10, 6))
     colors = plt.cm.viridis(np.linspace(0, 1, len(profiles)))
 
@@ -45,10 +44,7 @@ def plot_radial_profiles(profiles, U_max, r_max, title="Radial velocity profiles
     plt.show()
 
 
-
-# Centerline velocity along tube
 def plot_centerline_velocity(HC, L, U_max, title="Centerline velocity development"):
-    """Extract and plot max u_z in thin slices along z."""
     z_slices = np.linspace(-L / 2 + 0.1, L / 2 - 0.1, 30)
     z_centers = []
     u_center = []
@@ -76,4 +72,20 @@ def plot_centerline_velocity(HC, L, U_max, title="Centerline velocity developmen
     plt.show()
 
 
-# Run the plot
+def plot_3d_velocity(HC, cmap='viridis', s=15, alpha=0.8):
+    """Safe 3D scatter with explicit float64 casting."""
+    x = np.asarray([v.x_a[0] for v in HC.V], dtype=np.float64)
+    y = np.asarray([v.x_a[1] for v in HC.V], dtype=np.float64)
+    z = np.asarray([v.x_a[2] for v in HC.V], dtype=np.float64)
+    uz = np.asarray([v.u[2] for v in HC.V], dtype=np.float64)
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    scatter = ax.scatter(x, y, z, c=uz, cmap=cmap, s=s, alpha=alpha)
+    plt.colorbar(scatter, label='u_z [m/s]')
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+    ax.set_zlabel('z [m]')
+    ax.set_title('Axial velocity distribution')
+    plt.show()
+    return fig, ax
