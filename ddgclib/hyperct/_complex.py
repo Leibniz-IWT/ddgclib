@@ -64,7 +64,7 @@ try:
     from matplotlib.patches import FancyArrowPatch
     from matplotlib.tri import Triangulation
     from mpl_toolkits.mplot3d import axes3d, Axes3D, proj3d
-    from ._misc import Arrow3D
+    from ddgclib._misc import Arrow3D
 except ImportError:
     logging.warning("Plotting functions are unavailable. To use install "
                     "matplotlib, install using ex. `pip install matplotlib` ")
@@ -93,8 +93,8 @@ except ImportError:  # Python 2:
 
 # Module specific imports
 from ._vertex import (VertexCacheIndex, VertexCacheField)
-from ._field import (FieldCache, ScalarFieldCache)
-from ._vertex_group import (Subgroup, Cell, Simplex)
+from ddgclib._field import (FieldCache, ScalarFieldCache)
+from ddgclib._vertex_group import (Subgroup, Cell, Simplex)
 
 
 # Main complex class:
