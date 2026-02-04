@@ -34,7 +34,8 @@ from ddgclib._misc import *
 from ddgclib._plotting import *
 
 # barycentric imports (from ddgclib.barycentric subpackage)
-from ddgclib.barycentric._duals import compute_vd, triang_dual, plot_dual, plot_dual_mesh_2D, _set_boundary
+from ddgclib.barycentric._duals import compute_vd, triang_dual, plot_dual_mesh_2D, _set_boundary
+from ddgclib._plotting import plot_dual
 
 # compute duals (and Delaunay dual from a set of points)
 from ddgclib.barycentric._duals import compute_vd, _merge_local_duals_vector, triang_dual, plot_dual
