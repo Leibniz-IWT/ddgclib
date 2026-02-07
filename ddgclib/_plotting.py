@@ -383,10 +383,13 @@ def plot_drop_profile(name='pin spread'):
       if df.ndim<2: continue
       if 'spread' in cont and df[0,-1]==.566: continue
       col=BoColour(df[0,-1])
+      col='k'
+      if '0028' in fname: col='b'
       #ax.plot(df[:,0]/df[-1,0], (df[:,1]-df[-1,1])/df[-1,0], 'o', color=col)#, alpha=.9)
-      #ax.plot(df[0,0], df[0,1], '+', color=col)#, alpha=.9)
       ax.plot(df[:,0], df[:,1], color=col)#, alpha=.9)
-      logBo = int(np.log2(df[-1,-1]))
+      for p in range(1,len(df[:,0])):
+        if df[p,3]*df[p-1,3]<0: ax.plot(df[p,0], df[p,1], '+', color=col)#, alpha=.9)
+      #logBo = int(np.log2(df[-1,-1]))
       if False:#logBo==-2: 
         if 'spread' in cont:
           ax.plot([df[-1,0],df[-1,0]+.15], [df[-1,1],df[-1,1]], color='k', linestyle='dashed')
@@ -394,8 +397,8 @@ def plot_drop_profile(name='pin spread'):
         elif 'pin' in cont:
           ax.plot([df[-1,0],0], [df[-1,1],df[-1,1]], color='k', linestyle='dashed')
           ax.text(df[-1,0]/2, df[-1,1]+.1, '$r_\\mathrm{con}$', ha='center', va='center')
-      if logBo>2: continue
-      if logBo<-1: continue
+      #if logBo>2: continue
+      #if logBo<-1: continue
       #ax.text(*df[-1,:2], f'${df[-1,-1]**.5:.4g}$', ha='left', va='center')
     ax.tick_params(which='both', direction='in', top=True, right=True)
     #ax.set_xlabel('$r/R_\\mathrm{top}$')
@@ -481,7 +484,7 @@ def plot_detach_radius_vs_cont_angle():
       df = np.loadtxt(f)
     for i in range(len(df[:,0])):
       #ax.plot(df[i,2], (.75*df[i,4]/np.pi)**(1/3)/df[i,5], 's', mec=(0,0,df[i,2]/3), mfc='None', clip_on=False)
-      ax.plot(180-df[i,2], (.75*df[i,4]*1e-6/np.pi)**(1/3)/df[i,5]/1e-3, 's', mec='k', mfc='None', clip_on=False)
+      ax.plot(df[i,2], (.75*df[i,4]*1e-6/np.pi)**(1/3)/df[i,5]/1e-3, 's', mec='k', mfc='None', clip_on=False)
   ax.tick_params(which='both', direction='in', top=True, right=True)
   ax.set_xlabel('$\\phi$', rotation=0)
   #ax.set_ylabel('$\\frac{R_{det}}{\\lambda}$', rotation=0, size=22, labelpad=15)

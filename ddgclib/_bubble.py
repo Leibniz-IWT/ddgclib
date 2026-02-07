@@ -394,7 +394,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
   VolPrev=0
   centroid=0
   if fname: adams_txt = open(fname, "w") 
-  for i in range(int(1e6)):
+  for i in range(int(1e4)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
     #if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
