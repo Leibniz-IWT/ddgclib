@@ -376,7 +376,7 @@ def plot_drop_profile(name='pin spread'):
   for cont in name.split():
     fig, ax = plt.subplots(1)
     for fname in sorted(os.listdir(folName)):
-      if 'txt' not in fname: continue
+      if '0.txt' not in fname: continue
       if cont not in fname: continue
       with open(folName+fname, encoding = 'utf-8') as f:
         df = np.loadtxt(f)
@@ -413,6 +413,30 @@ def plot_drop_profile(name='pin spread'):
     fname = folName+'profile_'+cont+'.pdf'
     print('savin ',fname)
     fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def plot_drop_vol_vs_rad_top(name='angle'): 
+  import os
+  folName = 'data/'
+  for cont in name.split():
+    fig, ax = plt.subplots(1)
+    for fname in sorted(os.listdir(folName)):
+      if 'txt' not in fname: continue
+      if cont not in fname: continue
+      with open(folName+fname, encoding = 'utf-8') as f:
+        df = np.loadtxt(f)
+      if df.ndim<2: continue
+      for s in range(len(df[:,0])):
+        col=(abs(df[s,2]/np.pi)**.5,0,0)
+        ax.plot(df[s,5], (df[s,6]*3/4/np.pi)**(1/3), '.', color=col)
+    ax.tick_params(which='both', direction='in', top=True, right=True)
+    ax.set_xlabel('$R_t/\\lambda$')
+    ax.set_ylabel('$\\frac{ R_d }{\\lambda}$',rotation=0,size=22)
+    ax.set_xscale('log')
+    #ax.set_yscale('log')
+    fname = folName+'volVsRad_'+cont+'.pdf'
+  print('savin ',fname)
+  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf')
   return
 
 def plot_centroid_vs_grid_size(): 

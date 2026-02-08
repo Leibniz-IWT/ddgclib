@@ -380,7 +380,7 @@ def bubbleProfile(capLen, RadTop, contactAng=-1, fname=None):
   centroid /= Volume
   return Volume*capLen**3, r*capLen, z*capLen, (z-centroid)*capLen, psi
 
-def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
+def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
@@ -391,10 +391,12 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
   r=0
   z=0
   Volume=0
-  VolPrev=0
+  #VolPrev=0
   centroid=0
+  area=0
+  dPsiPrev=1
   if fname: adams_txt = open(fname, "w") 
-  for i in range(int(1e4)):
+  for i in range(int(1e5)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
     #if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
@@ -409,14 +411,24 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None):
     psi += dPsi
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
-    if fname:
-      #if not i%100 or dPsi>1e-2: 
-      print(r, -z, psi, dPsi, capLen, Volume, file=adams_txt)
+    area+= 2*np.pi*r*ds
+    if fname: 
+      if not i%100 or dPsi>1e-2: 
+        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
+    angBin = int(psi*180/np.pi // angleSave)
+    angBinPrev = int((psi-dPsi)*180/np.pi // angleSave)
+    if angleSave and angBin != angBinPrev:
+      angFname=f'data/angle{max(angBin,angBinPrev):05}.txt'
+      ang_txt = open(angFname) 
+      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
     #if contactAng>0 and Volume*r**-3<VolPrev: break
-    if contactAng<0 and dPsi<0: break
-    if contactAng>0 and dPsi<0 and psi<contactAng: break
-    VolPrev = Volume*r**-3
-  if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
+    #if contactAng<0 and dPsi<0: break
+    if psi<0: break
+    if dPsi>0 and dPsiPrev<0: break
+    dPsiPrev=dPsi
+    #if contactAng>0 and dPsi<0 and psi<contactAng: break
+    #VolPrev = Volume*r**-3
+  #if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
   if fname: print('saved',fname,'capLen',capLen,'i',i)
   centroid /= Volume
   return Volume, r, z, centroid, psi
