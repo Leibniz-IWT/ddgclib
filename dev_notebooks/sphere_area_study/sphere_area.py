@@ -2,7 +2,7 @@
 
 # ddg imports
 import os, sys
-module_path = os.path.abspath(os.path.join('..'))
+module_path = os.path.abspath(os.path.join('../../..'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from ddgclib._plotting import *
