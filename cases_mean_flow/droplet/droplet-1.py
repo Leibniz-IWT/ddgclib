@@ -23,7 +23,7 @@ from mpl_toolkits.mplot3d import proj3d
 
 # Local library
 from ddgclib import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._sphere import *
 from ddgclib._curvatures import * #plot_surface#, curvature
 from ddgclib._sessile import *
