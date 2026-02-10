@@ -2,12 +2,8 @@
 import numpy as np
 
 # Plotting library:
-import matplotlib.pyplot as plt
 
 # Local python scripts to extract test cases data
-from data_levelset_geometric_shapes.extract_and_process_interface_points import read_data, \
-    extract_and_save_unique_intersection_points, plot_intersection_points, plot_unique_intersections, \
-    plot_and_save_levelset_points
 
 # Black box computation of curvature in a cell withing a
 # `cell_corners_and_intersection` object supplied from the LSM cells.
