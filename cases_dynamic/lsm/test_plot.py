@@ -6,8 +6,8 @@ from hyperct import Complex
 from ddgclib._curvatures import * #plot_surface#, curvature
 from data.data_levelset_geometric_shapes.extract_and_process_interface_points import read_data
 
-filename = Path("data/data_levelset_geometric_shapes/sphere_coarse/extraction_data_0.000000.txt")
-result_folder = Path("data/data_levelset_geometric_shapes/X_intersections_sphere_coarse")
+filename = Path("../../data/data_levelset_geometric_shapes/sphere_coarse/extraction_data_0.000000.txt")
+result_folder = Path("../../data/data_levelset_geometric_shapes/X_intersections_sphere_coarse")
 plot_single_cells = False
 
 # Create the result folder
