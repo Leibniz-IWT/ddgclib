@@ -3,7 +3,7 @@ import numpy as np
 from ddgclib._plotting import plot_polyscope, plot_profile, plot_centroid_vs_iteration_compare
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
 from ddgclib.mean_flow_integrators._integrators_mean_flow import AdamsBashforth
-from ddgclib._volume import spherical_cap_init, spherical_cap_contact_angle
+from ddgclib.geometry._volume import spherical_cap_init, spherical_cap_contact_angle
 
 #Parameters
 Bo=0.4 #Bond number

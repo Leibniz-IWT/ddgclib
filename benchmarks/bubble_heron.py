@@ -14,7 +14,6 @@ from hyperct import *
 from ddgclib._sphere import *
 from ddgclib._sessile import *
 from ddgclib._capillary_rise_flow import *  # plot_surface, curvature
-from ddgclib._eos import *
 from ddgclib._plotting import plot_polyscope
 
 
