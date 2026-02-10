@@ -1,9 +1,9 @@
 #Ianto Cannon 2025 Mar 26. Find the profile of a bubble with Bond number 0.4
 import numpy as np
-from ddgclib._plotting import plot_polyscope, plot_profile, plot_centroid_vs_iteration_compare
+from ddgclib._plotting import plot_polyscope, plot_profile, plot_centroid_vs_iteration
 from ddgclib._bubble import AdamsBashforthProfile, load_complex
-from ddgclib._integrators_mean_flow import Euler, AdamsBashforth, NewtonRaphson, lineSearch
-from ddgclib._volume import cone_init, spherical_cap_init, spherical_cap_contact_angle
+from ddgclib.mean_flow_integrators._integrators_mean_flow import AdamsBashforth
+from ddgclib._volume import spherical_cap_init, spherical_cap_contact_angle
 
 #Parameters
 Bo=0.4 #Bond number
@@ -31,5 +31,5 @@ else:
   HC, bV = load_complex(t)
 t = AdamsBashforth(HC, bV, prm, t, 500, .1, maxMove=.5*minEdge, minEdge=minEdge, maxEdge=maxEdge)
 plot_profile(t)
-plot_centroid_vs_iteration_compare(centroid)
+plot_centroid_vs_iteration(centroid)
 plot_polyscope(HC)

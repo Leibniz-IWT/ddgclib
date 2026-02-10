@@ -768,7 +768,7 @@ elif MESH_SOURCE.lower() == "hc":
     # ---- ddgclib-based cube-surface mesh (then snapped to ellipsoid) ----
     try:
         from ddgclib import *
-        from ddgclib._complex import Complex
+        from hyperct import Complex
     except ImportError as e:
         raise RuntimeError(
             "MESH_SOURCE='hc' requires ddgclib to be installed. "

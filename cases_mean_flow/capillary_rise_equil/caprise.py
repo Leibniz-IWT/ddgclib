@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 # ddg imports
 # from ddgclib import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._curvatures import HC_curvatures, int_curvatures, Gauss_Bonnet, analytical_cap
 from ddgclib._capillary_rise_flow import kmean_flow, film_init, mean_flow
 from ddgclib._capillary_rise import cape_rise_plot, plot_c_outd, new_out_plot_cap_rise, out_plot_cap_rise, out_plot_cap_rise_boundary, cap_rise_init_N

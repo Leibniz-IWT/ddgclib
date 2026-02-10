@@ -12,7 +12,7 @@ from interruptingcow import timeout
 
 # ddg imports
 from ddgclib import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._curvatures import HC_curvatures
 from ddgclib._capillary_rise_flow import mean_flow
 from droplet import incr
