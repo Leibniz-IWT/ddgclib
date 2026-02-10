@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 #        return f.read()
 
 setup(name='ddgclib',
-      version='0.4.1',
+      version='0.4.2',
       description='Discrete differential geometry curvature library used for mean curvature flow and finite volume method simulations.',
       #url='https://github.com/stefan-endres/',
       author='Stefan Endres, Lutz Mädler, Sonyi Deng, Marcello Zani',
@@ -17,6 +17,8 @@ setup(name='ddgclib',
       install_requires=[
           'scipy',
           'numpy',
+          'hyperct'
+          'polyscope'
          # 'pytest',
          # 'pytest-cov'
            ],

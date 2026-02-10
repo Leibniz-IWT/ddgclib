@@ -3,7 +3,7 @@ import numpy as np
 
 # ddg imports
 from ddgclib import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._curvatures import * #plot_surface#, curvature
 from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 from ddgclib._ellipsoid import *

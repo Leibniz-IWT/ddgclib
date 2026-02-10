@@ -1,18 +1,13 @@
  
 from pathlib import Path
 import os
-import numpy as np
-import copy
 import matplotlib.pyplot as plt
-from ddgclib._complex import Complex
+from hyperct import Complex
 from ddgclib._curvatures import * #plot_surface#, curvature
-from ddgclib._curvatures import b_curvatures_hn_ij_c_ij
-from data_levelset_geometric_shapes.extract_and_process_interface_points import read_data, \
-    extract_and_save_unique_intersection_points, plot_intersection_points, plot_unique_intersections,\
-    plot_and_save_levelset_points
+from data.data_levelset_geometric_shapes.extract_and_process_interface_points import read_data
 
-filename = Path("./data_levelset_geometric_shapes/sphere_coarse/extraction_data_0.000000.txt")
-result_folder = Path("./data_levelset_geometric_shapes/X_intersections_sphere_coarse")
+filename = Path("data/data_levelset_geometric_shapes/sphere_coarse/extraction_data_0.000000.txt")
+result_folder = Path("data/data_levelset_geometric_shapes/X_intersections_sphere_coarse")
 plot_single_cells = False
 
 # Create the result folder
