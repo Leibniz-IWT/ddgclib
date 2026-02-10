@@ -1,4 +1,4 @@
-from ddgclib._complex import Complex
+from hyperct import Complex
 
 import numpy as np
 from scipy.spatial import Delaunay
