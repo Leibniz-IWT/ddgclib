@@ -21,7 +21,7 @@ if module_path not in sys.path:
 
 from ddgclib import *
 # from ddgclib._case1 import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._curvatures import *  # plot_surface#, curvature
 from ddgclib._capillary_rise_flow import *  # plot_surface#, curvature
 from ddgclib._capillary_rise import *  # plot_surface#, curvature
