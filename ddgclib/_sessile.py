@@ -14,7 +14,7 @@ from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
 
 from ddgclib import *
-from ddgclib._complex import Complex
+from hyperct import Complex
 
 
 # Colour scheme for surfaces

@@ -3,8 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay, QhullError
 import scipy
 
-from ._complex import Complex
-from ._vertex import VertexCacheField
+from hyperct import Complex, VertexCacheField
 import polyscope as ps
 from ddgclib._misc import coldict
 

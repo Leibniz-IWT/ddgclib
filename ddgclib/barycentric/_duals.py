@@ -2,8 +2,7 @@ import matplotlib.pyplot as plt
 
 from scipy.spatial import Delaunay
 
-from ._complex import Complex
-from ._vertex import VertexCacheField
+from hyperct import Complex, VertexCacheField
 
 
 def normalized(a, axis=-1, order=2):

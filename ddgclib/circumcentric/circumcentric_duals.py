@@ -6,8 +6,7 @@ from scipy.spatial import Delaunay, QhullError
 import scipy
 import polyscope as ps
 
-from ._complex import Complex
-from ._vertex import VertexCacheField
+from hyperct import Complex, VertexCacheField
 from ddgclib._misc import coldict
 
 

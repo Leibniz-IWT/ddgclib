@@ -1,5 +1,5 @@
 #import scipy
-from ddgclib.hyperct._complex import Complex
+from hyperct import Complex
 import matplotlib.pyplot as plot
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
