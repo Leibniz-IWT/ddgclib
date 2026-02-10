@@ -26,10 +26,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
 def _move(v, pos, HC, bV):
     """Move vertex, preserving boundary set membership."""
     if v in bV:
@@ -73,10 +70,7 @@ def _sync_mesh(verts, x_flat, u_flat, dim, HC, bV):
         _move(v, x_new, HC, bV)
 
 
-# ---------------------------------------------------------------------------
 # Euler (explicit, forward)
-# ---------------------------------------------------------------------------
-
 def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -135,10 +129,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, **dudt_kwargs):
     return t
 
 
-# ---------------------------------------------------------------------------
 # Symplectic (semi-implicit) Euler
-# ---------------------------------------------------------------------------
-
 def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
@@ -187,10 +178,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # RK45 via scipy.integrate.solve_ivp
-# ---------------------------------------------------------------------------
-
 def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
           rtol=1e-6, atol=1e-9, **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
@@ -292,10 +280,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # Velocity-only Euler (no position update, for fixed-mesh CFD)
-# ---------------------------------------------------------------------------
-
 def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).

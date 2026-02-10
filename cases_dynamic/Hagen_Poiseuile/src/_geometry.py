@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial import Delaunay
 import math
 
-from ddgclib.hyperct._complex import Complex
+from hyperct import Complex
 from ddgclib._misc import _set_boundary
 from ddgclib.barycentric._duals import compute_vd
 
