@@ -1,3 +1,10 @@
+# Folfer level ignores
+data/*
+fig/*
+surface_evolver
+shgo
+
+# Hidden and dev folders
 ddgclib/__pycache__
 .ipynb_checkpoints
 *.DS_Store
