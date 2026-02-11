@@ -1,23 +1,14 @@
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 import mpl_toolkits.mplot3d as a3
-import numpy as np
 import scipy as sp
-from scipy import spatial as sp_spatial
 
 from pathlib import Path
 import os
-import numpy as np
-import copy
 import matplotlib.pyplot as plt
-from ddgclib._complex import Complex
+from hyperct import Complex
 from ddgclib._curvatures import *  # plot_surface#, curvature
-from ddgclib._curvatures import b_curvatures_hn_ij_c_ij
-from data_levelset_geometric_shapes.extract_and_process_interface_points import \
-    read_data, \
-    extract_and_save_unique_intersection_points, plot_intersection_points, \
-    plot_unique_intersections, \
-    plot_and_save_levelset_points
+from data.data_levelset_geometric_shapes.extract_and_process_interface_points import \
+    read_data
 
 
 def HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
