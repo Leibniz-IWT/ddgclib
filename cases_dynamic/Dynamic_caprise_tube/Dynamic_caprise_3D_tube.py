@@ -34,14 +34,15 @@ from ddgclib._misc import *
 from ddgclib._plotting import *
 
 # barycentric imports (from ddgclib.barycentric subpackage)
-from ddgclib.barycentric._duals import compute_vd, triang_dual, plot_dual_mesh_2D, _set_boundary
+from ddgclib.barycentric._duals import compute_vd, triang_dual, _set_boundary
+from ddgclib.visualization.plot_dual import plot_dual_mesh_2D, plot_dual_mesh_3D
 from ddgclib._plotting import plot_dual
 
 # compute duals (and Delaunay dual from a set of points)
 from ddgclib.barycentric._duals import compute_vd, _merge_local_duals_vector, triang_dual, plot_dual
 
 # Plots
-from ddgclib.barycentric._duals import  plot_dual_mesh_2D, plot_dual_mesh_3D
+from ddgclib.barycentric._duals import  plot_dual_mesh_2D
 
 # Geometry and dual computations
 from ddgclib.barycentric._duals import area_of_polygon, e_star, volume_of_geometric_object, plot_dual, v_star
