@@ -25,7 +25,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 # ddg imports (from ddgclib package)
 from ddgclib import *
-from hyperct import Complex
+from ddgclib._complex import Complex
 from ddgclib._curvatures import *
 from ddgclib._capillary_rise_flow import *
 from ddgclib._capillary_rise import *

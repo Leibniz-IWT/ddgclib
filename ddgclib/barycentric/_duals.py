@@ -262,7 +262,7 @@ def compute_vd(HC, cdist=1e-10):
 def triang_dual(points, plot_delaunay=False):
     """
     Compute the Delaunay triangulation plus the dual points. Put into hyperct complex object.
-    #TODO: We need to compute boundaries before compute_vd
+    #TODO: We neeed to comput boundaries before compute_vd
     """
     dim = points.shape[1]
     tri = Delaunay(points)
@@ -561,6 +561,40 @@ def e_star(v_i, v_j, HC, n=None, dim=2):
         print("WARNING: Not implemented yet from dim > 3")
 
     return e_ij_star
+
+
+def e_star_old(v_i, v_j, dim=2):
+    """
+    Compute the dual of the primary edge e_ij. It's needed to specify the dimension dim.
+
+    return : e_ij_star
+    """
+    if dim == 2:
+        # e_ij_star = 0  # Initialize total dual area to zero
+        # Find the shared dual vertices between vp1 and vp2
+        vdnn = v_i.vd.intersection(v_j.vd)  # Should always be 2 for dim=2
+
+        vd1 = list(vdnn)[0]
+        vd2 = list(vdnn)[1]
+        e_ij_star = np.linalg.norm(vd1.x_a - vd2.x_a)
+
+    elif dim == 3:
+        # e_ij_star = 0  # Initialize total dual area to zero
+        vdnn = v_i.vd.intersection(v_j.vd)
+        local_dual_points = []
+        for vd in vdnn:
+            local_dual_points.append(vd.x)
+
+        # Added 02.20.2024
+        local_dual_points.append(vd.x)
+        print(f'local_dual_points = {local_dual_points}')
+        local_dual_points = np.array(local_dual_points)
+        e_ij_star = area_of_polygon(local_dual_points)
+    else:
+        print("WARNING: Not implemented yet from dim > 3")
+
+    return e_ij_star
+
 
 # Area computations
 def d_area(vp1):

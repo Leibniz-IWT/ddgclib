@@ -1,8 +1,3 @@
-# Folfer level ignores
-data/*
-fig/*
-
-# Hidden and dev folders
 ddgclib/__pycache__
 .ipynb_checkpoints
 *.DS_Store
