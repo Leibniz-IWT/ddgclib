@@ -4,7 +4,7 @@
 import numpy as np
 from ddgclib._curvatures import construct_HC#, HC_curvatures_sessile 
 from ddgclib._curvatures_heron import hndA_i
-from ddgclib._volume import triangle_prism_volume, cross_prod
+from ddgclib.geometry._volume import triangle_prism_volume, cross_prod
 
 def save_neighbours(fname,HC):
 #Make a text file listing the vertices (id from 0) in first column,
