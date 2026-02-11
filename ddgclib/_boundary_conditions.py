@@ -335,24 +335,67 @@ class PeriodicInletBC(BoundaryCondition):
         Inlet position along axis.
     cdist : float
         Vertex merging tolerance.
+    fields : list of str or None
+        Vertex attribute names to copy from ghost to newly injected vertices.
+        Defaults to ``['u', 'P', 'm']``.
+    period : float
+        Domain length along the flow axis. The ghost resets this far upstream
+        after all its vertices have crossed the inlet. Defaults to 1.0.
     """
 
-    def __init__(self, unit_mesh, velocity, axis=2, inlet_pos=0.0, cdist=1e-10):
+    def __init__(self, unit_mesh, velocity, axis=2, inlet_pos=0.0, cdist=1e-10,
+                 fields=None, period=1.0):
         super().__init__(axis)
         self.unit_mesh = unit_mesh
         self.velocity = velocity
         self.inlet_pos = inlet_pos
         self.cdist = cdist
+        self.fields = fields if fields is not None else ['u', 'P', 'm']
+        self.period = period
         self.ghost = self._clone_unit(unit_mesh)
         self._reset_ghost()
 
     def _clone_unit(self, unit_mesh):
-        """Safe clone without deepcopy issues."""
-        return unit_mesh  # placeholder -- replace with proper clone if needed
+        """Clone the unit mesh including vertex fields and connectivity."""
+        from hyperct import Complex
+
+        # Determine dimension and domain from unit_mesh vertices
+        all_coords = [v.x_a for v in unit_mesh.V]
+        if not all_coords:
+            return unit_mesh
+        coords_arr = np.array(all_coords)
+        dim = coords_arr.shape[1]
+        lb = coords_arr.min(axis=0)
+        ub = coords_arr.max(axis=0)
+        domain = [(float(lb[i]), float(ub[i])) for i in range(dim)]
+
+        clone = Complex(dim, domain=domain)
+
+        # Add vertices and copy fields
+        for v in unit_mesh.V:
+            cv = clone.V[tuple(v.x_a)]
+            for f in self.fields:
+                val = getattr(v, f, None)
+                if val is not None:
+                    if isinstance(val, np.ndarray):
+                        setattr(cv, f, val.copy())
+                    else:
+                        setattr(cv, f, val)
+
+        # Copy connectivity
+        seen = set()
+        for v in unit_mesh.V:
+            for nb in v.nn:
+                edge = frozenset((tuple(v.x_a), tuple(nb.x_a)))
+                if edge not in seen:
+                    clone.V[tuple(v.x_a)].connect(clone.V[tuple(nb.x_a)])
+                    seen.add(edge)
+
+        return clone
 
     def _reset_ghost(self):
-        """Shift ghost so its leading face is exactly 1 unit upstream."""
-        shift = self.inlet_pos - 1.0
+        """Shift ghost so its leading face is exactly one period upstream."""
+        shift = self.inlet_pos - self.period
         for v in list(self.ghost.V):
             pos = v.x_a.copy()
             pos[self.axis] += shift
@@ -373,6 +416,14 @@ class PeriodicInletBC(BoundaryCondition):
             if gv.x_a[self.axis] >= self.inlet_pos:
                 new_v = mesh.V[tuple(gv.x_a)]
                 entered.append((gv, new_v))
+                # Copy field values from ghost vertex to new mesh vertex
+                for f in self.fields:
+                    val = getattr(gv, f, None)
+                    if val is not None:
+                        if isinstance(val, np.ndarray):
+                            setattr(new_v, f, val.copy())
+                        else:
+                            setattr(new_v, f, val)
 
         # Copy connections for entered vertices
         for gv, new_v in entered:

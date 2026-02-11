@@ -32,19 +32,32 @@ class StateHistory:
     fields : sequence of str
         Vertex attributes to record (default: ['u', 'P']).
     record_every : int
-        Record a snapshot every N steps (default: 1).
+        Record a snapshot every N steps (default: 1). Used when
+        ``record_every_t`` is None.
+    record_every_t : float or None
+        Record a snapshot every this many seconds of simulation time.
+        When set, takes priority over ``record_every``. Works with
+        both fixed and adaptive time stepping.
+    save_dir : str or None
+        When set, each snapshot is automatically saved to disk as
+        ``{save_dir}/state_{idx:06d}_t{time:.6f}.json`` via ``save_state()``.
     """
 
     def __init__(
         self,
         fields: Sequence[str] = ('u', 'P'),
         record_every: int = 1,
+        record_every_t: Optional[float] = None,
+        save_dir: Optional[str] = None,
     ):
         self.fields = list(fields)
         self.record_every = record_every
+        self.record_every_t = record_every_t
+        self.save_dir = save_dir
 
         # Storage: list of (time, {vertex_key: {field: value}}, diagnostics)
         self._snapshots: list[tuple[float, dict, dict]] = []
+        self._last_recorded_t: float = -float('inf')
 
     @property
     def times(self) -> list[float]:
@@ -59,9 +72,16 @@ class StateHistory:
         """Callback suitable for integrators (supports both old and new signature).
 
         Can be passed directly as the ``callback`` argument to any integrator.
+
+        Recording is governed by either ``record_every_t`` (time-based,
+        takes priority) or ``record_every`` (step-based, default).
         """
-        if step % self.record_every != 0:
-            return
+        if self.record_every_t is not None:
+            if t - self._last_recorded_t < self.record_every_t - 1e-15:
+                return
+        else:
+            if step % self.record_every != 0:
+                return
 
         snapshot = {}
         for v in HC.V:
@@ -79,6 +99,20 @@ class StateHistory:
 
         diag = dict(diagnostics) if diagnostics else {}
         self._snapshots.append((float(t), snapshot, diag))
+        self._last_recorded_t = float(t)
+
+        # Auto-save to disk if save_dir is configured
+        if self.save_dir is not None:
+            import os
+            from ddgclib.data._io import save_state
+            os.makedirs(self.save_dir, exist_ok=True)
+            idx = len(self._snapshots) - 1
+            path = os.path.join(
+                self.save_dir,
+                f'state_{idx:06d}_t{t:.6f}.json',
+            )
+            save_state(HC, bV if bV is not None else set(),
+                       t=t, fields=self.fields, path=path)
 
     def append(self, t: float, HC, diagnostics: Optional[dict] = None):
         """Manually record a snapshot (alternative to callback)."""
