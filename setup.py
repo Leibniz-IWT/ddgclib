@@ -7,10 +7,10 @@ from setuptools import setup, find_packages
 #        return f.read()
 
 setup(name='ddgclib',
-      version='0.4.2',
+      version='0.4.3',
       description='Discrete differential geometry curvature library used for mean curvature flow and finite volume method simulations.',
       url='https://github.com/Leibniz-IWT/ddgclib',
-      author='Stefan Endres, Lutz Mädler, Sonyi Deng, Marcello Zani',
+      author='Stefan Endres, Lutz Mädler, Ianto Cannon, Sonyi Deng, Marcello Zani',
       author_email='s.endres@iwt-uni-bremen.de',
       license='MIT',
       packages=find_packages(),
