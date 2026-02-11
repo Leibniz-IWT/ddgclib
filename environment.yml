@@ -1,0 +1,26 @@
+name: ddg
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  # Core dependencies
+  - numpy
+  - scipy
+  # Visualization
+  - matplotlib
+  # Data
+  - pandas
+  # Development / testing
+  - pytest
+  - pytest-cov
+  # Jupyter
+  - jupyter
+  - jupyterlab
+  - ipykernel
+  - ipywidgets
+  # pip-only packages
+  - pip
+  - pip:
+    - hyperct
+    - polyscope

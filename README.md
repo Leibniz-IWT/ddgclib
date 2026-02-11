@@ -1,12 +1,39 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8010952.svg)](https://doi.org/10.5281/zenodo.8010952)
 
 # ddgclib
-Experimental library for discrete differential geometry curvature in fluid simulations, especially for useful for problems with complex and changing topologies.
+Experimental library for discrete differential geometry curvature in fluid simulations, especially useful for problems with complex and changing topologies.
 
 # Installation
-setup.py files are planned for a future release, currently the test cases can by run by cloning the entire repository:
 
-`$ git clone https://github.com/Leibniz-IWT/ddgclib/`
+```bash
+pip install -e .
+```
+
+## Dependencies
+
+**Required:** `numpy`, `scipy`, [`hyperct`](https://github.com/stefan-endres/hyperct)
+
+**Optional:**
+- Visualization: `polyscope`, `matplotlib` — install with `pip install -e ".[vis]"`
+- Data: `pandas` — install with `pip install -e ".[data]"`
+- Development: `pytest`, `pytest-cov` — install with `pip install -e ".[dev]"`
+
+Python 3.9+ required (tested up to 3.13).
+
+# Running Tests
+
+```bash
+# Run all tests
+pytest ddgclib/tests/ -v
+
+# Run fast tests only (skip slow convergence studies)
+pytest ddgclib/tests/ -v -m "not slow"
+
+# Run manuscript tutorial tests only
+pytest ddgclib/tests/test_manuscript_tutorials.py -v
+```
+
+PyCharm run configurations are included in `.idea/runConfigurations/`.
 
 # Tutorials and Manuscript figures
 

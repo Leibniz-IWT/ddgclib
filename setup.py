@@ -7,28 +7,26 @@ from setuptools import setup, find_packages
 #        return f.read()
 
 setup(name='ddgclib',
-      version='0.4.1',
+      version='0.4.2',
       description='Discrete differential geometry curvature library used for mean curvature flow and finite volume method simulations.',
-      #url='https://github.com/stefan-endres/',
+      url='https://github.com/Leibniz-IWT/ddgclib',
       author='Stefan Endres, Lutz Mädler, Sonyi Deng, Marcello Zani',
       author_email='s.endres@iwt-uni-bremen.de',
       license='MIT',
-      packages=['ddgclib'],
+      packages=find_packages(),
       install_requires=[
           'scipy',
           'numpy',
-         # 'pytest',
-         # 'pytest-cov'
+          'hyperct',
            ],
-      #long_description=readme(),
-      long_description='None',
+      extras_require={
+          'vis': ['polyscope', 'matplotlib'],
+          'data': ['pandas'],
+          'dev': ['pytest', 'pytest-cov'],
+      },
       long_description_content_type='text/markdown',
-      keywords='optimization, navier-stokes, pde, finite volume, mean curvature flow, discrete differential geometry',
+      keywords='navier-stokes, pde, finite volume, mean curvature flow, discrete differential geometry',
       classifiers=[
-          # How mature is this project? Common values are
-          #   3 - Alpha
-          #   4 - Beta
-          #   5 - Production/Stable
           'Development Status :: 3 - Alpha',
 
           'Intended Audience :: Science/Research',
@@ -39,8 +37,12 @@ setup(name='ddgclib',
           'License :: OSI Approved :: MIT License',
 
           'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.9',
+          'Programming Language :: Python :: 3.10',
+          'Programming Language :: Python :: 3.11',
+          'Programming Language :: Python :: 3.12',
+          'Programming Language :: Python :: 3.13',
           'Operating System :: OS Independent',
       ],
-      #test_suite='shgo.tests.test__shgo',  #TODO
       python_requires='>=3.9',
       zip_safe=False)
