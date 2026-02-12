@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 
 import math
 import numpy as np
 
-# ------------------------------------------------------------
 # Utility: numerically safe comparisons
-# ------------------------------------------------------------
 _EPS = 1e-12
 
 def _assert_close(a, b, tol=1e-12, msg=""):
     if abs(a - b) > tol * max(1.0, abs(b)):
         raise AssertionError(f"{msg}  got={a:.16e}, want={b:.16e}")
 
-# ------------------------------------------------------------
 # 1) Reduce a 3D quadric to the face-plane conic  g~(x,y)=0
 #    f(x,y,z) = Axx x^2 + Byy y^2 + Czz z^2 + 2 Dxy xy + 2 Exz xz + 2 Fyz yz
 #               + 2 Gx x + 2 Hy y + 2 Iz z + J
 #    NOTE: your coeffs were in a 1× convention; this reducer accepts that and
 #          returns the in-plane 1× convention:
 #          g~(x,y)= A' x^2 + D' x y + B' y^2 + G' x + H' y + J'
-# ------------------------------------------------------------
 def _plane_reduce_conic(A, B, C, coeffs, eps=_EPS):
     A = np.asarray(A, float); B = np.asarray(B, float); C = np.asarray(C, float)
     Axx, Byy, Czz, Dxy, Exz, Fyz, Gx, Hy, Iz, J = [float(t) for t in coeffs]
@@ -140,11 +136,9 @@ def _plane_reduce_conic(A, B, C, coeffs, eps=_EPS):
         return (A_u, D_uv, B_v, G_u, H_v, J_c), ('x','z')
 
 
-# ------------------------------------------------------------
 # 2) Thickness from the plane-reduced conic: span between two roots
 #    Vertical cut (fixed y):  A' x^2 + 2(D' y + G') x + (...) = 0
 #    Horizontal cut (fixed x): B' y^2 + 2(D' x + H') y + (...) = 0
-# ------------------------------------------------------------
 def _thickness_span(conic, x_fixed=None, y_fixed=None, eps=_EPS):
     A1, D1, B1, G1, H1, J1 = conic
 
@@ -187,9 +181,7 @@ def _thickness_span(conic, x_fixed=None, y_fixed=None, eps=_EPS):
     raise ValueError("Specify either x_fixed or y_fixed.")
 
 
-# ------------------------------------------------------------
 # 3) Main: split patch volume using thickness-weighted barycentric stencil
-# ------------------------------------------------------------
 def split_patch_volume_thickness_weighted(V_patch, A, B, C, coeffs, eps=_EPS):
     """
     Thickness-weighted split of a boundary face patch volume V_patch to vertices A,B,C.
@@ -265,10 +257,8 @@ def split_patch_volume_thickness_weighted(V_patch, A, B, C, coeffs, eps=_EPS):
     return (wA * V_patch, wB * V_patch, wC * V_patch)
 
 
-# ------------------------------------------------------------
 # 3b) NEW: split patch area using the SAME thickness-weighted stencil
 #     (for A_curved → A_curved_A, A_curved_B, A_curved_C)
-# ------------------------------------------------------------
 def split_patch_area_thickness_weighted(A_patch, A, B, C, coeffs, eps=_EPS):
     """
     Thickness-weighted split of a boundary face **area** A_patch to vertices A,B,C.
@@ -329,9 +319,7 @@ def split_patch_area_thickness_weighted(A_patch, A, B, C, coeffs, eps=_EPS):
     return (wA * A_patch, wB * A_patch, wC * A_patch)
 
 
-# ------------------------------------------------------------
 # 4) Simple sanity tests (kept from your original, now using plane reduction)
-# ------------------------------------------------------------
 def _print_case(name, V_patch, A, B, C, coeffs):
     VA, VB, VC = split_patch_volume_thickness_weighted(V_patch, A, B, C, coeffs)
     S = VA + VB + VC

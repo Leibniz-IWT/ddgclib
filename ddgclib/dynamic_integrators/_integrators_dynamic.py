@@ -34,9 +34,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _move(v, pos, HC, bV):
     """Move vertex, preserving boundary set membership."""
@@ -108,9 +106,7 @@ def _sync_mesh(verts, x_flat, u_flat, dim, HC, bV):
         _move(v, x_new, HC, bV)
 
 
-# ---------------------------------------------------------------------------
 # Euler (explicit, forward)
-# ---------------------------------------------------------------------------
 
 def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           **dudt_kwargs):
@@ -175,9 +171,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # Symplectic (semi-implicit) Euler
-# ---------------------------------------------------------------------------
 
 def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      bc_set=None, **dudt_kwargs):
@@ -228,9 +222,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # RK45 via scipy.integrate.solve_ivp
-# ---------------------------------------------------------------------------
 
 def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           rtol=1e-6, atol=1e-9, **dudt_kwargs):
@@ -336,9 +328,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # Velocity-only Euler (no position update, for fixed-mesh CFD)
-# ---------------------------------------------------------------------------
 
 def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         bc_set=None, **dudt_kwargs):
@@ -375,9 +365,7 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     return t
 
 
-# ---------------------------------------------------------------------------
 # Adaptive Euler with CFL-based time stepping
-# ---------------------------------------------------------------------------
 
 def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    bc_set=None, cfl_target=0.5, dt_min=1e-12, dt_max=None,

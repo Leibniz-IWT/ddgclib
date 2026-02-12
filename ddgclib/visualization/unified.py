@@ -12,9 +12,7 @@ import numpy as np
 _DEFAULT_FIG_DIR = os.path.join('results', 'fig')
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _extract_scalar(HC, field: str):
     """Return (positions, values) arrays for a scalar vertex attribute."""
@@ -38,9 +36,7 @@ def _extract_vector(HC, field: str, dim: int):
     return np.array(coords), np.array(vecs)
 
 
-# ---------------------------------------------------------------------------
 # 1D primal helpers
-# ---------------------------------------------------------------------------
 
 def _plot_primal_1d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 1D primal mesh with optional field overlays."""
@@ -110,9 +106,7 @@ def _plot_primal_1d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # 2D primal helpers
-# ---------------------------------------------------------------------------
 
 def _plot_primal_2d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 2D primal mesh with optional field overlays."""
@@ -185,9 +179,7 @@ def _plot_primal_2d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # 3D primal helpers
-# ---------------------------------------------------------------------------
 
 def _plot_primal_3d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 3D primal mesh with optional field overlays."""
@@ -255,9 +247,7 @@ def _plot_primal_3d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # 2D dual helpers
-# ---------------------------------------------------------------------------
 
 def _plot_dual_edges_2d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 2D barycentric dual edges connecting dual vertices.
@@ -414,9 +404,7 @@ def _overlay_vector_dual_2d(HC, field, dual_pts_set, ax):
     ax.quiver(px, py, ux, uy, color=colors, zorder=5)
 
 
-# ---------------------------------------------------------------------------
 # 3D dual helpers
-# ---------------------------------------------------------------------------
 
 def _plot_dual_3d(HC, vertex, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 3D dual around a single vertex using matplotlib.
@@ -500,9 +488,7 @@ def _plot_dual_3d(HC, vertex, bV, scalar_field, vector_field, ax, **kwargs):
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # 1D dual helpers
-# ---------------------------------------------------------------------------
 
 def _plot_dual_1d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     """Plot 1D dual mesh.
@@ -565,9 +551,7 @@ def _plot_dual_1d(HC, bV, scalar_field, vector_field, ax, **kwargs):
     return fig, ax
 
 
-# ===================================================================
 # PUBLIC API
-# ===================================================================
 
 def _save_fig(fig, save_path, dpi=150):
     """Save *fig* to *save_path*, creating parent directories as needed."""
@@ -719,9 +703,7 @@ def plot_dual(
     return fig, ax
 
 
-# ---------------------------------------------------------------------------
 # Polyscope unified wrappers
-# ---------------------------------------------------------------------------
 
 def plot_primal_polyscope(
     HC,
@@ -848,9 +830,7 @@ def plot_dual_polyscope(
     return ps_cloud
 
 
-# ===================================================================
 # HIGH-LEVEL FLUID WRAPPERS
-# ===================================================================
 
 def _restore_snapshot(HC, snapshot: dict, fields: list[str]):
     """Write snapshot field data back onto HC vertices (in-place)."""
@@ -993,6 +973,10 @@ def dynamic_plot_fluid(
     For **matplotlib** (default): generates a ``FuncAnimation`` and saves
     to *save_path* (supports ``.mp4``, ``.gif``, etc.).
 
+    Handles both Eulerian (fixed mesh) and Lagrangian (changing topology)
+    simulations by plotting directly from snapshot data rather than
+    restoring fields onto ``HC``.
+
     If *frame_dir* is provided, individual frame PNGs are also saved there
     (useful for polyscope workflows where static screenshots are compiled
     separately).
@@ -1002,10 +986,9 @@ def dynamic_plot_fluid(
     history : StateHistory
         Recorded simulation history containing snapshots.
     HC : Complex
-        The simplicial complex (used as a template — vertex fields will
-        be overwritten from each snapshot).
+        The simplicial complex (used only for ``dim``).
     bV : set or None
-        Boundary vertices.
+        Boundary vertices (unused in animation — kept for API compat).
     scalar_field : str or None
         Scalar field to animate (default ``'P'``).
     vector_field : str or None
@@ -1034,7 +1017,8 @@ def dynamic_plot_fluid(
         Matplotlib animation writer.  ``None`` auto-selects (``'ffmpeg'``
         for ``.mp4``, ``'pillow'`` for ``.gif``).
     **kwargs
-        Forwarded to ``plot_fluid`` (``cmap``, ``vertex_size``, etc.).
+        Extra options: ``cmap`` (str), ``vertex_size`` (float),
+        ``scale`` (float for quiver), ``arrow_length`` (float for 3D).
 
     Returns
     -------
@@ -1043,23 +1027,57 @@ def dynamic_plot_fluid(
     """
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation
+    import matplotlib.cm as mcm
+    import matplotlib.colors as mcolors
 
     if history.n_snapshots == 0:
         return None
 
-    # Collect fields we need to restore
-    restore_fields = []
-    if scalar_field is not None:
-        restore_fields.append(scalar_field)
-    if vector_field is not None:
-        restore_fields.append(vector_field)
-
     dim = HC.dim
-    n_panels = (1 if scalar_field is not None else 0) + \
-               (1 if vector_field is not None else 0)
-    n_panels = max(n_panels, 1)
+    cmap_name = kwargs.get('cmap', 'viridis')
+    vertex_size = kwargs.get('vertex_size', 15 if dim >= 2 else 30)
 
-    # Create figure skeleton once
+    # Pre-compute global bounds from ALL snapshots for stable animation
+    all_coords = []
+    scalar_vals_global = []
+    for _, snapshot, _ in history._snapshots:
+        for key, vdata in snapshot.items():
+            all_coords.append(key)
+            if scalar_field is not None and scalar_field in vdata:
+                val = vdata[scalar_field]
+                scalar_vals_global.append(
+                    float(val) if np.ndim(val) == 0 else float(val[0])
+                )
+
+    all_coords = np.array(all_coords)
+    margin = 0.05
+    xlim = (all_coords[:, 0].min() - margin, all_coords[:, 0].max() + margin)
+    ylim = zlim = None
+    if dim >= 2:
+        ylim = (all_coords[:, 1].min() - margin,
+                all_coords[:, 1].max() + margin)
+    if dim >= 3:
+        zlim = (all_coords[:, 2].min() - margin,
+                all_coords[:, 2].max() + margin)
+
+    # Global scalar range for consistent colorbar
+    if scalar_vals_global:
+        svmin = min(scalar_vals_global)
+        svmax = max(scalar_vals_global)
+        if svmin == svmax:
+            svmin -= 0.5
+            svmax += 0.5
+    else:
+        svmin, svmax = 0.0, 1.0
+
+    # Create figure and panels
+    panels = []
+    if scalar_field is not None:
+        panels.append(('scalar', scalar_field, scalar_label))
+    if vector_field is not None:
+        panels.append(('vector', vector_field, vector_label))
+    n_panels = max(len(panels), 1)
+
     if dim == 3:
         fig, axes = plt.subplots(1, n_panels,
                                  figsize=(7 * n_panels, 6),
@@ -1072,41 +1090,141 @@ def dynamic_plot_fluid(
     else:
         axes = list(axes)
 
-    suptitle = fig.suptitle('', fontsize=13, y=1.02)
+    suptitle = fig.suptitle('', fontsize=13)
+
+    # Create a fixed colorbar for the scalar panel (if any)
+    sm = None
+    cbar = None
+    if scalar_field is not None:
+        sm = mcm.ScalarMappable(
+            cmap=cmap_name,
+            norm=mcolors.Normalize(vmin=svmin, vmax=svmax),
+        )
+        sm.set_array([])
+        scalar_ax_idx = next(
+            i for i, (k, _, _) in enumerate(panels) if k == 'scalar'
+        )
+        cbar = fig.colorbar(sm, ax=axes[scalar_ax_idx], label=scalar_label)
+
+    fig.tight_layout()
 
     # Optional frame directory
     if frame_dir is not None:
         os.makedirs(frame_dir, exist_ok=True)
 
+    # Animation update: plot directly from snapshot data
     def update(frame_idx):
         t, snapshot, _ = history._snapshots[frame_idx]
-        # Restore fields onto HC
-        _restore_snapshot(HC, snapshot, restore_fields)
 
-        # Clear axes and redraw
+        coords = np.array(list(snapshot.keys()))
+        n_verts = len(coords)
+
         for ax in axes:
             ax.clear()
 
         suptitle.set_text(f't = {t:.4f} s')
 
-        panel_kwargs = dict(kwargs)
-        panel_kwargs['show_edges'] = panel_kwargs.get('show_edges', True)
-
-        panels = []
-        if scalar_field is not None:
-            panels.append(('scalar', scalar_field, scalar_label))
-        if vector_field is not None:
-            panels.append(('vector', vector_field, vector_label))
-
         for ax_panel, (kind, field, label) in zip(axes, panels):
             if kind == 'scalar':
-                plot_primal(HC, bV=bV, scalar_field=field, ax=ax_panel,
-                            title=label, save_path=None, **dict(panel_kwargs))
-            else:
-                plot_primal(HC, bV=bV, vector_field=field, ax=ax_panel,
-                            title=label, save_path=None, **dict(panel_kwargs))
+                # Extract scalar values
+                vals = np.array([
+                    float(snapshot[k].get(field, 0.0))
+                    if np.ndim(snapshot[k].get(field, 0.0)) == 0
+                    else float(snapshot[k].get(field, [0.0])[0])
+                    for k in snapshot
+                ])
 
-        fig.tight_layout()
+                if dim == 1:
+                    ax_panel.scatter(
+                        coords[:, 0], vals, c=vals, cmap=cmap_name,
+                        vmin=svmin, vmax=svmax, s=vertex_size,
+                        zorder=3, edgecolors='k', linewidths=0.3,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_ylabel(field)
+                    ax_panel.set_xlim(xlim)
+                elif dim == 2:
+                    ax_panel.scatter(
+                        coords[:, 0], coords[:, 1], c=vals,
+                        cmap=cmap_name, vmin=svmin, vmax=svmax,
+                        s=vertex_size, zorder=3,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_ylabel('y')
+                    ax_panel.set_aspect('equal')
+                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_ylim(ylim)
+                elif dim == 3:
+                    ax_panel.scatter(
+                        coords[:, 0], coords[:, 1], coords[:, 2],
+                        c=vals, cmap=cmap_name, vmin=svmin, vmax=svmax,
+                        s=vertex_size, alpha=0.8, zorder=3,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_ylabel('y')
+                    ax_panel.set_zlabel('z')
+                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_zlim(zlim)
+
+                ax_panel.set_title(label)
+
+            else:  # vector
+                # Extract velocity vectors
+                zero_vec = np.zeros(dim)
+                vecs = np.array([
+                    np.asarray(snapshot[k].get(field, zero_vec))[:dim]
+                    for k in snapshot
+                ])
+
+                magnitudes = np.linalg.norm(vecs, axis=1) if dim > 1 \
+                    else np.abs(vecs[:, 0])
+                max_mag = magnitudes.max()
+                if max_mag > 0:
+                    norm_mag = magnitudes / max_mag
+                else:
+                    norm_mag = magnitudes
+                cmap_v = plt.colormaps.get_cmap('coolwarm')
+                colors = cmap_v(norm_mag)
+
+                if dim == 1:
+                    ax_panel.quiver(
+                        coords[:, 0], np.zeros(n_verts),
+                        vecs[:, 0], np.zeros(n_verts),
+                        color=colors, scale=kwargs.get('scale'),
+                        zorder=5,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_yticks([])
+                    ax_panel.set_xlim(xlim)
+                elif dim == 2:
+                    ax_panel.quiver(
+                        coords[:, 0], coords[:, 1],
+                        vecs[:, 0], vecs[:, 1],
+                        color=colors, scale=kwargs.get('scale'),
+                        zorder=5,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_ylabel('y')
+                    ax_panel.set_aspect('equal')
+                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_ylim(ylim)
+                elif dim == 3:
+                    ax_panel.quiver(
+                        coords[:, 0], coords[:, 1], coords[:, 2],
+                        vecs[:, 0], vecs[:, 1], vecs[:, 2],
+                        colors=colors,
+                        length=kwargs.get('arrow_length', 0.05),
+                        normalize=True, alpha=0.7,
+                    )
+                    ax_panel.set_xlabel('x')
+                    ax_panel.set_ylabel('y')
+                    ax_panel.set_zlabel('z')
+                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_zlim(zlim)
+
+                ax_panel.set_title(label)
 
         # Save individual frame if frame_dir specified
         if frame_dir is not None:

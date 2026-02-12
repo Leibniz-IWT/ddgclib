@@ -38,9 +38,7 @@ from contextlib import redirect_stdout, redirect_stderr
 import io
 
 
-# ---------------------------------------------------------------------------
 # Local helpers: package paths & dynamic imports
-# ---------------------------------------------------------------------------
 
 _THIS_DIR = Path(__file__).resolve().parent
 _CURVED_DIR = _THIS_DIR / "curved_volume"
@@ -68,9 +66,7 @@ def _import_module(script_path: Path, mod_name: str):
     return mod
 
 
-# ---------------------------------------------------------------------------
 # Part-1 & Part-2 entry points (library versions)
-# ---------------------------------------------------------------------------
 
 # Part 1: coeffs
 _mod_coeffs = _import_module(_pkg_file("_1_coeffs_computing.py"), "cv_coeffs")
@@ -81,9 +77,7 @@ _mod_xform = _import_module(_pkg_file("_2_quadric_transformer.py"), "cv_transfor
 process_transform_file = getattr(_mod_xform, "process_file")
 
 
-# ---------------------------------------------------------------------------
 # Part-3 engines (ellipsoid / translation / rotation) + split enforcer
-# ---------------------------------------------------------------------------
 
 _mod_ell = _import_module(_pkg_file("_3_5_volume_ellipsoid.py"), "cv_vol_ell")
 process_coeffs_transformed_csv = getattr(_mod_ell, "process_coeffs_transformed_csv")
@@ -95,9 +89,7 @@ _mod_split = _import_module(_pkg_file("_4_dualvolume_split_patch_volume_thicknes
 split_patch_volume_thickness_weighted = getattr(_mod_split, "split_patch_volume_thickness_weighted")
 
 
-# ---------------------------------------------------------------------------
 # Utilities
-# ---------------------------------------------------------------------------
 
 def _silence_ctx():
     # local context to swallow noisy per-triangle prints from engines
@@ -197,7 +189,7 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
         p_trn = write_subset(noz_mask, "trn.csv")
         p_rot = write_subset(axis_mask, "rot.csv")
 
-        # --- ellipsoid engine ---
+        # ellipsoid engine
         if p_ell is not None:
             with _silence_ctx(), redirect_stderr(io.StringIO()):
                 out_csv_ell, _, _, _ = process_coeffs_transformed_csv(str(p_ell))
@@ -207,7 +199,7 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
             sub_df.to_csv(tmp_ell, index=False)
             parts.append(tmp_ell)
 
-        # --- translation engine ---
+        # translation engine
         if p_trn is not None:
             argv_bak, cwd_bak = sys.argv[:], os.getcwd()
             try:
@@ -225,7 +217,7 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
             sub_df.to_csv(tmp_trn, index=False)
             parts.append(tmp_trn)
 
-        # --- rotation engine ---
+        # rotation engine
         if p_rot is not None:
             argv_bak, cwd_bak = sys.argv[:], os.getcwd()
             try:
@@ -256,7 +248,7 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
         else:
             pd.DataFrame({"triangle_id": [], "Vcorrection": [], "Type": []}).to_csv(OUT, index=False)
 
-    # --- add A_id, B_id, C_id from the transformed CSV (if present) ---
+    # add A_id, B_id, C_id from the transformed CSV (if present)
     out_df = pd.read_csv(OUT)
     merge_cols = ["triangle_id"]
     extra_cols = []
@@ -409,9 +401,7 @@ def _write_dualvolume_csv_from_vol_csv(vol_csv: Path) -> Path:
 
     has_type_col = "Type" in df.columns
 
-    # ------------------------------------------------------------------
     # load *_COEFFS.csv to know which triangles to ignore
-    # ------------------------------------------------------------------
     ignore_tris = set()
     coeffs_csv_name = vol_csv.name.replace("_COEFFS_Transformed_Volume.csv", "_COEFFS.csv")
     coeffs_csv_path = vol_csv.with_name(coeffs_csv_name)
@@ -467,7 +457,7 @@ def _write_dualvolume_csv_from_vol_csv(vol_csv: Path) -> Path:
         else:
             tri_type = None
 
-        # ---- A vertex ----
+        # A vertex
         pid = row["A_id"]
         if pd.notna(pid):
             pid_i = int(pid)
@@ -482,7 +472,7 @@ def _write_dualvolume_csv_from_vol_csv(vol_csv: Path) -> Path:
                 if tri_type is not None and pid_i not in acc_type:
                     acc_type[pid_i] = tri_type
 
-        # ---- B vertex ----
+        # B vertex
         pid = row["B_id"]
         if pd.notna(pid):
             pid_i = int(pid)
@@ -497,7 +487,7 @@ def _write_dualvolume_csv_from_vol_csv(vol_csv: Path) -> Path:
                 if tri_type is not None and pid_i not in acc_type:
                     acc_type[pid_i] = tri_type
 
-        # ---- C vertex ----
+        # C vertex
         pid = row["C_id"]
         if pd.notna(pid):
             pid_i = int(pid)
@@ -535,9 +525,7 @@ def _write_dualvolume_csv_from_vol_csv(vol_csv: Path) -> Path:
     return out_path
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
     """
@@ -546,7 +534,7 @@ def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
     if complex_dtype != "vf":
         raise NotImplementedError("curved_volume currently supports 'vf' meshes only")
 
-    # --- resolve mesh path ---
+    # resolve mesh path
     msh_path = kwargs.get("msh_path", None)
     tmpdir = None
 
@@ -569,17 +557,17 @@ def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
 
     msh_path = Path(msh_path).resolve()
 
-    # --- choose work directory for CSVs ---
+    # choose work directory for CSVs
     workdir = Path(kwargs.get("workdir", msh_path.parent)).resolve()
 
-    # --- Part 1: coeffs ---
+    # Part 1: coeffs
     t1 = time.time()
     coeffs_kwargs = dict(kwargs.get("coeffs_kwargs", {}))
     coeffs_csv = workdir / f"{msh_path.stem}_COEFFS.csv"
     df_coeffs, total_tris, skipped_flat = compute_rimsafe_alltri(str(msh_path), str(coeffs_csv), **coeffs_kwargs)
     print(f"[CV] part-1 done in {time.time()-t1:.3f}s → {coeffs_csv} (tris={total_tris}, skipped_flat={skipped_flat})", flush=True)
 
-    # --- EARLY OUT FOR ALL-PLANAR CASE ---
+    # EARLY OUT FOR ALL-PLANAR CASE
     if skipped_flat == total_tris:
         empty_vol_csv = workdir / f"{msh_path.stem}_COEFFS_Transformed_Volume.csv"
         pd.DataFrame({
@@ -599,27 +587,27 @@ def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
             tmpdir.cleanup()
         return float(baseline)
 
-    # --- Part 2: transform (SILENCED) ---
+    # Part 2: transform (SILENCED)
     t2 = time.time()
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         tr_out_csv, err_csv, n_err = process_transform_file(str(coeffs_csv))
     print(f"[CV] part-2 done in {time.time()-t2:.3f}s → {tr_out_csv} (err_csv={err_csv}, n_err={n_err})", flush=True)
 
-    # --- Part 3: volumes by routing ---
+    # Part 3: volumes by routing
     t3 = time.time()
     vol_csv = _build_volume_csv_by_routing(Path(tr_out_csv))
     print(f"[CV] part-3 done in {time.time()-t3:.3f}s → {vol_csv}", flush=True)
 
-    # --- enforce scaling identity ---
+    # enforce scaling identity
     if bool(kwargs.get("enforce_split", True)):
         t4 = time.time()
         _enforce_split_identity(vol_csv, Path(tr_out_csv))
         print(f"[CV] split-enforce done in {time.time()-t4:.3f}s", flush=True)
 
-    # --- dual-volume per point (now also dual-area, with residual filter, and Type) ---
+    # dual-volume per point (now also dual-area, with residual filter, and Type)
     _write_dualvolume_csv_from_vol_csv(Path(vol_csv))
 
-    # --- read final volume csv and sum Vcorrection ---
+    # read final volume csv and sum Vcorrection
     t5 = time.time()
     df_vol = pd.read_csv(vol_csv)
     V_sum = float(np.nansum(df_vol.get("Vcorrection", pd.Series(dtype=float)).values))

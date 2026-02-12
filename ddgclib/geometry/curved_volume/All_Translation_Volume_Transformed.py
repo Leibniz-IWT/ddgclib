@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Compute transformed patch volumes from a COEFFS_Transformed CSV
 and save per-face patch volumes (and scaled variants) to <input>_Volume.csv.
@@ -33,11 +33,11 @@ import math
 import numpy as np
 import pandas as pd
 
-# ---------- default input ----------
+# default input
 DEFAULT_INPUT = "hyperbola_cylinder_x2_minus_y2_z1slice_COEFFS_Transformed.csv"
 DEFAULT_INPUT = "parabolic_cylinder_y_eq_x2_y1slice_COEFFS_Transformed.csv"
 #DEFAULT_INPUT = "CylinderSymm_0_tet_COEFFS_Transformed.csv"
-# --- per-vertex splitter ---
+# per-vertex splitter
 try:
     from _4_dualvolume_split_patch_volume_thickness_weighted import (
         split_patch_volume_thickness_weighted as split_patch,
@@ -48,14 +48,14 @@ except Exception as e:
         "_4_dualvolume_split_patch_volume_thickness_weighted.py."
     ) from e
 
-# --- project-local conic/volume helpers ---
+# project-local conic/volume helpers
 from _3_1_translation_curved_volume_computing import flat_plane_zero_volume
 from _3_1_translation_curved_volume_computing import (
     conic_at_z, length_conic_segment, volume_ABApBp_general_conic,
     g_val, roots_x_of_y, roots_y_of_x, pick_branch,
 )
 
-# --- shared translator (classification + patch computation) ---
+# shared translator (classification + patch computation)
 try:
     import _3_2_shared_translation_conic_utils as scu
 except Exception:
@@ -76,7 +76,7 @@ if not hasattr(scu, "_PROJ_CACHE"):
     scu._PROJ_CACHE = {}
 scu.PRINT_PLANAR_SKIPS = False  # keep rows; planar => zero volume
 
-# ---- columns ----
+# columns
 ID_COLS = ["triangle_id", "A_id", "B_id", "C_id"]
 SCALE_COLS = ["scale_factors1_x", "scale_factors1_y", "scale_factors1_z"]
 A_T = ["A_transformed_x", "A_transformed_y", "A_transformed_z"]
@@ -88,7 +88,7 @@ ABC_NEW_COLS = [
     "ABC_new_F","ABC_new_G","ABC_new_H","ABC_new_I","ABC_new_J"
 ]
 
-# ---- helpers ----
+# helpers
 def _normalize_coeffs_J_minus1(coeffs, thr=1e-3):
     """
     Return coefficients with J = -1 if |J|>thr; otherwise leave as-is.
@@ -139,20 +139,20 @@ def _is_planar(A, B, C, coeffs):
 def main():
     t0_all = time.time()
 
-    # -------- input / output --------
+    # input / output
     in_csv = sys.argv[1] if len(sys.argv) >= 2 else DEFAULT_INPUT
     if not os.path.isfile(in_csv):
         raise FileNotFoundError(f"Input CSV not found: {in_csv}")
     stem = os.path.splitext(os.path.basename(in_csv))[0]
     out_csv = f"{stem}_Volume.csv"
 
-    # -------- read + validate --------
+    # read + validate
     df = pd.read_csv(in_csv)
     missing = [c for c in (ID_COLS + SCALE_COLS + XYZ_T + ABC_NEW_COLS) if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns in {in_csv}: {missing}")
 
-    # -------- one-time conic classification (for fast-paths) --------
+    # one-time conic classification (for fast-paths)
     COEFFS_REF = _first_valid_coeffs(df)
     scu.KIND, scu.PARAMS = scu.classify_extruded_xy_conic(COEFFS_REF)
     scu.IS_PARABOLA = (scu.KIND == "parabola_y_eq_x2")
@@ -160,7 +160,7 @@ def main():
     scu.IS_ELLIPSE  = (scu.KIND == "ellipse")
     scu.IS_HYPERB   = (scu.KIND == "hyperbola")
 
-    # -------- per-row computation --------
+    # per-row computation
     rows = []
     sum_V_raw = 0.0
     sum_V_scal = 0.0
@@ -214,7 +214,7 @@ def main():
             side=side,
         ))
 
-    # -------- write output --------
+    # write output
     df_out = pd.DataFrame(rows)
     ordered = [
         "triangle_id",
@@ -228,7 +228,7 @@ def main():
     df_out = df_out[ordered]
     df_out.to_csv(out_csv, index=False)
 
-    # -------- summary --------
+    # summary
     elapsed = time.time() - t0_all
     print(f"Saved: {out_csv}")
     print(f"Sum of Vcorrection_scal = {sum_V_scal:.12f}")

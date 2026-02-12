@@ -47,9 +47,7 @@ class CompositeIC(InitialCondition):
             ic.apply(HC, bV)
 
 
-# ---------------------------------------------------------------------------
 # Scalar field ICs (pressure)
-# ---------------------------------------------------------------------------
 
 class UniformPressure(InitialCondition):
     """Set P = P0 (scalar) on all vertices."""
@@ -119,9 +117,7 @@ class LinearPressureGradient(InitialCondition):
             v.P = self.P_ref - self.G * v.x_a[self.axis]
 
 
-# ---------------------------------------------------------------------------
 # Vector field ICs (velocity)
-# ---------------------------------------------------------------------------
 
 class ZeroVelocity(InitialCondition):
     """Set u = 0 on all vertices."""
@@ -225,9 +221,7 @@ class HagenPoiseuille3D(InitialCondition):
             v.u[self.flow_axis] = self.analytical_velocity(v.x_a)
 
 
-# ---------------------------------------------------------------------------
 # Custom / generic ICs
-# ---------------------------------------------------------------------------
 
 class CustomFieldIC(InitialCondition):
     """User-defined IC via callable fn(x_a) -> value.

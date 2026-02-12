@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Compute transformed patch volumes from a COEFFS_Transformed CSV
 and save per-face patch volumes (and scaled variants) to <input>_Volume.csv.
@@ -55,7 +55,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-# --- thresholds / knobs ---
+# thresholds / knobs
 FLAT_TOL = 1e-10         # detect "planar" via max(|A..F|) < FLAT_TOL
 J_FORCE_THR = 1e-4       # only force J = -1 when |J| is clearly non-tiny
 SNAP_COEFF_TOL = 5e-4    # snap |coef|<tol -> 0, |coef-1|<tol -> 1, |coef+1|<tol -> -1
@@ -67,7 +67,7 @@ DEFAULT_INPUT_CSV = "coarse_paraboloid_COEFFS_Transformed.csv"
 DEFAULT_INPUT_CSV = "coarse_hyperboloid_COEFFS_Transformed.csv"
 DEFAULT_INPUT_CSV = "CylinderSymm_0_tet_COEFFS_Transformed.csv"
 
-# --- required project helpers ---
+# required project helpers
 try:
     import _3_4_shared_axisymmetric_utils as sau
     from _3_4_shared_axisymmetric_utils import (
@@ -203,7 +203,7 @@ def main():
     if missing:
         raise ValueError(f"Input CSV is missing required columns: {missing}")
 
-    # --- Vectorized snap for ABC_new A..I: 0, +1, -1 ---
+    # Vectorized snap for ABC_new A..I: 0, +1, -1
     coef_cols_noJ = [
         "ABC_new_A","ABC_new_B","ABC_new_C",
         "ABC_new_D","ABC_new_E","ABC_new_F",
@@ -232,7 +232,7 @@ def main():
     planar_skipped = 0
     t0 = time.time()
 
-    # ---- pre-allocate small arrays to avoid per-row allocations ----
+    # pre-allocate small arrays to avoid per-row allocations
     A  = np.empty(3, dtype=float)
     B  = np.empty(3, dtype=float)
     C  = np.empty(3, dtype=float)
@@ -240,7 +240,7 @@ def main():
     B0 = np.empty(3, dtype=float)
     C0 = np.empty(3, dtype=float)
 
-    # --------- uses itertuples (faster than iterrows) ---------
+    # uses itertuples (faster than iterrows)
     for row in df.itertuples(index=False):
         tri_id = _safe_int(row.triangle_id)
         A_id = _safe_int(row.A_id)
@@ -342,7 +342,7 @@ def main():
         V_B_scal = s * float(V_B)
         V_C_scal = s * float(V_C)
 
-        # --- curved areas (transformed + effective original mapping) ---
+        # curved areas (transformed + effective original mapping)
         try:
             A_curved_transformed = 0.0
             # curved area in the transformed frame
@@ -368,7 +368,7 @@ def main():
         except Exception:
             A_curved = 0.0
 
-        # --- split curved area to A_id / B_id / C_id ---
+        # split curved area to A_id / B_id / C_id
         if A_curved != 0.0:
             if split_patch_area is not None:
                 try:

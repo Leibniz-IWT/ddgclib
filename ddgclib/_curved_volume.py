@@ -34,9 +34,7 @@ import numpy as np
 import pandas as pd
 
 
-# ---------------------------------------------------------------------------
 # Local helpers: package paths & dynamic imports
-# ---------------------------------------------------------------------------
 
 _THIS_DIR = Path(__file__).resolve().parent
 _CURVED_DIR = _THIS_DIR / "curved_volume"
@@ -61,11 +59,9 @@ def _import_module(script_path: Path, mod_name: str):
     return mod
 
 
-# ---------------------------------------------------------------------------
 # Part-1 & Part-2 entry points (library versions)
 #   - compute_rimsafe_alltri(msh_path, out_csv, **kwargs) -> (df, total_tris, skipped_flat)
 #   - process_file(in_csv) -> (out_csv, err_csv, n_errors)
-# ---------------------------------------------------------------------------
 
 # Part 1: coeffs
 _mod_coeffs = _import_module(_pkg_file("_1_coeffs_computing.py"), "cv_coeffs")
@@ -76,9 +72,7 @@ _mod_xform = _import_module(_pkg_file("_2_quadric_transformer.py"), "cv_transfor
 process_transform_file = getattr(_mod_xform, "process_file")
 
 
-# ---------------------------------------------------------------------------
 # Part-3 engines (ellipsoid / translation / rotation) + split enforcer
-# ---------------------------------------------------------------------------
 
 _mod_ell = _import_module(_pkg_file("_3_5_volume_ellipsoid.py"), "cv_vol_ell")
 process_coeffs_transformed_csv = getattr(_mod_ell, "process_coeffs_transformed_csv")
@@ -90,9 +84,7 @@ _mod_split = _import_module(_pkg_file("_4_dualvolume_split_patch_volume_thicknes
 split_patch_volume_thickness_weighted = getattr(_mod_split, "split_patch_volume_thickness_weighted")
 
 
-# ---------------------------------------------------------------------------
 # Utilities
-# ---------------------------------------------------------------------------
 
 def _write_gmsh2(points: np.ndarray, tris: np.ndarray, out_path: Path) -> None:
     """
@@ -188,12 +180,12 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
         p_trn = write_subset(noz_mask, "trn.csv")
         p_rot = write_subset(axis_mask, "rot.csv")
 
-        # --- ellipsoid engine (pure function style) ---
+        # ellipsoid engine (pure function style)
         if p_ell is not None:
             out_csv_ell, _, _, _ = process_coeffs_transformed_csv(str(p_ell))
             parts.append(Path(out_csv_ell))
 
-        # --- translation engine (script-style main, writes to CWD) ---
+        # translation engine (script-style main, writes to CWD)
         if p_trn is not None:
             argv_bak, cwd_bak = sys.argv[:], os.getcwd()
             try:
@@ -205,7 +197,7 @@ def _build_volume_csv_by_routing(tr_csv_path: Path) -> Path:
                 os.chdir(cwd_bak)
             parts.append(TMP / f"{p_trn.stem}_Volume.csv")
 
-        # --- rotation engine (script-style main, writes to CWD) ---
+        # rotation engine (script-style main, writes to CWD)
         if p_rot is not None:
             argv_bak, cwd_bak = sys.argv[:], os.getcwd()
             try:
@@ -343,9 +335,7 @@ def _enforce_split_identity(vol_csv: Path, tr_csv: Path) -> None:
     df_vol.to_csv(vol_csv, index=False)
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
 
 def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
     """
@@ -375,7 +365,7 @@ def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
     if complex_dtype != "vf":
         raise NotImplementedError("curved_volume currently supports 'vf' meshes only")
 
-    # --- resolve mesh path ---
+    # resolve mesh path
     msh_path = kwargs.get("msh_path", None)
     tmpdir = None
 
@@ -399,25 +389,25 @@ def curved_volume(HC, complex_dtype: str = "vf", **kwargs) -> float:
 
     msh_path = Path(msh_path).resolve()
 
-    # --- choose work directory for CSVs ---
+    # choose work directory for CSVs
     workdir = Path(kwargs.get("workdir", msh_path.parent)).resolve()
 
-    # --- Part 1: coeffs ---
+    # Part 1: coeffs
     coeffs_kwargs = dict(kwargs.get("coeffs_kwargs", {}))
     coeffs_csv = workdir / f"{msh_path.stem}_COEFFS.csv"
     df_coeffs, total_tris, skipped_flat = compute_rimsafe_alltri(str(msh_path), str(coeffs_csv), **coeffs_kwargs)
 
-    # --- Part 2: transform ---
+    # Part 2: transform
     tr_out_csv, err_csv, n_err = process_transform_file(str(coeffs_csv))
 
-    # --- Part 3: volumes by routing ---
+    # Part 3: volumes by routing
     vol_csv = _build_volume_csv_by_routing(Path(tr_out_csv))
 
-    # --- enforce scaling identity for the per-vertex split (optional) ---
+    # enforce scaling identity for the per-vertex split (optional)
     if bool(kwargs.get("enforce_split", True)):
         _enforce_split_identity(vol_csv, Path(tr_out_csv))
 
-    # --- read final volume csv and sum Vcorrection ---
+    # read final volume csv and sum Vcorrection
     df_vol = pd.read_csv(vol_csv)
     V_sum = float(np.nansum(df_vol.get("Vcorrection", pd.Series(dtype=float)).values))
 

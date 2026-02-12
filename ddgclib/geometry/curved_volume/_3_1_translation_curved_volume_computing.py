@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 
 """
 _volume.py — conic/cylinder helpers
@@ -19,21 +19,20 @@ Exports:
 """
 
 
-
 import time
 import math
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 
 
-# --------------------------- small util ---------------------------
+# small util
 
 def fmt_s(s: float) -> str:
     """Pretty time formatting."""
     return f"{s*1e6:.1f} µs" if s < 1e-3 else (f"{s*1e3:.3f} ms" if s < 1 else f"{s:.6f} s")
 
 
-# --------------------------- core conic helpers ---------------------------
+# core conic helpers
 
 def conic_at_z(coeffs, zC):
     """
@@ -62,7 +61,7 @@ def Q_area(x, y):  # x dy gives area by Green's theorem
     return x
 
 
-# --------------------------- roots / branch picking ---------------------------
+# roots / branch picking
 
 def roots_x_of_y(conic, y):
     a,b,c2,d,e,f = conic
@@ -104,7 +103,7 @@ def pick_branch(vals, target):
     return float(arr[np.argmin(np.abs(arr - target))])
 
 
-# --------------------------- interior point on the same branch ---------------------------
+# interior point on the same branch
 
 def interior_point_on_conic(conic, P0, P1):
     """
@@ -133,7 +132,7 @@ def interior_point_on_conic(conic, P0, P1):
     return np.array([0.5*(x0+x1), 0.5*(y0+y1)], float)
 
 
-# --------------------------- ∫ Q dy along conic segment ---------------------------
+# ∫ Q dy along conic segment
 
 def integrate_conic_Q_dy_yparam(conic, P0, P1, Q, tol=1e-14, max_levels=14, n_gl=32):
     """Preferred integrator when y is monotone along the arc: ∫ Q(x(y),y) dy"""
@@ -258,7 +257,7 @@ def conic_segment_Q_dy(conic, P0, P1, tol=1e-14, Q=None, n_gl=32):
     return integrate_conic_Q_dy_xparam(conic, P0, P1, Q, tol=tol, n_gl=n_gl)
 
 
-# --------------------------- straight segment line integrals ---------------------------
+# straight segment line integrals
 
 def straight_Qf_dy_integral(P, Qp):
     """Analytic ∫[(1/3)x^3 - x y^2] dy along a straight segment P->Qp."""
@@ -277,7 +276,7 @@ def straight_x_dy_integral(P, Qp):
     return (Qp[1] - P[1]) * 0.5*(P[0] + Qp[0])
 
 
-# --------------------------- exact flux over planar triangle ---------------------------
+# exact flux over planar triangle
 
 def triangle_flux_z(P, Q, R):
     """
@@ -293,7 +292,7 @@ def triangle_flux_z(P, Q, R):
     return Az * zbar
 
 
-# --------------------------- cap areas ---------------------------
+# cap areas
 
 def cap_area_arc_plus_chord(conic, P0, P1, tol=1e-14):
     """
@@ -307,7 +306,7 @@ def cap_area_arc_plus_chord(conic, P0, P1, tol=1e-14):
     return abs(A_signed), A_signed, area_arc, area_chord
 
 
-# --------------------------- circle utilities / sector/segment areas ---------------------------
+# circle utilities / sector/segment areas
 
 def _is_vertical_cylinder(coeffs, tol=1e-14):
     """True for x^2 + y^2 + ... with no z-coupling (C=D=E=F=G=H=J=0)."""
@@ -352,7 +351,7 @@ def _circle_segment_area_signed(P0, P1, r=1.0):
     return 0.5 * r * r * (dth - math.sin(dth))
 
 
-# --------------------------- arc length of conic segment ---------------------------
+# arc length of conic segment
 
 def length_conic_segment(conic, P0, P1, tol=1e-14, max_levels=14, n_gl=32):
     """
@@ -450,7 +449,7 @@ def length_conic_segment(conic, P0, P1, tol=1e-14, max_levels=14, n_gl=32):
     return length_xparam(P0, P1)
 
 
-# --------------------------- main volume routine ---------------------------
+# main volume routine
 
 def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume_cylinder=True, debug=False):
     """
@@ -485,7 +484,7 @@ def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume
 
     t0 = time.perf_counter(); t = {}
 
-    # --- caps (areas on bottom and top) ---
+    # caps (areas on bottom and top)
     # Bottom: A -> B (CW from +z) => signed area negative
     t['cap_bot_start'] = time.perf_counter()
     if cap_mode == "segment":
@@ -514,7 +513,7 @@ def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume
         Atop_arc = Atop_chord = None
     t['cap_top'] = time.perf_counter() - t['cap_top_start']
 
-    # --- cylinder shortcut: vertical faces => zero z-flux; curved side integral => 0 ---
+    # cylinder shortcut: vertical faces => zero z-flux; curved side integral => 0
     if assume_cylinder and _is_vertical_cylinder(coeffs):
         I_flat = 0.0
         I_curved = 0.0
@@ -562,12 +561,12 @@ def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume
         #print("Volume for conic:", coeffs, "A:", A, "B:", B, "A':", A_, "B':", B_, " V:", V)
         return V, I_flat, I_curved, caps, timings, lengths
 
-    # --- planar quad side (two triangles) ---
+    # planar quad side (two triangles)
     t['flat_start'] = time.perf_counter()
     I_flat = triangle_flux_z(A, B, B_) + triangle_flux_z(A, B_, A_)
     t['flat'] = time.perf_counter() - t['flat_start']
 
-    # --- curved side (general conic case) ---
+    # curved side (general conic case)
     t['lower_start'] = time.perf_counter()
     I_lower = conic_segment_Q_dy(conic_low,  (A[0],  A[1]),  (B[0],  B[1]), Q=Q_f)
     t['lower'] = time.perf_counter() - t['lower_start']
@@ -586,11 +585,11 @@ def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume
 
     I_curved = I_lower + I_BB + I_upper + I_AA
 
-    # --- lengths (diagnostic) ---
+    # lengths (diagnostic)
     L_lower = length_conic_segment(conic_low,  (A[0],  A[1]),  (B[0],  B[1]))
     L_upper = length_conic_segment(conic_high, (B_[0], B_[1]), (A_[0], A_[1]))
 
-    # --- assemble ---
+    # assemble
     V = I_flat - I_curved + z_high * Atop_signed + z_low * Abot_signed
     t['total'] = time.perf_counter() - t0
 
@@ -620,7 +619,7 @@ def volume_ABApBp_general_conic(coeffs, A, B, A_, B_, cap_mode="segment", assume
 
 
 # flat_plane_guard.py
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Flat-plane guard for triangle patches on general quadrics.
 
@@ -651,7 +650,7 @@ from typing import Tuple, Optional, Dict
 
 ArrayLike = np.ndarray | Tuple[float, float, float] | list
 
-# ---------- Quadric helpers ---------------------------------------------------
+# Quadric helpers
 
 def quadric_F(x: float, y: float, z: float, coeffs: Tuple[float, ...]) -> float:
     """
@@ -684,7 +683,7 @@ def quadric_hess(coeffs: Tuple[float, ...]) -> np.ndarray:
                      [   D, 2.0*B,  Fc],
                      [   E,   Fc, 2.0*C]], dtype=float)
 
-# ---------- Differential geometry on implicit surfaces ------------------------
+# Differential geometry on implicit surfaces
 
 def _tangent_basis_from_normal(n: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Return two orthonormal tangent vectors given a unit normal n (3,)."""
@@ -727,7 +726,7 @@ def principal_curvatures_on_quadric(P: ArrayLike,
     w = np.linalg.eigvalsh(S2)     # eigenvalues sorted ascending
     return float(w[0]), float(w[1])
 
-# ---------- Main guard --------------------------------------------------------
+# Main guard
 
 def flat_plane_zero_volume(A: ArrayLike, B: ArrayLike, C: ArrayLike,
                            coeffs: Tuple[float, ...],
@@ -795,7 +794,7 @@ def flat_plane_zero_volume(A: ArrayLike, B: ArrayLike, C: ArrayLike,
     # Not planar by these tests
     return None
 
-# ---------- Optional convenience: boolean + diagnostics -----------------------
+# Optional convenience: boolean + diagnostics
 
 def is_triangle_planar(A: ArrayLike, B: ArrayLike, C: ArrayLike,
                        coeffs: Tuple[float, ...],
@@ -828,7 +827,7 @@ def is_triangle_planar(A: ArrayLike, B: ArrayLike, C: ArrayLike,
     return False, info
 
 
-# ---------- Self-test ---------------------------------------------------------
+# Self-test
 if __name__ == "__main__":
     # Example 1: triangle on the plane x=2 (coordinate-aligned)
     A = (2.0, -1.5, -1.0)

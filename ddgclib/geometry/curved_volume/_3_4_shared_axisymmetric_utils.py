@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 shared_axisymmetric_utils.py
 Auto-generated on 2025-08-18 12:22:16 by consolidation script.
@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
             return func
         return wrapper
 
-# ---- Fallbacks for pipeline-level globals (caller should override/import their own) ----
+# Fallbacks for pipeline-level globals (caller should override/import their own)
 try:
     COEFFS
 except NameError:
@@ -51,9 +51,7 @@ except Exception:  # pragma: no cover
             "import it in your caller or pass an alternative."
         )
 
-# --------------------------------------------------------------------
 # Debug + caches
-# --------------------------------------------------------------------
 # Triangles for which verbose debug printing is enabled (empty in production)
 DEBUG_TRI = set()
 
@@ -61,9 +59,7 @@ DEBUG_TRI = set()
 _AXIS_TRANSFORM_CACHE = {}  # key: coeffs tuple(10) -> (x0, U, A3p, bp, cp)
 _AXIS_CENTER_CACHE = {}     # key: coeffs tuple(10) -> (ok, axis_dir, axis_point, frame)
 
-# --------------------------------------------------------------------
 # Tiny, fast tetra-volume helper (used everywhere)
-# --------------------------------------------------------------------
 @njit(cache=True, fastmath=False)
 def _tet_volume_core(apex, P, Q, R):
     """Numba-friendly 3D tetra volume |det([P-apex, Q-apex, R-apex])| / 6."""
@@ -98,8 +94,6 @@ def _tet_volume_apex(apex, P, Q, R):
     R = np.asarray(R, dtype=float)
     return float(_tet_volume_core(apex, P, Q, R))
 
-
-# ----------------------------------------------------------------------------
 
 __all__ = [
   "_axis_frame",
@@ -278,7 +272,7 @@ def adjust_curvature_signs(k1, k2, coeffs, observer_outside=True):
 def cone_volume_patch(A, B, C, R_unused, r_plane, k, triangle_id=None):
     EPS = 1e-12
 
-    # ---------- constants/angles ----------
+    # constants/angles
     V_cut = Vcut(A[2], B[2], coeffs_1x_to_2x(COEFFS))
     rA, rB, rC = np.linalg.norm(A[:2]), np.linalg.norm(B[:2]), np.linalg.norm(C[:2])
     O  = np.array([0.0, 0.0, (B[2] + A[2]) / 2.0])
@@ -345,7 +339,7 @@ def cone_volume_patch(A, B, C, R_unused, r_plane, k, triangle_id=None):
             a = 0.0
         return a
 
-    # ======================= CASE 1: C ≈ A =======================
+    # CASE 1: C ≈ A
     if abs(C[2] - A[2]) < EPS:
         rAC   = rA
         EPS_R = 1e-14
@@ -408,7 +402,7 @@ def cone_volume_patch(A, B, C, R_unused, r_plane, k, triangle_id=None):
 
         return Vpatch
 
-    # ======================= CASE 2: C ≈ B =======================
+    # CASE 2: C ≈ B
     if abs(C[2] - B[2]) < EPS:
         rAC = rA
         Bt  = np.array([rAC * math.cos(thB), rAC * math.sin(thB), A[2]], float)  # B -> AC circle
@@ -481,7 +475,7 @@ def cone_volume_patch(A, B, C, R_unused, r_plane, k, triangle_id=None):
 
         return Vpatch
 
-    # ======================= default (unchanged overall logic) =======================
+    # default (unchanged overall logic)
     dth  = (thC - thA) % (2 * math.pi)
     D    = find_rotated_point(B, rB, -((math.atan2(C[1], C[0]) - math.atan2(A[1], A[0]))))
     if dth < 1e-8:
@@ -1002,7 +996,7 @@ def wedge_volume_rotation(Coeffs, A, B, C, idx, forced_orientation):
     V3 = _tet_volume_apex(Ep, Ap, Bp, Cp)
     return (3, V1 + V2 + V3)
 
-# ===================== ADDED: plane-lift curved area =====================
+# ADDED: plane-lift curved area
 
 def _quadric_lift_point_along_normal(P_plane, n_hat, A3, b, c_, root_mode="nearest"):
     """
@@ -1158,7 +1152,7 @@ def curved_patch_area_plane_lift_with_D(A, B, C, N, coeffs, root_mode="nearest")
     A_curved_D : float
         Approximate curved surface area of the quadric patch.
     """
-    # ---- local helpers (self-contained, no external dependencies) ----
+    # local helpers (self-contained, no external dependencies)
 
     def _local_triangle_flat_area(P, Q, R):
         """Flat area of triangle PQR in 3D."""
@@ -1257,7 +1251,7 @@ def curved_patch_area_plane_lift_with_D(A, B, C, N, coeffs, root_mode="nearest")
 
         return P + t * n
 
-    # ---- main body of curved_patch_area_plane_lift_with_D ----
+    # main body of curved_patch_area_plane_lift_with_D
 
     A = np.asarray(A, float)
     B = np.asarray(B, float)
@@ -1480,7 +1474,7 @@ def rotation_patch_area_original(coeffs, A, B, C, sx=None, sy=None, sz=None, nz=
         Area = 0.0
     return Area 
 
-# ===================== END ADDED PART =====================
+# END ADDED PART
 
 def worker(args):
     idx, tri, points = args

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Self-contained quadric transformer utilities (no external _quadric_transformer.py).
 
@@ -83,7 +83,7 @@ def write_csv_snapped(df: pd.DataFrame, path: str, tol: float = SNAP_TOL) -> Non
     snap_ABCDJ_columns(df, tol=tol)
     df.to_csv(path, index=False, float_format="%.12g")
 
-# ---- robust near-zero check ----
+# robust near-zero check
 def _near0(v: float, base: float, rel: float = 1e-4, abs_tol: float = 1e-8) -> bool:
     """Relative+absolute near-zero test against a problem scale."""
     return abs(v) <= max(abs_tol, rel * base)
@@ -123,7 +123,7 @@ def _detect_parabolic_axes(coeffs, rel: float | None = None, abs_tol: float | No
     thr = max(abs_tol, rel*baseAB)
     return (abs(A) < thr, abs(B) < thr)
 
-# ---------- expected CSV columns ----------
+# expected CSV columns
 ABC_COLS = [f"ABC_{k}" for k in "ABCDEFGHIJ"]
 PT_COLS = {
     "A": ["Ax", "Ay", "Az", "A_id"],
@@ -264,7 +264,7 @@ def _z_invariant_xy_diag(coeffs, tol=1e-9) -> bool:
     A, B, C, D, E, F, G, H, I, J = map(float, coeffs)
     return (abs(C) < tol and abs(E) < tol and abs(F) < tol and abs(I) < tol and abs(D) < tol)
 
-# ----- NEW: permutation to force unique principal axis -> z (fast path only) -----
+# NEW: permutation to force unique principal axis -> z (fast path only)
 def _permute_to_unique_axis_z(A: float, B: float, C: float, tol: float = 1e-10) -> np.ndarray:
     """
     Return permutation R so the unique principal axis (if any) becomes z.
@@ -313,7 +313,7 @@ def quadric_major_z_minor_x(coeffs, tol=1e-8, offdiag_rel=1e-4): #offdiag_rel=1e
     # unpack
     A, B, C, D, E, F, G, H, I_lin, J = map(float, coeffs)
 
-    # --- zmask swap (if exactly one of A,B,C ~ 0) ---
+    # zmask swap (if exactly one of A,B,C ~ 0)
     base = max(abs(A), abs(B), abs(C), 1.0)
     zmask = np.isclose([A, B, C], 0.0, atol=tol * base + tol)
     R_acc = np.eye(3)
@@ -341,17 +341,17 @@ def quadric_major_z_minor_x(coeffs, tol=1e-8, offdiag_rel=1e-4): #offdiag_rel=1e
         G, H, I_lin = map(float, bp)
         R_acc = R0
 
-    # --- near-diagonal snap to kill tiny off-diagonals (prevents eigen-rotate) ---
+    # near-diagonal snap to kill tiny off-diagonals (prevents eigen-rotate)
     base = max(abs(A), abs(B), abs(C), 1.0)
     if max(abs(D), abs(E), abs(F)) <= offdiag_rel * base:
         return (A, B, C, 0.0, 0.0, 0.0, G, H, I_lin, J), R_acc
 
-    # --- small-absolute off-diagonal check ---
+    # small-absolute off-diagonal check
     tol_off = tol * base + tol
     if abs(D) <= tol_off and abs(E) <= tol_off and abs(F) <= tol_off:
         return (A, B, C, 0.0, 0.0, 0.0, G, H, I_lin, J), R_acc
 
-    # --- eigen path ---
+    # eigen path
     Q = np.array([[A, D/2.0, E/2.0],
                   [D/2.0, B, F/2.0,],
                   [E/2.0, F/2.0, C ]], dtype=float)
@@ -548,7 +548,7 @@ def analyse_quadric(*coeffs: float,
     a1,b1,c1,d1,e1,f1,g1,h1,i1,j1 = new_coeffs_unscaled
     print("a1", a1, "b1", b1, "c1", c1, "d1", d1, "e1", e1, "f1", f1," g1", g1, "h1", h1, "i1", i1, "j1", j1)
 
-    # ---- force j1 = -1 by scaling all coeffs ----
+    # force j1 = -1 by scaling all coeffs
     if abs(j1) > J_FORCE_THR:
         alphaJ = -1.0 / j1       # multiply both sides by this
         a1 *= alphaJ
@@ -616,7 +616,7 @@ def analyse_quadric(*coeffs: float,
     print("!!!!debug:scale_factors1:", (sx,sy,sz))
     print("!!!!debug:after scaling (final coeffs):", new_coeffs_final)
 
-    # -------- KEY FIX: center used for transform must match the final polynomial --------
+    # KEY FIX: center used for transform must match the final polynomial
     centre_canon = np.array([dx/max(sx,1e-30), dy/max(sy,1e-30), dz/max(sz,1e-30)], float)
     print("alpha:", alpha)
     scale_factors1 = (float(sx), float(sy), float(sz)) 
@@ -644,7 +644,7 @@ def transform_point(p: np.ndarray, centre: np.ndarray, R: np.ndarray,
     sxf = np.asarray(scale_factors1, dtype=float).reshape(3)
     return (R.T @ p) / sxf - centre
 
-# ======================= CSV processing helpers =======================
+# CSV processing helpers
 
 def process_file(in_csv: str) -> tuple[str, str | None, int]:
     df = pd.read_csv(in_csv)
@@ -679,11 +679,11 @@ def process_file(in_csv: str) -> tuple[str, str | None, int]:
                     "ABC_new_D": coeffs[3], "ABC_new_E": coeffs[4], "ABC_new_F": coeffs[5],
                     "ABC_new_G": coeffs[6], "ABC_new_H": coeffs[7], "ABC_new_I": coeffs[8],
                     "ABC_new_J": coeffs[9],
-                    # ---- appended original coordinates, exactly as requested ----
+                    # appended original coordinates, exactly as requested
                     "Ax": A_xyz[0], "Ay": A_xyz[1], "Az": A_xyz[2],
                     "Bx": B_xyz[0], "By": B_xyz[1], "Bz": B_xyz[2],
                     "Cx": C_xyz[0], "Cy": C_xyz[1], "Cz": C_xyz[2],
-                    # ---- appended original ABC_* coeffs from _COEFFS.csv ----
+                    # appended original ABC_* coeffs from _COEFFS.csv
                     "ABC_A": float(row["ABC_A"]), "ABC_B": float(row["ABC_B"]), "ABC_C": float(row["ABC_C"]),
                     "ABC_D": float(row["ABC_D"]), "ABC_E": float(row["ABC_E"]), "ABC_F": float(row["ABC_F"]),
                     "ABC_G": float(row["ABC_G"]), "ABC_H": float(row["ABC_H"]), "ABC_I": float(row["ABC_I"]),
@@ -732,11 +732,11 @@ def process_file(in_csv: str) -> tuple[str, str | None, int]:
                 "ABC_new_D": newD, "ABC_new_E": newE, "ABC_new_F": newF,
                 "ABC_new_G": newG, "ABC_new_H": newH, "ABC_new_I": newI,
                 "ABC_new_J": newJ,
-                # ---- appended original coordinates, exactly as requested ----
+                # appended original coordinates, exactly as requested
                 "Ax": float(A_xyz[0]), "Ay": float(A_xyz[1]), "Az": float(A_xyz[2]),
                 "Bx": float(B_xyz[0]), "By": float(B_xyz[1]), "Bz": float(B_xyz[2]),
                 "Cx": float(C_xyz[0]), "Cy": float(C_xyz[1]), "Cz": float(C_xyz[2]),
-                # ---- appended original ABC_* coeffs from _COEFFS.csv ----
+                # appended original ABC_* coeffs from _COEFFS.csv
                 "ABC_A": float(row["ABC_A"]), "ABC_B": float(row["ABC_B"]), "ABC_C": float(row["ABC_C"]),
                 "ABC_D": float(row["ABC_D"]), "ABC_E": float(row["ABC_E"]), "ABC_F": float(row["ABC_F"]),
                 "ABC_G": float(row["ABC_G"]), "ABC_H": float(row["ABC_H"]), "ABC_I": float(row["ABC_I"]),
@@ -784,7 +784,7 @@ def process_file(in_csv: str) -> tuple[str, str | None, int]:
 
     return out_csv, err_csv, len(err_rows)
 
-# ======================= batch / CLI helpers =======================
+# batch / CLI helpers
 def clean_old_transformed() -> None:
     patterns = [
         "*_COEFFS_Transformed.csv",

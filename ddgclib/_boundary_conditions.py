@@ -24,9 +24,7 @@ from typing import Callable, Optional, Union
 import numpy as np
 
 
-# ---------------------------------------------------------------------------
 # Boundary identification helpers
-# ---------------------------------------------------------------------------
 
 def identify_boundary_vertices(HC, criterion_fn: Callable) -> set:
     """Return set of vertices matching criterion_fn(v) -> bool.
@@ -77,9 +75,7 @@ def identify_cube_boundaries(HC, lb: float, ub: float, dim: Optional[int] = None
     return bV
 
 
-# ---------------------------------------------------------------------------
 # Abstract base class
-# ---------------------------------------------------------------------------
 
 class BoundaryCondition(ABC):
     """Base class for boundary conditions on a moving mesh.
@@ -108,9 +104,7 @@ class BoundaryCondition(ABC):
         """
 
 
-# ---------------------------------------------------------------------------
 # BoundaryConditionSet container
-# ---------------------------------------------------------------------------
 
 class BoundaryConditionSet:
     """Container managing multiple BCs for a simulation.
@@ -162,9 +156,7 @@ class BoundaryConditionSet:
         return diagnostics
 
 
-# ---------------------------------------------------------------------------
 # Dirichlet Boundary Conditions (Fixed Value)
-# ---------------------------------------------------------------------------
 
 class NoSlipWallBC(BoundaryCondition):
     """Zero velocity on wall vertices (no-slip condition).
@@ -241,9 +233,7 @@ class DirichletPressureBC(BoundaryCondition):
         return count
 
 
-# ---------------------------------------------------------------------------
 # Neumann Boundary Condition (Fixed Flux/Derivative)
-# ---------------------------------------------------------------------------
 
 class NeumannBC(BoundaryCondition):
     """Zero-gradient (or fixed gradient) at boundary.
@@ -288,9 +278,7 @@ class NeumannBC(BoundaryCondition):
         return count
 
 
-# ---------------------------------------------------------------------------
 # Open (Transparent/Absorbing) Boundary Condition
-# ---------------------------------------------------------------------------
 
 class OutletDeleteBC(BoundaryCondition):
     """Simple open outlet: delete vertices that leave the domain.
@@ -314,9 +302,7 @@ class OutletDeleteBC(BoundaryCondition):
         return len(to_delete)
 
 
-# ---------------------------------------------------------------------------
 # Periodic Boundary Condition
-# ---------------------------------------------------------------------------
 
 class PeriodicInletBC(BoundaryCondition):
     """Periodic inlet: continuously injects copies of a unit mesh from upstream.
@@ -439,9 +425,7 @@ class PeriodicInletBC(BoundaryCondition):
         mesh.V.merge_all(cdist=self.cdist)
 
 
-# ---------------------------------------------------------------------------
 # Generic time stepper / advancer
-# ---------------------------------------------------------------------------
 
 class MeshAdvancer:
     """Coordinate inlet/outlet BCs with bulk mesh advection.

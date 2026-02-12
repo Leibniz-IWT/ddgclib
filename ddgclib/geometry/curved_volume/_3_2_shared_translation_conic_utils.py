@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 shared_conic_utils.py
 Shared helper functions for conic and extrusion geometry.
@@ -33,7 +33,7 @@ import numpy as np
 from numpy.polynomial.polynomial import Polynomial as Poly, polyroots
 from typing import Dict, Tuple, Any
 
-# --------------- Injection points (set by caller) ---------------
+# Injection points (set by caller)
 # These will be set from your project at runtime. We keep them as
 # module attributes to avoid importing heavy local modules here.
 conic_at_z = None                     # fn: (coeffs, z) -> (a,b,c2,d,e,f)
@@ -45,7 +45,7 @@ flat_plane_zero_volume = None         # fn: (A,B,C,coeffs) -> 0.0 if planar, els
 # Optional logging knob (can be set by caller)
 PRINT_PLANAR_SKIPS = False
 
-# --------------- Classification state (set by caller) ---------------
+# Classification state (set by caller)
 KIND: str = "general"
 PARAMS: Dict[str, Any] = {}
 IS_PARABOLA = False
@@ -53,7 +53,7 @@ IS_CIRCLE   = False
 IS_ELLIPSE  = False
 IS_HYPERB   = False
 
-# --------------- Numerics & caches ---------------
+# Numerics & caches
 # 6-point Gauss–Legendre nodes/weights
 _GL6_X = np.array([0.2386191860831969,
                    0.6612093864662645,
@@ -65,7 +65,7 @@ _GL6_W = np.array([0.4679139345726910,
 # projection cache for parabola/circle projections
 _PROJ_CACHE = {}
 
-# --------------- Small utilities ---------------
+# Small utilities
 def _gauss6_integrate(f, L: float) -> float:
     """Integrate f(t) on [0, L] using 6-point Gauss–Legendre (symmetric form)."""
     if L <= 0.0:
@@ -112,7 +112,7 @@ def _to_norm_coords_for_between(X):
         return math.atan2(v, u)
     return None
 
-# --------- local detector for axis-aligned, z-independent parabola ----------
+# local detector for axis-aligned, z-independent parabola
 def _is_vertical_parabolic_cylinder_coeffs(coeffs, tol=1e-10):
     """
     Detects a z-independent, axis-aligned parabolic cylinder of the form:
@@ -131,7 +131,7 @@ def _is_vertical_parabolic_cylinder_coeffs(coeffs, tol=1e-10):
     if abs(H) <= tol or abs(A) <= tol: return False
     return True
 
-# --------------- Classification ---------------
+# Classification
 def classify_extruded_xy_conic(coeffs, tol=1e-12):
     trl=5e-5 # for parabola y - x^2 = 0, we use a very tight tolerance due to fitted data
     """
@@ -193,7 +193,7 @@ def classify_extruded_xy_conic(coeffs, tol=1e-12):
 
     return "general", {}
 
-# --------------- Geometry basics ---------------
+# Geometry basics
 def tet_volume(pts):
     p0, p1, p2, p3 = pts
     return abs(np.dot(p1 - p0, np.cross(p2 - p0, p3 - p0))) / 6.0
@@ -217,7 +217,7 @@ def coincident_xy(P, Q, eps=1e-12):
     P = np.asarray(P, float); Q = np.asarray(Q, float)
     return np.hypot(P[0]-Q[0], P[1]-Q[1]) < eps
 
-# --------------- Projections ---------------
+# Projections
 def project_to_parabola_xy(x0, y0):
     # Orthogonal projection to y=x^2 via Newton on: 2x^3 + (1 - 2y0)x - x0 = 0
     k = _proj_key(x0, y0)
@@ -287,7 +287,7 @@ def project_xy_to_conic_3d(coeffs, P, z_level):
         raise RuntimeError("No valid projection root found.")
     return np.array([best[1], best[2], float(z_level)], float)
 
-# --------------- Arc lengths (for weights) ---------------
+# Arc lengths (for weights)
 def arc_len_parabola_between_oncurve(P, Q):
     # y=x^2; exact primitive: S(x) = 1/4 (asinh(2x) + 2x*sqrt(1+4x^2))
     def S(x): return 0.25*(math.asinh(2.0*x) + 2.0*x*math.sqrt(1.0 + 4.0*x*x))
@@ -336,7 +336,7 @@ def arc_len_hyperbola_between(P, Q, params):
         return math.hypot(a*math.sinh(T), b*math.cosh(T))
     return _gauss6_integrate(f, d)
 
-# --------------- Segment area magnitudes ---------------
+# Segment area magnitudes
 def parabola_segment_area_mag(P, Q):
     # endpoints on y=x^2
     x1, x2 = float(P[0]), float(Q[0])
@@ -376,7 +376,7 @@ def hyperbola_segment_area_mag(P, Q, params):
     A_unit = 0.5 * abs(arc_int + chord_int)
     return PARAMS.get("area_scale", 1.0) * A_unit
 
-# --------------- Between test ---------------
+# Between test
 def arc_between_on_conic(conic, P, Q, R, tol_param=1e-12):
     if IS_PARABOLA:
         xP, xQ, xR = P[0], Q[0], R[0]
@@ -408,7 +408,7 @@ def arc_between_on_conic(conic, P, Q, R, tol_param=1e-12):
 
     return False
 
-# --------------- Length & Volume wrappers ---------------
+# Length & Volume wrappers
 def length_or_zero(conic, P, Q):
     if coincident_xy(P, Q): return 0.0
     if IS_PARABOLA:
@@ -470,7 +470,7 @@ def safe_ratio(num, den):
     if not np.isfinite(num) or not np.isfinite(den) or den == 0.0: return 0.0
     return num/den
 
-# --------------- Patch construction & computation ---------------
+# Patch construction & computation
 def construct_multilevel_points(coeffs, A_in, B_in, C_in, clamp_to_segment=True):
     A_in = np.asarray(A_in, float)
     B_in = np.asarray(B_in, float)
@@ -626,7 +626,7 @@ def compute_V_patch_from_ABC(coeffs, A_in, B_in, C_in, idx=None, eps=1e-12):
         print("coeffs:", coeffs)
     return abs(V_patch1) + abs(V_patch2) + abs(V_ABCD)
 
-# --------------- Labels (optional) ---------------
+# Labels (optional)
 def classify_side_and_direction(A, B, C, coeffs):
     A = np.asarray(A,float); B = np.asarray(B,float); C = np.asarray(C,float)
     Gtri = (A + B + C) / 3.0
@@ -641,7 +641,7 @@ def classify_side_and_direction(A, B, C, coeffs):
     side = "outside"
     return side, direction
 
-# --------------- Public API ---------------
+# Public API
 __all__ = [
     # classification & context
     "classify_extruded_xy_conic", "KIND", "PARAMS", "IS_PARABOLA", "IS_CIRCLE", "IS_ELLIPSE", "IS_HYPERB",

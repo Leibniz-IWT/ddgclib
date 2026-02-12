@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Quadric fitting (1× convention) with rim-safe growth.
 
@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import meshio
 
-# ============================ Single-source config ============================
+# Single-source config
 
 THETA_MAX_DEG = 55.0  # ← change here to adjust the default once
 
@@ -34,7 +34,7 @@ THETA_MAX_DEG = 55.0  # ← change here to adjust the default once
 RES_TOL_ABS_FLOOR = 1e-2 #1e-4 # 1e-2 for ellip  # 5e-3
 # (RES_TOL_REL_MULT concept kept implicit; not needed to write the CSV columns)
 
-# ============================== Helpers: coeffs ===============================
+# Helpers: coeffs
 
 def rescale_smart(coeff: np.ndarray, tol_abs: float = 1e-9, tol_rel: float = 1e-6, prefer: str = "H") -> np.ndarray:
     c = np.array(coeff, float)
@@ -168,7 +168,7 @@ def fit_quadric_stable(P: np.ndarray, irls_iters: int = 0, snap_rel: float = 5e-
     c = _snap_small_A_to_I(c, snap_rel, snap_abs)
     return c
 
-# ============================ Residual helpers ===============================
+# Residual helpers
 
 def _quadric_f_value(p: np.ndarray, c: np.ndarray) -> float:
     """Evaluate implicit quadric f(x,y,z)=Ax^2+By^2+Cz^2+Dxy+Exz+Fyz+Gx+Hy+Iz+J."""
@@ -178,7 +178,7 @@ def _quadric_f_value(p: np.ndarray, c: np.ndarray) -> float:
             D*x*y + E*x*z + F*y*z +
             G*x + H*y + I*z + J)
 
-# ============================ Mesh / components ============================
+# Mesh / components
 
 def get_all_surface_triangles(mesh: meshio.Mesh) -> np.ndarray:
     tris = []
@@ -278,7 +278,7 @@ def build_vertex_adjacency_smooth(points: np.ndarray, tris: np.ndarray, theta_ma
             adj[u].add(v); adj[v].add(u)
     return adj
 
-# ================================ RIM stuff =================================
+# RIM stuff
 
 def _boundary_vertices(tris: np.ndarray) -> Set[int]:
     from collections import Counter
@@ -315,7 +315,7 @@ def _rim_depth(nV: int, tris: np.ndarray, boundary_verts: Set[int]) -> np.ndarra
                 depth[w] = du + 1; dq.append(w)
     return depth
 
-# -------------- Rim by dihedral angle (> theta_max_deg) ---------------------
+# Rim by dihedral angle (> theta_max_deg)
 
 def vertex_max_dihedral_deg(points: np.ndarray, tris: np.ndarray) -> np.ndarray:
     nV = points.shape[0]
@@ -346,7 +346,7 @@ def rim_vertices_by_dihedral(points: np.ndarray, tris: np.ndarray, theta_max_deg
     v_max_dih = vertex_max_dihedral_deg(points, tris)
     return (v_max_dih > float(theta_max_deg))
 
-# ================================ Planarity =================================
+# Planarity
 
 def is_patch_planar(points: np.ndarray, idx: np.ndarray, plane_rel_tol: float = 1e-3, plane_abs_tol: float = 1e-9):
     P = points[idx].astype(float)
@@ -360,7 +360,7 @@ def is_patch_planar(points: np.ndarray, idx: np.ndarray, plane_rel_tol: float = 
     thr = max(plane_abs_tol, plane_rel_tol*max(scale,1e-12))
     return (max_d <= thr), max_d, scale, n, c
 
-# ============================ Fitting wrappers ==============================
+# Fitting wrappers
 
 def fit_coeffs_for_triangle(points, idxA, idxB, idxC, idxABC,
                             irls_iters, snap_rel, snap_abs,
@@ -402,7 +402,7 @@ def fit_coeffs_for_triangle(points, idxA, idxB, idxC, idxABC,
 
     return coABC, coA, coB, coC
 
-# ====================== Topological graphs & rings ===========================
+# Topological graphs & rings
 
 def _vertex_graph_from_tris(nV: int, tris: np.ndarray) -> List[Set[int]]:
     G: List[Set[int]] = [set() for _ in range(nV)]
@@ -431,7 +431,7 @@ def _ring1_ring2_smooth(a: int, b: int, c: int, comp: int, adj_comp):
     r2 -= (r1 | seeds)
     return sorted(r1), sorted(r2)
 
-# ------- per-vertex max dihedral angle (degrees); boundary edges => 180° -----
+# per-vertex max dihedral angle (degrees); boundary edges => 180°
 
 def vertex_max_dihedral_deg(points: np.ndarray, tris: np.ndarray) -> np.ndarray:
     nV = points.shape[0]
@@ -458,7 +458,7 @@ def vertex_max_dihedral_deg(points: np.ndarray, tris: np.ndarray) -> np.ndarray:
         if ang > out[v]: out[v] = ang
     return out
 
-# ===================== Face roles (boundary / interior / nonmanifold) =======
+# Face roles (boundary / interior / nonmanifold)
 
 def _extract_tets(mesh: meshio.Mesh) -> np.ndarray:
     tets = []
@@ -503,7 +503,7 @@ def compute_point_face_roles(mesh: meshio.Mesh):
         on_boundary[u] = True
     return on_boundary, on_interior, on_nonman
 
-# ====================== Planarity classifier (PLANE ONLY) ====================
+# Planarity classifier (PLANE ONLY)
 
 def _k_ring_topological(G: List[Set[int]], seed: int, min_pts: int = 10, max_k: int = 4) -> np.ndarray:
     patch = {seed}
@@ -605,7 +605,7 @@ def classify_points_and_write_csv(points: np.ndarray, tris: np.ndarray, rim_dept
     nonplanar_mask = (type_arr != "planar") & surface_mask
     return df_types, nonplanar_mask
 
-# ---------------- rim-safe, component-aware patch growth ---------------------
+# rim-safe, component-aware patch growth
 
 def adaptive_patch_in_component(
     seed: int,
@@ -657,7 +657,7 @@ def adaptive_patch_in_component(
 
     return _np.array(sorted(patch), dtype=int)
 
-# ============================== Ring CSV helpers =============================
+# Ring CSV helpers
 
 def _ring1_ring2_for_csv(points, tris, comp_id, adj_comp):
     G_topo = _vertex_graph_from_tris(len(points), tris)
@@ -680,7 +680,7 @@ def _ring1_ring2_for_csv(points, tris, comp_id, adj_comp):
         "ring1_smooth_ids","ring2_smooth_ids"
     ])
 
-# ============================== Main pipeline ===============================
+# Main pipeline
 
 def compute_rimsafe_alltri(
     msh_path: str,
@@ -832,7 +832,7 @@ def compute_rimsafe_alltri(
             a=a, b=b, c=c
         )
 
-        # ----- residuals at triangle vertices (ABC fit) -----
+        # residuals at triangle vertices (ABC fit)
         if coABC is not None and np.all(np.isfinite(coABC)):
             fA = abs(_quadric_f_value(points[a], coABC))
             fB = abs(_quadric_f_value(points[b], coABC))
@@ -867,7 +867,7 @@ def compute_rimsafe_alltri(
         if (len(rows) % 1000) == 0:
             print(f"[progress] kept {len(rows)} rows | skipped_flat={skipped_flat}")
 
-    # ---- write COEFFS CSV ----
+    # write COEFFS CSV
     df = pd.DataFrame(rows)
     ordered_cols = [
         "triangle_id","component_id","component_size",
@@ -890,12 +890,12 @@ def compute_rimsafe_alltri(
     else:
         print("[ok] Non-planar ABC rows written.")
 
-    # ---- write triangle TYPE CSV (now with plane_rel_tol) ----
+    # write triangle TYPE CSV (now with plane_rel_tol)
     out_tri_type_csv = base + "_Tri_TYPE.csv"
     pd.DataFrame(tri_type_rows, columns=["triangle_id","type","max_d","thr","plane_rel_tol"]).to_csv(out_tri_type_csv, index=False)
     print(f"[write] tri types -> {out_tri_type_csv}  (triangles={len(tris)})")
 
-    # ---- write RINGS CSV (with ID_used_coeffs) ----
+    # write RINGS CSV (with ID_used_coeffs)
     df_rings = _ring1_ring2_for_csv(points, tris, comp_id, adj_comp)
     df_rings["ID_used_coeffs"] = df_rings["triangle_id"].map(lambda t: tri_to_used_ids.get(int(t), ""))
     out_rings_csv = base + "_RINGS.csv"
@@ -904,7 +904,7 @@ def compute_rimsafe_alltri(
 
     return df, len(tris), skipped_flat
 
-# ================================== CLI =====================================
+# CLI
 
 def main():
     ap = argparse.ArgumentParser(description="Quadric fitting with plane-only vertex classifier (topo k-ring) + ring diagnostics.")

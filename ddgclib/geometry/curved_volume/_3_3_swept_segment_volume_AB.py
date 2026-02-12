@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 
 import math
 import numpy as np
 
-# ================== small helpers ==================
+# small helpers
 def normalize(v):
     v = np.asarray(v, float)
     n = np.linalg.norm(v)
@@ -93,7 +93,7 @@ def _polygon_area_centroid(poly_xy):
     Cy = (1.0/(6.0*A_signed)) * np.sum((y + y1) * cross)
     return abs(A_signed), Cx, Cy
 
-# ================== core function (z-only API) ==================
+# core function (z-only API)
 def swept_segment_volume_AB(coeffs_1h, z_A, z_B, N=4096):
     """
     1H (1×) INPUT:
@@ -107,7 +107,7 @@ def swept_segment_volume_AB(coeffs_1h, z_A, z_B, N=4096):
     if not ok:
         return 0.0, "no-axis"
 
-    # --- 1H parse to matrix form x^T A x + 2 b·x + J ---
+    # 1H parse to matrix form x^T A x + 2 b·x + J
     A,B,C,D,E,F,G,H,I,J = map(float, coeffs_1h)
     A3 = np.array([[A,   D/2, E/2],
                    [D/2, B,   F/2],
@@ -230,7 +230,7 @@ def swept_segment_volume_A1B(coeffs, z_A, z_B, N=4096):
     return V, "meridian"
 
 if __name__ == "__main__":
-    # ===== Hyperboloid check (symmetric) =====
+    # Hyperboloid check (symmetric)
     # x^2 + y^2 - z^2/c^2 = 1  (J = -1)
     c = 1.0
     COEFFS = (1.0, 1.0, -1.0/(c**2), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0)
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     print(f"Exact V:     {V_exact:.12f}  (= 4π/3 * h^3 / c^2)")
     print(f"Abs error:   {abs(V_num - V_exact):.3e}")
 
-    # ===== Second hyperboloid params =====
+    # Second hyperboloid params
     h2, c2 = 1.75, 1.5
     COEFFS2 = (1.0, 1.0, -1.0/(c2**2), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0)
     z_A2, z_B2 = +h2, -h2
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     print(f"Exact V:     {V_exact2:.12f}")
     print(f"Abs error:   {abs(V_num2 - V_exact2):.3e}")
 
-    # ===== Paraboloid test (requested COEFFS) =====
+    # Paraboloid test (requested COEFFS)
     # x^2 + y^2 - z = 0  ->  (A,B,C,D,E,F,G,H,I,J) = (1,1,0,0,0,0,0,0,-0.5,0)
     COEFFS_P = (1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.5, 0.0)
 

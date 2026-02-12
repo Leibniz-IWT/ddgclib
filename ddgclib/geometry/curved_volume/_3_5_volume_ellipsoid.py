@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 
 import os, sys, math, time
 import numpy as np
 import pandas as pd
 
-# ---------------- configuration ----------------
+# configuration
 DEBUG_PER_ROW = True     # set False to silence per-row debug prints
 WRITE_DEBUG_COLS = True  # set False to keep only the core output columns
 
@@ -14,7 +14,7 @@ WRITE_DEBUG_COLS = True  # set False to keep only the core output columns
 # Example: axes_override = (1.5, 1.0, 0.8)
 axes_override = None
 
-# -------------- import your splitter -----------
+# import your splitter
 for p in (os.getcwd(), "/mnt/data"):
     if p not in sys.path:
         sys.path.append(p)
@@ -30,12 +30,12 @@ from _3_4_shared_axisymmetric_utils import (
     OBSERVER_OUTSIDE,
 )
 
-# ----------------- tolerances ------------------
+# tolerances
 OMEGA_TOL = 1e-14
 PATCH_TOL = 1e-15
 DEN_TOL   = 1e-18
 
-# ----------------- helpers ---------------------
+# helpers
 def _unit(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v if n == 0.0 else (v / n)
@@ -115,7 +115,7 @@ def _triangle_corner_angles(u: np.ndarray, v: np.ndarray, w: np.ndarray) -> tupl
     C = ang(w, u, v)
     return A, B, C
 
-# ----------------- main processing ---------------------
+# main processing
 def process_coeffs_transformed_csv(input_csv: str):
     df = pd.read_csv(input_csv)
 
@@ -139,7 +139,7 @@ def process_coeffs_transformed_csv(input_csv: str):
         jacobian_scales = np.array(axes_override, float) if axes_override is not None else s_csv
         scaling_factor = float(np.prod(jacobian_scales))
 
-        # ====== use raw A,B,C directly ======
+        # use raw A,B,C directly
         a = A.copy()
         b = B.copy()
         c = C.copy()
@@ -165,7 +165,6 @@ def process_coeffs_transformed_csv(input_csv: str):
         # ellipsoid-space correction (scaled by det)
         Vcorrection = Vcorrection_scal * scaling_factor
 
-        # ---------------------------------------------------
         # NEW: compute principal curvatures PER VERTEX
         A_k1, A_k2 = principal_curvatures_at(A, coeffs=coeffs, project=True, observer_outside=OBSERVER_OUTSIDE)
         B_k1, B_k2 = principal_curvatures_at(B, coeffs=coeffs, project=True, observer_outside=OBSERVER_OUTSIDE)
@@ -180,9 +179,8 @@ def process_coeffs_transformed_csv(input_csv: str):
         else:
             # fallback to geometric orientation (keep your old behavior)
             side = _side_from_orientation_unitdirs(au, bu, cu)
-        # ---------------------------------------------------
 
-        # ====== feed raw A,B,C to splitter ======
+        # feed raw A,B,C to splitter
         A_can = A
         B_can = B
         C_can = C
@@ -196,7 +194,7 @@ def process_coeffs_transformed_csv(input_csv: str):
         V_patch_B = V_patch_B_scal * scaling_factor
         V_patch_C = V_patch_C_scal * scaling_factor
 
-        # -------------------- Curved/flat area + per-vertex area split --------------------
+        # Curved/flat area + per-vertex area split
         def _sph_dir(p_u, q_u, r_u, wa, wb, wc):
             s = wa*p_u + wb*q_u + wc*r_u
             n = np.linalg.norm(s)
@@ -265,7 +263,6 @@ def process_coeffs_transformed_csv(input_csv: str):
             A_patch_A = A_curved * wA
             A_patch_B = A_curved * wB
             A_patch_C = A_curved - A_patch_A - A_patch_B
-        # ---------------------------------------------------------------------------------------
 
         if (Omega < OMEGA_TOL) or (abs(Vcorrection) <= PATCH_TOL):
             planar_skipped += 1
@@ -304,13 +301,13 @@ def process_coeffs_transformed_csv(input_csv: str):
             "B_k1": B_k1, "B_k2": B_k2,
             "C_k1": C_k1, "C_k2": C_k2,
             "side": side,
-            # -------------------- area outputs --------------------
+            # area outputs
             "A_curved": A_curved,
             "A_flat": A_flat,
             "A_patch_A": A_patch_A,
             "A_patch_B": A_patch_B,
             "A_patch_C": A_patch_C,
-            # ----------- saved raw a,b,c (now identical to A,B,C) -----------
+            # saved raw a,b,c (now identical to A,B,C)
             "a_x": a_x, "a_y": a_y, "a_z": a_z,
             "b_x": b_x, "b_y": b_y, "b_z": b_z,
             "c_x": c_x, "c_y": c_y, "c_z": c_z,
@@ -347,7 +344,7 @@ def process_coeffs_transformed_csv(input_csv: str):
     V_sum = float(np.nansum(out_df["Vcorrection"].values)) if curved_count else 0.0
     return out_csv, curved_count, planar_skipped, V_sum
 
-# ----------------- CLI ---------------------
+# CLI
 if __name__ == "__main__":
     in_csv = sys.argv[1] if len(sys.argv) > 1 else "Ellip_0_sub0_full_COEFFS_Transformed.csv"
     t0 = time.time()

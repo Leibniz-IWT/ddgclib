@@ -16,9 +16,7 @@ def normalized(a, axis=-1, order=2):
     return a / np.expand_dims(l2, axis)
 
 
-################################
 # New code for volumes:
-################################
 def _signed_volume_parallelepiped(u, v, w):
     u, v, w = map(np.array, (u, v, w))
     v_para = np.dot(u, v) * u
@@ -31,9 +29,6 @@ def _volume_parallelepiped(u, v, w):
     vol = np.abs(_signed_volume_parallelepiped(u, v, w))
     print(f"Volume of Parallelepiped={vol}")
     return vol
-
-
-################################
 
 
 # Circumcenter computation (replaces barycentric mean)

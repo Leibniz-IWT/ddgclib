@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# coding: utf-8
 """
 Vcut(z1, z2, coeffs_2x)
 - coeffs_2x can be a 10-tuple OR a string like:
@@ -18,7 +18,7 @@ import re
 from math import sqrt, pi
 import numpy as np
 
-# ----------------------- parsing helpers -----------------------
+# parsing helpers
 
 def parse_coeffs_2x(obj):
     """
@@ -47,7 +47,7 @@ def parse_coeffs_2x(obj):
 
     raise TypeError("coeffs_2x must be a 10-tuple/list or a string like 'COEFFS 2x form (...)'.")
 
-# ----------------------- core volume -----------------------
+# core volume
 
 def Vcut(z1: float, z2: float, coeffs_2x, clip: bool = True) -> float:
     """
@@ -136,7 +136,7 @@ def Vcut(z1: float, z2: float, coeffs_2x, clip: bool = True) -> float:
         V += anti_S(R) - anti_S(L)
     return factor * V
 
-# ----------------------- quick validations -----------------------
+# quick validations
 
 def rel_err(val, ref):
     denom = max(1e-30, abs(ref))
