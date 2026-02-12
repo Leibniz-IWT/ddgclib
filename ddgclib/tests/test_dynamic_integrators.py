@@ -7,9 +7,7 @@ import pytest
 from hyperct import Complex
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mesh_1d():
@@ -61,9 +59,7 @@ def constant_accel(v, dim=1, **kwargs):
     return a
 
 
-# ---------------------------------------------------------------------------
 # Backward compatibility: integrators still work without bc_set
-# ---------------------------------------------------------------------------
 
 class TestBackwardCompatibility:
     def test_euler_no_bc_set(self, mesh_1d):
@@ -94,9 +90,7 @@ class TestBackwardCompatibility:
         assert log == [0, 1, 2]
 
 
-# ---------------------------------------------------------------------------
 # BC set integration
-# ---------------------------------------------------------------------------
 
 class TestBCSetIntegration:
     def test_bc_set_called_each_step(self, mesh_1d):
@@ -149,9 +143,7 @@ class TestBCSetIntegration:
         assert abs(t - 0.03) < 1e-12
 
 
-# ---------------------------------------------------------------------------
 # New callback signature
-# ---------------------------------------------------------------------------
 
 class TestNewCallback:
     def test_new_5arg_callback(self, mesh_1d):
@@ -182,9 +174,7 @@ class TestNewCallback:
         assert records[2]['step'] == 2
 
 
-# ---------------------------------------------------------------------------
 # Velocity advancement tests
-# ---------------------------------------------------------------------------
 
 class TestVelocityAdvancement:
     def test_euler_velocity_only_constant_accel(self, mesh_1d):
@@ -225,9 +215,7 @@ class TestVelocityAdvancement:
         assert True
 
 
-# ---------------------------------------------------------------------------
 # Adaptive Euler tests
-# ---------------------------------------------------------------------------
 
 class TestEulerAdaptive:
     def test_reaches_t_end(self, mesh_1d):
@@ -274,9 +262,7 @@ class TestEulerAdaptive:
             assert v.u[0] == 0.0
 
 
-# ---------------------------------------------------------------------------
 # RK45 tests
-# ---------------------------------------------------------------------------
 
 class TestRK45:
     def test_rk45_basic(self, mesh_1d):
@@ -295,9 +281,7 @@ class TestRK45:
         npt.assert_allclose(t, 0.02, atol=1e-12)
 
 
-# ---------------------------------------------------------------------------
 # DynamicSimulation runner tests
-# ---------------------------------------------------------------------------
 
 class TestSimulationParams:
     def test_defaults(self):
@@ -404,9 +388,7 @@ class TestDynamicSimulation:
         npt.assert_allclose(t, 0.05, atol=1e-12)
 
 
-# ---------------------------------------------------------------------------
 # Module-level imports
-# ---------------------------------------------------------------------------
 
 class TestImports:
     def test_all_exports(self):

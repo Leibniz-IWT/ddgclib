@@ -11,9 +11,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mesh_1d():
@@ -58,9 +56,7 @@ def close_figs():
     plt.close('all')
 
 
-# ---------------------------------------------------------------------------
 # 1D plot tests
-# ---------------------------------------------------------------------------
 
 class TestPlot1D:
     def test_scalar_field_1d(self, mesh_1d):
@@ -90,9 +86,7 @@ class TestPlot1D:
         assert ax is ax0
 
 
-# ---------------------------------------------------------------------------
 # 2D plot tests
-# ---------------------------------------------------------------------------
 
 class TestPlot2D:
     def test_scalar_field_2d(self, mesh_2d):
@@ -120,9 +114,7 @@ class TestPlot2D:
         assert fig is not None
 
 
-# ---------------------------------------------------------------------------
 # 3D plot tests
-# ---------------------------------------------------------------------------
 
 class TestPlot3D:
     def test_scalar_field_3d(self, mesh_3d):
@@ -151,9 +143,7 @@ class TestPlot3D:
             assert xs == sorted(xs)
 
 
-# ---------------------------------------------------------------------------
 # Polyscope tests (skipped if not installed)
-# ---------------------------------------------------------------------------
 
 class TestPolyscope:
     def test_import_guard(self):
@@ -167,9 +157,7 @@ class TestPolyscope:
                 register_point_cloud(None)
 
 
-# ---------------------------------------------------------------------------
 # Animation tests
-# ---------------------------------------------------------------------------
 
 class TestAnimation:
     def test_animate_scalar_1d(self, mesh_1d):
@@ -201,13 +189,9 @@ class TestAnimation:
         assert anim is not None
 
 
-# ---------------------------------------------------------------------------
 # Imports
-# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
 # Unified wrapper tests
-# ---------------------------------------------------------------------------
 
 class TestPlotPrimal:
     """Tests for plot_primal() dimension-dispatching wrapper."""
@@ -362,9 +346,7 @@ class TestPlotPrimalDispatch:
         assert mesh_3d.dim == 3
 
 
-# ---------------------------------------------------------------------------
 # plot_fluid tests
-# ---------------------------------------------------------------------------
 
 class TestPlotFluid:
     """Tests for plot_fluid() high-level wrapper."""
@@ -425,9 +407,7 @@ class TestPlotFluid:
         assert '0.0000 s' in fig._suptitle.get_text()
 
 
-# ---------------------------------------------------------------------------
 # dynamic_plot_fluid tests
-# ---------------------------------------------------------------------------
 
 class TestDynamicPlotFluid:
     """Tests for dynamic_plot_fluid() animation wrapper."""
@@ -500,9 +480,7 @@ class TestDynamicPlotFluid:
         assert anim is not None
 
 
-# ---------------------------------------------------------------------------
 # Imports
-# ---------------------------------------------------------------------------
 
 class TestImports:
     def test_all_exports(self):

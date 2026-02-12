@@ -20,9 +20,7 @@ from ddgclib.initial_conditions import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def complex_1d():
@@ -67,9 +65,7 @@ def complex_3d():
     return HC, bV
 
 
-# ---------------------------------------------------------------------------
 # Scalar field IC tests
-# ---------------------------------------------------------------------------
 
 class TestUniformPressure:
     def test_sets_scalar_pressure(self, complex_2d):
@@ -118,9 +114,7 @@ class TestLinearPressureGradient:
             npt.assert_allclose(v.P, expected, atol=1e-12)
 
 
-# ---------------------------------------------------------------------------
 # Vector field IC tests
-# ---------------------------------------------------------------------------
 
 class TestZeroVelocity:
     def test_all_zero(self, complex_3d):
@@ -206,9 +200,7 @@ class TestHagenPoiseuille3D:
         npt.assert_allclose(ic.analytical_velocity(np.array([0.0, 0.0, 5.0])), 2.0)
 
 
-# ---------------------------------------------------------------------------
 # Custom / generic IC tests
-# ---------------------------------------------------------------------------
 
 class TestCustomFieldIC:
     def test_custom_pressure(self, complex_2d):
@@ -250,9 +242,7 @@ class TestUniformMass:
         npt.assert_allclose(total_mass, rho * total_volume, rtol=1e-12)
 
 
-# ---------------------------------------------------------------------------
 # CompositeIC tests
-# ---------------------------------------------------------------------------
 
 class TestCompositeIC:
     def test_applies_all_in_order(self, complex_2d):

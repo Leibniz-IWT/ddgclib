@@ -7,9 +7,7 @@ import pytest
 from hyperct import Complex
 
 
-# ---------------------------------------------------------------------------
 # Registry tests
-# ---------------------------------------------------------------------------
 
 class TestMethodRegistry:
     def test_register_and_retrieve(self):
@@ -39,9 +37,7 @@ class TestMethodRegistry:
         assert "b" not in reg
 
 
-# ---------------------------------------------------------------------------
 # Backward compatibility: _method_wrappers still works
-# ---------------------------------------------------------------------------
 
 class TestMethodWrappersShim:
     def test_import_classes(self):
@@ -65,9 +61,7 @@ class TestMethodWrappersShim:
         assert volume is not None
 
 
-# ---------------------------------------------------------------------------
 # Operator imports from operators/__init__.py
-# ---------------------------------------------------------------------------
 
 class TestOperatorsImports:
     def test_all_exports(self):
@@ -84,9 +78,7 @@ class TestOperatorsImports:
         assert callable(acceleration)
 
 
-# ---------------------------------------------------------------------------
 # Gradient operator tests (requires mesh with computed duals)
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def simple_2d_mesh_with_duals():
@@ -169,9 +161,7 @@ class TestAcceleration:
                                     err_msg=f"Non-zero acceleration at {v.x}")
 
 
-# ---------------------------------------------------------------------------
 # DualArea_i test
-# ---------------------------------------------------------------------------
 
 class TestDualArea:
     def test_positive_area(self, simple_2d_mesh_with_duals):

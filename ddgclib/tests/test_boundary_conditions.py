@@ -18,9 +18,7 @@ from ddgclib._boundary_conditions import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mesh_2d():
@@ -39,9 +37,7 @@ def mesh_2d():
     return HC, bV
 
 
-# ---------------------------------------------------------------------------
 # Boundary identification tests
-# ---------------------------------------------------------------------------
 
 class TestIdentifyBoundaryVertices:
     def test_identifies_left_wall(self, mesh_2d):
@@ -74,9 +70,7 @@ class TestIdentifyCubeBoundaries:
             assert on_boundary
 
 
-# ---------------------------------------------------------------------------
 # Concrete BC tests
-# ---------------------------------------------------------------------------
 
 class TestNoSlipWallBC:
     def test_zeros_velocity(self, mesh_2d):
@@ -166,9 +160,7 @@ class TestOutletDeleteBC:
             assert v.x_a[0] < 8.0
 
 
-# ---------------------------------------------------------------------------
 # BoundaryConditionSet tests
-# ---------------------------------------------------------------------------
 
 class TestBoundaryConditionSet:
     def test_applies_all_in_order(self, mesh_2d):

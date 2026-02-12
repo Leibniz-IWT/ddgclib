@@ -15,9 +15,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def poiseuille_2d():
@@ -29,9 +27,7 @@ def poiseuille_2d():
     return HC, bV, ic, bc_set, params
 
 
-# ---------------------------------------------------------------------------
 # Analytical profile verification
-# ---------------------------------------------------------------------------
 
 class TestAnalyticalProfile:
     def test_velocity_profile(self, poiseuille_2d):
@@ -78,9 +74,7 @@ class TestAnalyticalProfile:
         npt.assert_allclose(center_v.u[0], U_max, atol=0.01)
 
 
-# ---------------------------------------------------------------------------
 # Developing flow test
-# ---------------------------------------------------------------------------
 
 class TestDevelopingFlow:
     def test_plug_flow_develops(self, poiseuille_2d):
@@ -118,9 +112,7 @@ class TestDevelopingFlow:
                 npt.assert_array_equal(v.u, np.zeros(2))
 
 
-# ---------------------------------------------------------------------------
 # Setup function tests
-# ---------------------------------------------------------------------------
 
 class TestSetupFunction:
     def test_setup_creates_mesh(self):

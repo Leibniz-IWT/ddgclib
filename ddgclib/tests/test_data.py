@@ -10,9 +10,7 @@ import pytest
 from hyperct import Complex
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mesh_1d():
@@ -37,9 +35,7 @@ def state_path(tmp_path):
     return str(tmp_path / 'test_state.json')
 
 
-# ---------------------------------------------------------------------------
 # Save/Load tests
-# ---------------------------------------------------------------------------
 
 class TestSaveLoad:
     def test_save_creates_file(self, mesh_1d, state_path):
@@ -135,9 +131,7 @@ class TestSaveLoad:
         assert os.path.exists(deep_path)
 
 
-# ---------------------------------------------------------------------------
 # StateHistory tests
-# ---------------------------------------------------------------------------
 
 class TestStateHistory:
     def test_callback_records(self, mesh_1d):
@@ -281,9 +275,7 @@ class TestStateHistory:
         npt.assert_allclose(values[0], [1.0])  # Should be original, not 99
 
 
-# ---------------------------------------------------------------------------
 # Imports
-# ---------------------------------------------------------------------------
 
 class TestImports:
     def test_all_exports(self):

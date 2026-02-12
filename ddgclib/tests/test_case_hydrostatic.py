@@ -15,9 +15,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def hydrostatic_1d():
@@ -35,9 +33,7 @@ def hydrostatic_2d():
     return HC, bV, ic, bc_set, params
 
 
-# ---------------------------------------------------------------------------
 # Static equilibrium tests
-# ---------------------------------------------------------------------------
 
 class TestHydrostaticEquilibrium1D:
     def test_pressure_profile(self, hydrostatic_1d):
@@ -96,9 +92,7 @@ class TestHydrostaticEquilibrium2D:
             npt.assert_array_equal(v.u, np.zeros(2))
 
 
-# ---------------------------------------------------------------------------
 # Perturbation recovery tests
-# ---------------------------------------------------------------------------
 
 class TestPerturbationRecovery1D:
     def test_perturbed_state_converges(self, hydrostatic_1d):
@@ -137,9 +131,7 @@ class TestPerturbationRecovery1D:
         assert ke_final < ke_initial
 
 
-# ---------------------------------------------------------------------------
 # Setup function tests
-# ---------------------------------------------------------------------------
 
 class TestSetupFunction:
     def test_setup_1d(self):

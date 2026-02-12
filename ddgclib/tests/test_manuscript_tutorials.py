@@ -30,9 +30,7 @@ from ddgclib._curvatures import (
 from ddgclib._capillary_rise import cap_rise_init_N, out_plot_cap_rise
 
 
-# ---------------------------------------------------------------------------
 # Physical constants used throughout manuscript / tutorials
-# ---------------------------------------------------------------------------
 GAMMA = 0.0728      # N/m, surface tension of water at 20 deg C
 RHO = 1000.0        # kg/m3, density of water
 G_ACC = 9.81        # m/s2, gravitational acceleration
@@ -86,9 +84,7 @@ def _build_capillary_rise_complex(r, theta_p, gamma, N=7, refinement=0):
     return F, nn, HC, bV, K_f, H_f
 
 
-# ===================================================================
 # 1. Core utility function tests
-# ===================================================================
 class TestNormalized(unittest.TestCase):
     """Tests for the normalized() utility (ddgclib._curvatures)."""
 
@@ -159,9 +155,7 @@ class TestConstructHC(unittest.TestCase):
         self.assertIsInstance(HC, Complex)
 
 
-# ===================================================================
 # 2. Capillary rise tests (Case Study 1, fig11, figS6)
-# ===================================================================
 class TestCapillaryRiseInit(unittest.TestCase):
     """Tests for capillary rise mesh construction.
 
@@ -320,9 +314,7 @@ class TestCapillaryRiseOverTheta(unittest.TestCase):
                                     msg="K_f should decrease with theta")
 
 
-# ===================================================================
 # 3. Catenoid / minimal surface tests (Case Study 2, fig16)
-# ===================================================================
 class TestCatenoidConstruction(unittest.TestCase):
     """Tests for catenoid_N — catenoid mesh construction.
 
@@ -441,9 +433,7 @@ class TestCatenoidCurvatureIntegration(unittest.TestCase):
                                 f"expected near zero")
 
 
-# ===================================================================
 # 4. Sphere curvature tests (Case Study 4)
-# ===================================================================
 class TestSphereAnalytical(unittest.TestCase):
     """Analytical formulae for the sphere used throughout the manuscript."""
 
@@ -587,9 +577,7 @@ class TestSphereCurvatureComputation(unittest.TestCase):
                                msg="Total solid angle should be positive")
 
 
-# ===================================================================
 # 5. Vectorise and local curvature tests
-# ===================================================================
 class TestVectoriseVnn(unittest.TestCase):
     """Tests for vectorise_vnn — vertex to F/nn array conversion."""
 
@@ -698,9 +686,7 @@ class TestLocalCurvatureDicts(unittest.TestCase):
         self.assertGreaterEqual(theta, 0.0)
 
 
-# ===================================================================
 # 6. Complex class basic tests (from Case Study 3 patterns)
-# ===================================================================
 class TestComplexConstruction(unittest.TestCase):
     """Test Complex class construction patterns used in sessile droplet.
 
@@ -793,9 +779,7 @@ class TestCylinderToDropletPattern(unittest.TestCase):
                                  msg=f"Vertex {v.x} outside cylinder r={r}")
 
 
-# ===================================================================
 # 7. Droplet error data validation (fig19_droplet_data.py)
-# ===================================================================
 class TestDropletErrorData(unittest.TestCase):
     """Validate the known-good error data from manuscript fig19.
 
@@ -823,9 +807,7 @@ class TestDropletErrorData(unittest.TestCase):
                                msg="SE error should decrease with N")
 
 
-# ===================================================================
 # 8. Convergence / refinement study tests (fig11, fig16)
-# ===================================================================
 class TestCapillaryRiseConvergence(unittest.TestCase):
     """Test that Young-Laplace error decreases with mesh refinement.
 
@@ -858,9 +840,7 @@ class TestCapillaryRiseConvergence(unittest.TestCase):
                             msg=f"Error should improve with N: {errors}")
 
 
-# ===================================================================
 # 9. Geometry helpers used across all case studies
-# ===================================================================
 class TestGeometryHelpers(unittest.TestCase):
     """Test geometric relationships used throughout the manuscript."""
 
