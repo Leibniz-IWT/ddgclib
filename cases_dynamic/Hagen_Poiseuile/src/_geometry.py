@@ -4,7 +4,7 @@ import math
 
 from hyperct import Complex
 from ddgclib._misc import _set_boundary
-from ddgclib.barycentric._duals import compute_vd
+from hyperct.ddg import compute_vd
 
 
 

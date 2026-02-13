@@ -27,7 +27,7 @@ def set_equilibrium_IC_2d(HC, G=1.0, mu=1.0, h=1.0, y_lb=0.0, y_ub=1.0, u_in=Non
             ux = u_in  # constant plug for testing
         v.u = np.array([ux, 0.0])
         P_i = P_gradient_analytical(v.x_a, G=G, axis=0)
-        v.P = np.array([P_i, P_i])  # diagonal per your convention
+        v.p = np.array([P_i, P_i])  # diagonal per your convention
     return HC
 
 def set_equilibrium_IC_3d(HC, U_max=1.0, R=1.0, G=1.0, axis=2):
@@ -36,7 +36,7 @@ def set_equilibrium_IC_3d(HC, U_max=1.0, R=1.0, G=1.0, axis=2):
         uz = poiseuille_analytical_3d(v.x_a, U_max=U_max, R=R)
         v.u = np.array([0.0, 0.0, uz])
         P_i = P_gradient_analytical(v.x_a, G=G, axis=axis)
-        v.P = np.array([P_i, P_i, P_i])  # extend to 3 components if needed; adjust du/dP accordingly
+        v.p = np.array([P_i, P_i, P_i])  # extend to 3 components if needed; adjust du/dP accordingly
     return HC
 
 def test_analytical_equilibrium_2d(HC, tol=1e-10, G=1.0, mu=1.0, h=1.0):

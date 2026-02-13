@@ -1,6 +1,6 @@
 # src/_boundary_conditions.py
 import numpy as np
-from ddgclib.barycentric._duals import compute_vd#, triang_dual
+from hyperct.ddg import compute_vd
 from ._mass import set_mass_3d
 
 
