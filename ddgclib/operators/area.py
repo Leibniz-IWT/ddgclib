@@ -100,15 +100,15 @@ class Area:
 
 
 class DualArea_i:
-    """Compute dual area directly from barycentric duals.
+    """Compute dual area directly from DDG duals.
 
-    Wraps d_area from ddgclib.barycentric._duals. Requires that
+    Wraps d_area from hyperct.ddg. Requires that
     compute_vd(HC) has been called first to populate v.vd sets.
 
     Usage
     -----
-        from ddgclib.barycentric._duals import compute_vd
-        compute_vd(HC, cdist=1e-10)
+        from hyperct.ddg import compute_vd
+        compute_vd(HC, method="barycentric")
 
         dual_area = DualArea_i()
         a = dual_area(v)  # area of dual cell around vertex v
@@ -127,5 +127,5 @@ class DualArea_i:
         float
             Dual cell area.
         """
-        from ddgclib.barycentric._duals import d_area
+        from hyperct.ddg import d_area
         return d_area(v)

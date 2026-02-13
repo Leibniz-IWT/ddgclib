@@ -1,3 +1,19 @@
+"""
+Deprecated: use ddgclib.visualization.unified instead.
+
+This module is a legacy compatibility shim. All plotting functions have been
+moved to ddgclib.visualization.unified, which delegates mesh rendering to
+hyperct._plotting.plot_complex.
+"""
+import warnings
+
+warnings.warn(
+    "ddgclib._plotting is deprecated. "
+    "Use ddgclib.visualization.unified instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import collections
 
 import numpy as np
@@ -10,7 +26,7 @@ from matplotlib.widgets import Slider
 import polyscope as ps
 from ddgclib._misc import *  # coldict is neeeded
 from ddgclib._misc import coldict
-from ddgclib.barycentric._duals import du
+from ddgclib.operators.gradient import velocity_laplacian as du
 
 plt.rcdefaults()
 plt.rcParams.update({"text.usetex": True,'font.size' : 14,})

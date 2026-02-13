@@ -495,11 +495,15 @@ class TestImports:
             plot_primal,
             plot_dual,
             plot_fluid,
+            plot_fluid_ps,
             dynamic_plot_fluid,
+            dynamic_plot_fluid_polyscope,
         )
         assert callable(plot_scalar_field_1d)
         assert callable(extract_slice_profile)
         assert callable(plot_primal)
         assert callable(plot_dual)
         assert callable(plot_fluid)
+        assert callable(plot_fluid_ps)
         assert callable(dynamic_plot_fluid)
+        assert callable(dynamic_plot_fluid_polyscope)

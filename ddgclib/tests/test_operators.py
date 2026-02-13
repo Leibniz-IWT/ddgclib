@@ -83,7 +83,7 @@ class TestOperatorsImports:
 @pytest.fixture
 def simple_2d_mesh_with_duals():
     """2D mesh on [0,1]^2 with barycentric duals computed."""
-    from ddgclib.barycentric._duals import compute_vd
+    from hyperct.ddg import compute_vd
 
     HC = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
     HC.triangulate()

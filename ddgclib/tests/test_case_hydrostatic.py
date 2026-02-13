@@ -56,7 +56,7 @@ class TestHydrostaticEquilibrium1D:
         NOTE: This test requires barycentric duals to be computed. We use the
         clean gradient operator which depends on e_star from _duals.py.
         """
-        from ddgclib.barycentric._duals import compute_vd
+        from hyperct.ddg import compute_vd
         from ddgclib.operators.gradient import pressure_gradient
 
         HC, bV, _, _, p = hydrostatic_1d

@@ -1,17 +1,16 @@
 """
 Discrete gradient and Laplacian operators for continuum simulations.
 
-Clean reimplementation of the operators from ddgclib.barycentric._duals
-(dP, du, dudt) with the following improvements:
+Clean reimplementation of the pressure gradient, velocity Laplacian and
+acceleration operators with the following improvements over legacy code:
 
 - No debug print() statements
 - Passes HC explicitly to e_star (fixes 3D bug)
 - Expects scalar v.P (not vector)
 - Consistent dim handling
 
-These functions call e_star from _duals.py directly as the computational
-backend. The original dP/du/dudt in _duals.py are left unchanged for
-backward compatibility with mean flow code.
+These functions call e_star from hyperct.ddg as the computational
+backend.
 
 Usage
 -----
@@ -53,7 +52,7 @@ def pressure_gradient(v, dim: int = 3, HC=None) -> np.ndarray:
     np.ndarray
         Integrated pressure gradient vector (length dim).
     """
-    from ddgclib.barycentric._duals import e_star as _e_star
+    from hyperct.ddg import e_star as _e_star
 
     dP_i = np.zeros(dim)
     P_i = float(v.P) if np.ndim(v.P) == 0 else float(v.P[0])
@@ -98,7 +97,7 @@ def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
     np.ndarray
         Integrated velocity Laplacian vector (length dim).
     """
-    from ddgclib.barycentric._duals import e_star as _e_star
+    from hyperct.ddg import e_star as _e_star
 
     du_i = np.zeros(dim)
 

@@ -27,7 +27,9 @@ from ddgclib.visualization.unified import (
     plot_primal,
     plot_dual,
     plot_fluid,
+    plot_fluid_ps,
     dynamic_plot_fluid,
+    dynamic_plot_fluid_polyscope,
 )
 
 __all__ = [
@@ -41,5 +43,7 @@ __all__ = [
     'plot_primal',
     'plot_dual',
     'plot_fluid',
+    'plot_fluid_ps',
     'dynamic_plot_fluid',
+    'dynamic_plot_fluid_polyscope',
 ]
