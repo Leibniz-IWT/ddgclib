@@ -32,7 +32,7 @@ def mesh_2d():
                 abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - 1.0) < 1e-14):
             bV.add(v)
         v.u = np.array([1.0, 0.5])
-        v.P = 100.0
+        v.p = 100.0
         v.m = 1.0
     return HC, bV
 
@@ -113,14 +113,14 @@ class TestDirichletPressureBC:
         bc = DirichletPressureBC(value=200.0)
         bc.apply(HC, dt=0.01, target_vertices=bV)
         for v in bV:
-            assert v.P == 200.0
+            assert v.p == 200.0
 
     def test_callable_pressure(self, mesh_2d):
         HC, bV = mesh_2d
         bc = DirichletPressureBC(value=lambda v: v.x_a[0] * 100)
         bc.apply(HC, dt=0.01, target_vertices=bV)
         for v in bV:
-            npt.assert_allclose(v.P, v.x_a[0] * 100)
+            npt.assert_allclose(v.p, v.x_a[0] * 100)
 
 
 class TestNeumannBC:
@@ -129,9 +129,9 @@ class TestNeumannBC:
         HC, bV = mesh_2d
         # Set a known field pattern
         for v in HC.V:
-            v.P = v.x_a[0] * 10  # Linear in x
+            v.p = v.x_a[0] * 10  # Linear in x
 
-        bc = NeumannBC(field_name='P', flux_value=0.0)
+        bc = NeumannBC(field_name='p', flux_value=0.0)
         bc.apply(HC, dt=0.01, target_vertices=bV)
 
         # Boundary vertices should now have their nearest interior neighbor's P
@@ -140,7 +140,7 @@ class TestNeumannBC:
             if interior_nbs:
                 # Should be close to nearest interior neighbor value
                 nb = min(interior_nbs, key=lambda nb: np.linalg.norm(v.x_a - nb.x_a))
-                npt.assert_allclose(v.P, nb.P, atol=1e-10)
+                npt.assert_allclose(v.p, nb.p, atol=1e-10)
 
 
 class TestOutletDeleteBC:

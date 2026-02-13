@@ -5,7 +5,7 @@ import numpy as np
 
 def plot_scalar_field_1d(
     HC,
-    field: str = 'P',
+    field: str = 'p',
     ax=None,
     label: str = None,
     analytical_fn=None,
@@ -22,7 +22,7 @@ def plot_scalar_field_1d(
     HC : Complex
         Simplicial complex (1D).
     field : str
-        Vertex attribute name to plot (default 'P').
+        Vertex attribute name to plot (default 'p').
     ax : matplotlib Axes or None
         If None, a new figure is created.
     label : str or None

@@ -5,7 +5,7 @@ import numpy as np
 
 def plot_scalar_field_3d(
     HC,
-    field: str = 'P',
+    field: str = 'p',
     ax=None,
     cmap: str = 'viridis',
     s: float = 15,
@@ -21,7 +21,7 @@ def plot_scalar_field_3d(
     HC : Complex
         Simplicial complex (3D).
     field : str
-        Vertex attribute to color by (default 'P').
+        Vertex attribute to color by (default 'p').
     ax : mpl_toolkits.mplot3d.Axes3D or None
         If None, a new 3D figure is created.
     cmap : str

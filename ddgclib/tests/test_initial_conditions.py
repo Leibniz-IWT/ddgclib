@@ -73,14 +73,14 @@ class TestUniformPressure:
         ic = UniformPressure(P0=101325.0)
         ic.apply(HC, bV)
         for v in HC.V:
-            assert v.P == 101325.0
+            assert v.p == 101325.0
 
     def test_zero_default(self, complex_1d):
         HC, bV = complex_1d
         ic = UniformPressure()
         ic.apply(HC, bV)
         for v in HC.V:
-            assert v.P == 0.0
+            assert v.p == 0.0
 
 
 class TestHydrostaticPressure:
@@ -91,7 +91,7 @@ class TestHydrostaticPressure:
         ic.apply(HC, bV)
         for v in HC.V:
             expected = rho * g * (h_ref - v.x_a[0])
-            npt.assert_allclose(v.P, expected, atol=1e-12)
+            npt.assert_allclose(v.p, expected, atol=1e-12)
 
     def test_pressure_at_reference_height(self, complex_2d):
         HC, bV = complex_2d
@@ -100,7 +100,7 @@ class TestHydrostaticPressure:
         # At y=0.5 (h_ref), P should equal P_ref
         for v in HC.V:
             if abs(v.x_a[1] - 0.5) < 1e-14:
-                npt.assert_allclose(v.P, 100.0, atol=1e-12)
+                npt.assert_allclose(v.p, 100.0, atol=1e-12)
 
 
 class TestLinearPressureGradient:
@@ -111,7 +111,7 @@ class TestLinearPressureGradient:
         ic.apply(HC, bV)
         for v in HC.V:
             expected = 100.0 - G * v.x_a[0]
-            npt.assert_allclose(v.P, expected, atol=1e-12)
+            npt.assert_allclose(v.p, expected, atol=1e-12)
 
 
 # Vector field IC tests
@@ -205,11 +205,11 @@ class TestHagenPoiseuille3D:
 class TestCustomFieldIC:
     def test_custom_pressure(self, complex_2d):
         HC, bV = complex_2d
-        ic = CustomFieldIC(fn=lambda x: x[0] ** 2 + x[1] ** 2, field_name='P')
+        ic = CustomFieldIC(fn=lambda x: x[0] ** 2 + x[1] ** 2, field_name='p')
         ic.apply(HC, bV)
         for v in HC.V:
             expected = v.x_a[0] ** 2 + v.x_a[1] ** 2
-            npt.assert_allclose(v.P, expected, atol=1e-12)
+            npt.assert_allclose(v.p, expected, atol=1e-12)
 
     def test_custom_velocity(self, complex_2d):
         HC, bV = complex_2d
@@ -255,7 +255,7 @@ class TestCompositeIC:
         ic.apply(HC, bV)
         for v in HC.V:
             npt.assert_array_equal(v.u, np.zeros(2))
-            assert v.P == 100.0
+            assert v.p == 100.0
             assert hasattr(v, 'm')
 
     def test_later_ics_can_overwrite(self, complex_1d):
@@ -267,4 +267,4 @@ class TestCompositeIC:
         )
         ic.apply(HC, bV)
         for v in HC.V:
-            assert v.P == 200.0
+            assert v.p == 200.0

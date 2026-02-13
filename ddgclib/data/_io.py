@@ -1,6 +1,6 @@
 """Save and load simulation state to/from JSON files.
 
-The format stores vertex coordinates, connectivity, field values (u, P, m),
+The format stores vertex coordinates, connectivity, field values (u, p, m),
 boundary membership, and simulation time. It is designed to be human-readable
 and compatible with hyperct's ``Complex`` reconstruction.
 
@@ -8,7 +8,7 @@ Usage
 -----
     from ddgclib.data import save_state, load_state
 
-    save_state(HC, bV, t=0.5, fields=['u', 'P', 'm'], path='state.json')
+    save_state(HC, bV, t=0.5, fields=['u', 'p', 'm'], path='state.json')
     HC2, bV2, meta = load_state('state.json')
 """
 
@@ -30,7 +30,7 @@ def save_state(
     HC,
     bV: set,
     t: float = 0.0,
-    fields: Sequence[str] = ('u', 'P', 'm'),
+    fields: Sequence[str] = ('u', 'p', 'm'),
     path: str = 'state.json',
     extra_meta: Optional[dict] = None,
 ) -> str:

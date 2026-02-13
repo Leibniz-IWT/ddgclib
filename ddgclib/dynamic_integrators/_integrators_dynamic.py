@@ -16,25 +16,131 @@ Position is updated via HC.V.move(v, tuple(x_new)) which maintains the cache.
 
 Usage
 -----
-    from ddgclib.operators.gradient import acceleration
-    from ddgclib.dynamic_integrators._integrators_dynamic import euler
+    from ddgclib.operators.stress import dudt_i
+    from ddgclib.dynamic_integrators import euler_velocity_only
 
-    t = euler(HC, bV, acceleration, dt=1e-4, n_steps=100, dim=3, mu=8.9e-4)
+    # dudt_i is the Cauchy stress acceleration: a_i = F_stress_i / m_i
+    # Pass dim, mu, HC as keyword args (forwarded by integrator):
+    t = euler_velocity_only(HC, bV, dudt_i, dt=1e-4, n_steps=100,
+                            dim=2, mu=0.1, HC=HC)
+
+    # Or bind parameters with functools.partial:
+    from functools import partial
+    dudt_fn = partial(dudt_i, dim=3, mu=8.9e-4, HC=HC)
+    t = euler_velocity_only(HC, bV, dudt_fn, dt=1e-4, n_steps=100)
 
     # With boundary conditions:
     from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
     bc_set = BoundaryConditionSet().add(NoSlipWallBC(dim=3), bV_wall)
-    t = euler(HC, bV, acceleration, dt=1e-4, n_steps=100, dim=3,
-              bc_set=bc_set, mu=8.9e-4)
+    t = euler(HC, bV, dudt_i, dt=1e-4, n_steps=100, dim=3,
+              bc_set=bc_set, mu=8.9e-4, HC=HC)
 """
 
 import inspect
+import os
 
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.spatial import Delaunay
 
 
 # Helpers
+
+def _retopologize(HC, bV, dim):
+    """Retriangulate, recompute boundaries, and rebuild duals.
+
+    Called at the start of every integrator time step to ensure that:
+    1. Delaunay connectivity is correct after vertex movement
+    2. Newly injected (inlet) and removed (outlet) vertices are handled
+    3. All vertices have valid dual cells (``v.vd``) for stress operators
+
+    Steps:
+        1. Retriangulation — Delaunay for dim >= 2, sorted chain for dim == 1
+        2. Boundary recomputation via ``HC.boundary()`` — update *bV* in-place
+        3. Tag ``v.boundary`` on all vertices
+        4. Recompute barycentric dual mesh via ``compute_vd``
+    """
+    from hyperct.ddg import compute_vd
+
+    verts = list(HC.V)
+    if len(verts) < dim + 1:
+        return  # not enough vertices for a simplex
+
+    # 1. Disconnect ALL existing edges
+    for v in verts:
+        for nb in list(v.nn):
+            v.disconnect(nb)
+
+    # 2. Retriangulate
+    if dim == 1:
+        # 1D: sort by coordinate and connect as a chain
+        sorted_verts = sorted(verts, key=lambda v: v.x_a[0])
+        for i in range(len(sorted_verts) - 1):
+            sorted_verts[i].connect(sorted_verts[i + 1])
+    else:
+        # 2D/3D: Delaunay triangulation
+        coords = np.array([v.x_a[:dim] for v in verts])
+        tri = Delaunay(coords)
+        for simplex in tri.simplices:
+            for i in range(len(simplex)):
+                for j in range(i + 1, len(simplex)):
+                    verts[simplex[i]].connect(verts[simplex[j]])
+
+    # 3. Recompute boundary via HC.boundary()
+    dV = HC.boundary()
+    bV.clear()
+    bV.update(dV)
+
+    # 4. Tag v.boundary on all vertices
+    for v in HC.V:
+        v.boundary = v in bV
+
+    # 5. Recompute barycentric duals
+    compute_vd(HC, method="barycentric")
+
+
+def _recompute_duals(HC):
+    """Lightweight dual mesh recomputation after vertex position changes.
+
+    Only recomputes barycentric dual cells (``v.vd``) without
+    retriangulation or boundary detection.  Use this when vertex
+    positions have changed but topology (vertex count, connectivity)
+    has not.
+    """
+    from hyperct.ddg import compute_vd
+    compute_vd(HC, method="barycentric")
+
+
+def _maybe_save_state(save_every, save_dir, step, t, HC, bV,
+                      fields=('u', 'p', 'm')):
+    """Save simulation state to disk if save_every and save_dir are set.
+
+    Parameters
+    ----------
+    save_every : int or None
+        Save every N steps.  ``None`` disables saving.
+    save_dir : str or None
+        Directory for state files.  ``None`` disables saving.
+    step : int
+        Current step number.
+    t : float
+        Current simulation time.
+    HC : Complex
+        Simplicial complex.
+    bV : set
+        Boundary vertex set.
+    fields : sequence of str
+        Vertex attributes to save (default ``('u', 'p', 'm')``).
+    """
+    if save_every is None or save_dir is None:
+        return
+    if step % save_every != 0:
+        return
+    from ddgclib.data._io import save_state
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, f'state_{step:06d}_t{t:.6f}.json')
+    save_state(HC, bV, t=t, fields=list(fields), path=path)
+
 
 def _move(v, pos, HC, bV):
     """Move vertex, preserving boundary set membership."""
@@ -56,6 +162,42 @@ def _apply_bc_set(bc_set, HC, bV, dt):
     if bc_set is not None:
         return bc_set.apply_all(HC, bV, dt)
     return {}
+
+
+def _compute_accel(dudt_fn, verts, workers=None, **dudt_kwargs):
+    """Compute acceleration for all interior vertices.
+
+    When *workers* > 1, evaluations are distributed across threads
+    using :class:`concurrent.futures.ThreadPoolExecutor`.  This is
+    effective because the heavy computation (numpy C routines in
+    ``dual_area_vector``, ``d_area``, etc.) releases the GIL.
+
+    Parameters
+    ----------
+    dudt_fn : callable
+        ``dudt_fn(v, **kwargs) -> ndarray``.
+    verts : list
+        Interior vertices to evaluate.
+    workers : int or None
+        Thread count.  ``None`` or 1 means sequential (default).
+    **dudt_kwargs
+        Extra keyword arguments forwarded to *dudt_fn*.
+
+    Returns
+    -------
+    dict
+        ``{v: accel_array}`` for every vertex in *verts*.
+    """
+    if workers and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _eval(v):
+            return dudt_fn(v, **dudt_kwargs)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_eval, verts))
+        return dict(zip(verts, results))
+    return {v: dudt_fn(v, **dudt_kwargs) for v in verts}
 
 
 def _invoke_callback(callback, step, t, HC, bV=None, diagnostics=None):
@@ -109,7 +251,7 @@ def _sync_mesh(verts, x_flat, u_flat, dim, HC, bV):
 # Euler (explicit, forward)
 
 def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
-          **dudt_kwargs):
+          save_every=None, save_dir=None, workers=None, **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
     Update rule per step::
@@ -138,6 +280,10 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         ``callback(step, t, HC, bV, diagnostics)`` (new).
     bc_set : BoundaryConditionSet or None
         Applied after each step.
+    save_every : int or None
+        Save state to disk every N steps.  Requires *save_dir*.
+    save_dir : str or None
+        Directory for periodic state dumps (JSON via ``save_state``).
     **dudt_kwargs
         Forwarded to *dudt_fn* (e.g. ``dim=3, mu=8.9e-4``).
 
@@ -148,10 +294,10 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     """
     t = 0.0
     for step in range(n_steps):
+        _retopologize(HC, bV, dim)
         verts = _interior_verts(HC, bV)
 
-        # Evaluate acceleration at current state
-        accel = {v: dudt_fn(v, **dudt_kwargs) for v in verts}
+        accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
         # Update: position uses OLD velocity, then velocity is advanced
         updates = {}
@@ -167,6 +313,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         diagnostics = _apply_bc_set(bc_set, HC, bV, dt)
         t += dt
         _invoke_callback(callback, step, t, HC, bV, diagnostics)
+        _maybe_save_state(save_every, save_dir, step, t, HC, bV)
 
     return t
 
@@ -174,7 +321,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
 # Symplectic (semi-implicit) Euler
 
 def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
-                     bc_set=None, **dudt_kwargs):
+                     bc_set=None, save_every=None, save_dir=None,
+                     workers=None, **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
     Update rule per step::
@@ -191,6 +339,10 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     ----------
     HC, bV, dudt_fn, dt, n_steps, dim, callback, bc_set, **dudt_kwargs
         Same as :func:`euler`.
+    save_every : int or None
+        Save state to disk every N steps.  Requires *save_dir*.
+    save_dir : str or None
+        Directory for periodic state dumps (JSON via ``save_state``).
 
     Returns
     -------
@@ -199,10 +351,10 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     """
     t = 0.0
     for step in range(n_steps):
+        _retopologize(HC, bV, dim)
         verts = _interior_verts(HC, bV)
 
-        # Evaluate acceleration at current state
-        accel = {v: dudt_fn(v, **dudt_kwargs) for v in verts}
+        accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
         # Velocity first, then position with updated velocity
         updates = {}
@@ -218,6 +370,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         diagnostics = _apply_bc_set(bc_set, HC, bV, dt)
         t += dt
         _invoke_callback(callback, step, t, HC, bV, diagnostics)
+        _maybe_save_state(save_every, save_dir, step, t, HC, bV)
 
     return t
 
@@ -225,7 +378,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
 # RK45 via scipy.integrate.solve_ivp
 
 def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
-          rtol=1e-6, atol=1e-9, **dudt_kwargs):
+          rtol=1e-6, atol=1e-9, save_every=None, save_dir=None,
+          workers=None, **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
     The full coupled ODE system is solved::
@@ -258,6 +412,10 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         Applied after each macro step.
     rtol, atol : float
         Relative / absolute tolerances forwarded to *solve_ivp*.
+    save_every : int or None
+        Save state to disk every N steps.  Requires *save_dir*.
+    save_dir : str or None
+        Directory for periodic state dumps (JSON via ``save_state``).
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -279,6 +437,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     """
     t = 0.0
     for step in range(n_steps):
+        _retopologize(HC, bV, dim)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -295,10 +454,10 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
             dydt = np.empty_like(y)
             # dx/dt = u
             dydt[:n * dim] = u_flat
-            # du/dt = dudt_fn(v)
+            # du/dt = dudt_fn(v)  — parallel when workers > 1
+            accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
             for i, v in enumerate(verts):
-                a = dudt_fn(v, **dudt_kwargs)
-                dydt[(n + i) * dim:(n + i + 1) * dim] = a[:dim]
+                dydt[(n + i) * dim:(n + i + 1) * dim] = accel[v][:dim]
             return dydt
 
         sol = solve_ivp(
@@ -324,6 +483,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         diagnostics = _apply_bc_set(bc_set, HC, bV, dt)
         t += dt
         _invoke_callback(callback, step, t, HC, bV, diagnostics)
+        _maybe_save_state(save_every, save_dir, step, t, HC, bV)
 
     return t
 
@@ -331,7 +491,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
 # Velocity-only Euler (no position update, for fixed-mesh CFD)
 
 def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
-                        bc_set=None, **dudt_kwargs):
+                        bc_set=None, save_every=None, save_dir=None,
+                        workers=None, **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
     Useful for Eulerian CFD (e.g. Poiseuille flow on a static mesh) where
@@ -344,6 +505,10 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     ----------
     HC, bV, dudt_fn, dt, n_steps, dim, callback, bc_set, **dudt_kwargs
         Same as :func:`euler`.
+    save_every : int or None
+        Save state to disk every N steps.  Requires *save_dir*.
+    save_dir : str or None
+        Directory for periodic state dumps (JSON via ``save_state``).
 
     Returns
     -------
@@ -352,8 +517,9 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     """
     t = 0.0
     for step in range(n_steps):
+        _retopologize(HC, bV, dim)
         verts = _interior_verts(HC, bV)
-        accel = {v: dudt_fn(v, **dudt_kwargs) for v in verts}
+        accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
         for v, a in accel.items():
             v.u[:dim] += dt * a[:dim]
@@ -361,6 +527,7 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         diagnostics = _apply_bc_set(bc_set, HC, bV, dt)
         t += dt
         _invoke_callback(callback, step, t, HC, bV, diagnostics)
+        _maybe_save_state(save_every, save_dir, step, t, HC, bV)
 
     return t
 
@@ -369,7 +536,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
 
 def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    bc_set=None, cfl_target=0.5, dt_min=1e-12, dt_max=None,
-                   velocity_only=True, **dudt_kwargs):
+                   velocity_only=True, save_every=None, save_dir=None,
+                   workers=None, **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
     The time step is adjusted each step based on the CFL condition::
@@ -406,6 +574,10 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
         Maximum allowed time step. Defaults to dt_initial.
     velocity_only : bool
         If True, only update velocity (no position update). Default True.
+    save_every : int or None
+        Save state to disk every N steps.  Requires *save_dir*.
+    save_dir : str or None
+        Directory for periodic state dumps (JSON via ``save_state``).
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -425,8 +597,9 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
         # Don't overshoot t_end
         dt = min(dt, t_end - t)
 
+        _retopologize(HC, bV, dim)
         verts = _interior_verts(HC, bV)
-        accel = {v: dudt_fn(v, **dudt_kwargs) for v in verts}
+        accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
         if velocity_only:
             for v, a in accel.items():
@@ -446,6 +619,7 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
 
         t += dt
         _invoke_callback(callback, step, t, HC, bV, diagnostics)
+        _maybe_save_state(save_every, save_dir, step, t, HC, bV)
         step += 1
 
         # Adaptive CFL: compute new dt

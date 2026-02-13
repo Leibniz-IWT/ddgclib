@@ -105,7 +105,7 @@ def simple_2d_mesh_with_duals():
     # Initialize fields
     for v in HC.V:
         v.u = np.zeros(2)
-        v.P = 0.0
+        v.p = 0.0
         v.m = 1.0
 
     return HC, bV
@@ -118,7 +118,7 @@ class TestPressureGradient:
 
         HC, bV = simple_2d_mesh_with_duals
         for v in HC.V:
-            v.P = 100.0  # Uniform
+            v.p = 100.0  # Uniform
 
         for v in HC.V:
             if v not in bV:
@@ -150,7 +150,7 @@ class TestAcceleration:
 
         HC, bV = simple_2d_mesh_with_duals
         for v in HC.V:
-            v.P = 0.0
+            v.p = 0.0
             v.u = np.zeros(2)
             v.m = 1.0
 

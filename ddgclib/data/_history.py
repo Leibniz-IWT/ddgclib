@@ -7,15 +7,15 @@ Usage
 -----
     from ddgclib.data import StateHistory
 
-    history = StateHistory(fields=['u', 'P'], record_every=10)
+    history = StateHistory(fields=['u', 'p'], record_every=10)
 
     # Use as callback in integrator
     euler_velocity_only(HC, bV, dudt_fn, dt=1e-4, n_steps=1000,
                         callback=history.callback)
 
     # Query after simulation
-    times, values = history.query_vertex(vertex_key, 'P')
-    field_dict = history.query_field_at_time(0.5, 'P')
+    times, values = history.query_vertex(vertex_key, 'p')
+    field_dict = history.query_field_at_time(0.5, 'p')
 """
 
 import copy
@@ -30,7 +30,7 @@ class StateHistory:
     Parameters
     ----------
     fields : sequence of str
-        Vertex attributes to record (default: ['u', 'P']).
+        Vertex attributes to record (default: ['u', 'p']).
     record_every : int
         Record a snapshot every N steps (default: 1). Used when
         ``record_every_t`` is None.
@@ -45,7 +45,7 @@ class StateHistory:
 
     def __init__(
         self,
-        fields: Sequence[str] = ('u', 'P'),
+        fields: Sequence[str] = ('u', 'p'),
         record_every: int = 1,
         record_every_t: Optional[float] = None,
         save_dir: Optional[str] = None,
@@ -141,7 +141,7 @@ class StateHistory:
         vertex_key : tuple
             Vertex coordinate tuple (e.g. (0.5, 0.5)).
         field : str
-            Field name (e.g. 'P', 'u').
+            Field name (e.g. 'p', 'u').
 
         Returns
         -------

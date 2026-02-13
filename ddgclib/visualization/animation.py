@@ -5,9 +5,9 @@ Usage
     from ddgclib.data import StateHistory
     from ddgclib.visualization.animation import animate_scalar_1d
 
-    history = StateHistory(fields=['P'])
+    history = StateHistory(fields=['p'])
     # ... run simulation with history.callback ...
-    anim = animate_scalar_1d(history, field='P')
+    anim = animate_scalar_1d(history, field='p')
     anim.save('pressure_evolution.gif')
 """
 
@@ -16,7 +16,7 @@ import numpy as np
 
 def animate_scalar_1d(
     history,
-    field: str = 'P',
+    field: str = 'p',
     interval: int = 100,
     xlabel: str = 'x',
     ylabel: str = None,
@@ -104,7 +104,7 @@ def animate_scalar_1d(
 
 def animate_scalar_2d(
     history,
-    field: str = 'P',
+    field: str = 'p',
     interval: int = 100,
     cmap: str = 'viridis',
     s: float = 30,

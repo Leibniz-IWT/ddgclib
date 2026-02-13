@@ -24,7 +24,7 @@ def mesh_1d():
         if abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - 1.0) < 1e-14:
             bV.add(v)
         v.u = np.array([v.x_a[0] * 2])
-        v.P = v.x_a[0] * 100
+        v.p = v.x_a[0] * 100
         v.m = 1.0
 
     return HC, bV
@@ -57,7 +57,7 @@ class TestSaveLoad:
         assert data['dim'] == 1
         assert data['n_vertices'] == sum(1 for _ in HC.V)
         assert 'u' in data['fields']
-        assert 'P' in data['fields']
+        assert 'p' in data['fields']
 
     def test_round_trip_fields(self, mesh_1d, state_path):
         from ddgclib.data import save_state, load_state
@@ -67,9 +67,9 @@ class TestSaveLoad:
         original = {}
         for v in HC.V:
             key = tuple(float(x) for x in v.x_a)
-            original[key] = {'u': v.u.copy(), 'P': float(v.P), 'm': float(v.m)}
+            original[key] = {'u': v.u.copy(), 'p': float(v.p), 'm': float(v.m)}
 
-        save_state(HC, bV, t=0.42, fields=['u', 'P', 'm'], path=state_path)
+        save_state(HC, bV, t=0.42, fields=['u', 'p', 'm'], path=state_path)
         HC2, bV2, meta = load_state(state_path)
 
         assert meta['time'] == 0.42
@@ -80,7 +80,7 @@ class TestSaveLoad:
             key = tuple(float(x) for x in v.x_a)
             if key in original:
                 npt.assert_allclose(v.u, original[key]['u'], atol=1e-10)
-                npt.assert_allclose(v.P, original[key]['P'], atol=1e-10)
+                npt.assert_allclose(v.p, original[key]['p'], atol=1e-10)
                 npt.assert_allclose(v.m, original[key]['m'], atol=1e-10)
 
     def test_round_trip_boundary(self, mesh_1d, state_path):
@@ -143,7 +143,7 @@ class TestStateHistory:
         def zero_accel(v, dim=1, **kw):
             return np.zeros(dim)
 
-        history = StateHistory(fields=['u', 'P'], record_every=1)
+        history = StateHistory(fields=['u', 'p'], record_every=1)
         euler_velocity_only(HC, bV, zero_accel, dt=0.01, n_steps=5, dim=1,
                             callback=history.callback)
 
@@ -159,7 +159,7 @@ class TestStateHistory:
         def zero_accel(v, dim=1, **kw):
             return np.zeros(dim)
 
-        history = StateHistory(fields=['P'], record_every=3)
+        history = StateHistory(fields=['p'], record_every=3)
         euler_velocity_only(HC, bV, zero_accel, dt=0.01, n_steps=9, dim=1,
                             callback=history.callback)
 
@@ -170,21 +170,21 @@ class TestStateHistory:
         from ddgclib.data import StateHistory
 
         HC, bV = mesh_1d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
 
         # Manual snapshots
         for v in HC.V:
-            v.P = 10.0
+            v.p = 10.0
         history.append(0.0, HC)
 
         for v in HC.V:
-            v.P = 20.0
+            v.p = 20.0
         history.append(0.1, HC)
 
         # Query a vertex
         some_v = next(iter(HC.V))
         key = tuple(float(x) for x in some_v.x_a)
-        times, values = history.query_vertex(key, 'P')
+        times, values = history.query_vertex(key, 'p')
 
         assert len(times) == 2
         assert times[0] == 0.0
@@ -196,13 +196,13 @@ class TestStateHistory:
         from ddgclib.data import StateHistory
 
         HC, bV = mesh_1d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
 
         for v in HC.V:
-            v.P = 42.0
+            v.p = 42.0
         history.append(1.0, HC)
 
-        result = history.query_field_at_time(1.0, 'P')
+        result = history.query_field_at_time(1.0, 'p')
         assert len(result) > 0
         for key, val in result.items():
             assert val == 42.0
@@ -211,23 +211,23 @@ class TestStateHistory:
         from ddgclib.data import StateHistory
 
         HC, bV = mesh_1d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
 
         for v in HC.V:
-            v.P = 10.0
+            v.p = 10.0
         history.append(0.0, HC)
 
         for v in HC.V:
-            v.P = 20.0
+            v.p = 20.0
         history.append(1.0, HC)
 
         # Query at t=0.3 should find t=0.0 snapshot (closer)
-        result = history.query_field_at_time(0.3, 'P')
+        result = history.query_field_at_time(0.3, 'p')
         some_val = next(iter(result.values()))
         assert some_val == 10.0
 
         # Query at t=0.7 should find t=1.0 snapshot (closer)
-        result = history.query_field_at_time(0.7, 'P')
+        result = history.query_field_at_time(0.7, 'p')
         some_val = next(iter(result.values()))
         assert some_val == 20.0
 
@@ -235,7 +235,7 @@ class TestStateHistory:
         from ddgclib.data import StateHistory
 
         HC, bV = mesh_1d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
         history.append(0.0, HC)
         assert history.n_snapshots == 1
         history.clear()
@@ -245,7 +245,7 @@ class TestStateHistory:
         from ddgclib.data import StateHistory
 
         HC, bV = mesh_1d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
         history.append(0.0, HC, diagnostics={'dt': 0.01})
         history.append(0.01, HC, diagnostics={'dt': 0.005})
 

@@ -20,7 +20,7 @@ def mesh_1d():
     HC.refine_all()
     for v in HC.V:
         v.u = np.array([v.x_a[0]])
-        v.P = v.x_a[0] * 100
+        v.p = v.x_a[0] * 100
     return HC
 
 
@@ -35,7 +35,7 @@ def mesh_2d():
                 abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - 1.0) < 1e-14):
             bV.add(v)
         v.u = np.array([v.x_a[0], -v.x_a[1]])
-        v.P = v.x_a[0] + v.x_a[1]
+        v.p = v.x_a[0] + v.x_a[1]
     return HC, bV
 
 
@@ -45,7 +45,7 @@ def mesh_3d():
     HC.triangulate()
     for v in HC.V:
         v.u = np.array([0.0, 0.0, v.x_a[2]])
-        v.P = v.x_a[2] * 100
+        v.p = v.x_a[2] * 100
     return HC
 
 
@@ -61,14 +61,14 @@ def close_figs():
 class TestPlot1D:
     def test_scalar_field_1d(self, mesh_1d):
         from ddgclib.visualization import plot_scalar_field_1d
-        fig, ax = plot_scalar_field_1d(mesh_1d, field='P')
+        fig, ax = plot_scalar_field_1d(mesh_1d, field='p')
         assert fig is not None
         assert ax is not None
 
     def test_scalar_field_1d_with_analytical(self, mesh_1d):
         from ddgclib.visualization import plot_scalar_field_1d
         fig, ax = plot_scalar_field_1d(
-            mesh_1d, field='P',
+            mesh_1d, field='p',
             analytical_fn=lambda x: x * 100,
             title='Test Pressure',
         )
@@ -82,7 +82,7 @@ class TestPlot1D:
     def test_1d_with_existing_axes(self, mesh_1d):
         from ddgclib.visualization import plot_scalar_field_1d
         fig0, ax0 = plt.subplots()
-        fig, ax = plot_scalar_field_1d(mesh_1d, field='P', ax=ax0)
+        fig, ax = plot_scalar_field_1d(mesh_1d, field='p', ax=ax0)
         assert ax is ax0
 
 
@@ -92,7 +92,7 @@ class TestPlot2D:
     def test_scalar_field_2d(self, mesh_2d):
         from ddgclib.visualization import plot_scalar_field_2d
         HC, _ = mesh_2d
-        fig, ax = plot_scalar_field_2d(HC, field='P', title='Pressure 2D')
+        fig, ax = plot_scalar_field_2d(HC, field='p', title='Pressure 2D')
         assert fig is not None
 
     def test_vector_field_2d(self, mesh_2d):
@@ -119,7 +119,7 @@ class TestPlot2D:
 class TestPlot3D:
     def test_scalar_field_3d(self, mesh_3d):
         from ddgclib.visualization import plot_scalar_field_3d
-        fig, ax = plot_scalar_field_3d(mesh_3d, field='P', title='Pressure 3D')
+        fig, ax = plot_scalar_field_3d(mesh_3d, field='p', title='Pressure 3D')
         assert fig is not None
 
     def test_extract_slice_profile(self, mesh_3d):
@@ -164,14 +164,14 @@ class TestAnimation:
         from ddgclib.data import StateHistory
         from ddgclib.visualization.animation import animate_scalar_1d
 
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
         # Create a few manual snapshots
         for t_val in [0.0, 0.1, 0.2]:
             for v in mesh_1d.V:
-                v.P = v.x_a[0] * 100 + t_val * 10
+                v.p = v.x_a[0] * 100 + t_val * 10
             history.append(t_val, mesh_1d)
 
-        anim = animate_scalar_1d(history, field='P')
+        anim = animate_scalar_1d(history, field='p')
         assert anim is not None
 
     def test_animate_scalar_2d(self, mesh_2d):
@@ -179,13 +179,13 @@ class TestAnimation:
         from ddgclib.visualization.animation import animate_scalar_2d
 
         HC, _ = mesh_2d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
         for t_val in [0.0, 0.1]:
             for v in HC.V:
-                v.P = v.x_a[0] + t_val
+                v.p = v.x_a[0] + t_val
             history.append(t_val, HC)
 
-        anim = animate_scalar_2d(history, field='P')
+        anim = animate_scalar_2d(history, field='p')
         assert anim is not None
 
 
@@ -204,7 +204,7 @@ class TestPlotPrimal:
 
     def test_primal_1d_scalar(self, mesh_1d):
         from ddgclib.visualization import plot_primal
-        fig, ax = plot_primal(mesh_1d, scalar_field='P', title='P on 1D',
+        fig, ax = plot_primal(mesh_1d, scalar_field='p', title='P on 1D',
                               save_path=None)
         assert fig is not None
 
@@ -216,7 +216,7 @@ class TestPlotPrimal:
 
     def test_primal_1d_both_fields(self, mesh_1d):
         from ddgclib.visualization import plot_primal
-        fig, ax = plot_primal(mesh_1d, scalar_field='P', vector_field='u',
+        fig, ax = plot_primal(mesh_1d, scalar_field='p', vector_field='u',
                               save_path=None)
         assert fig is not None
 
@@ -229,7 +229,7 @@ class TestPlotPrimal:
     def test_primal_2d_scalar(self, mesh_2d):
         from ddgclib.visualization import plot_primal
         HC, bV = mesh_2d
-        fig, ax = plot_primal(HC, bV=bV, scalar_field='P', title='P on 2D',
+        fig, ax = plot_primal(HC, bV=bV, scalar_field='p', title='P on 2D',
                               save_path=None)
         assert fig is not None
 
@@ -243,7 +243,7 @@ class TestPlotPrimal:
     def test_primal_2d_both_fields(self, mesh_2d):
         from ddgclib.visualization import plot_primal
         HC, bV = mesh_2d
-        fig, ax = plot_primal(HC, scalar_field='P', vector_field='u',
+        fig, ax = plot_primal(HC, scalar_field='p', vector_field='u',
                               save_path=None)
         assert fig is not None
 
@@ -261,7 +261,7 @@ class TestPlotPrimal:
 
     def test_primal_3d_scalar(self, mesh_3d):
         from ddgclib.visualization import plot_primal
-        fig, ax = plot_primal(mesh_3d, scalar_field='P', title='P on 3D',
+        fig, ax = plot_primal(mesh_3d, scalar_field='p', title='P on 3D',
                               save_path=None)
         assert fig is not None
 
@@ -281,7 +281,7 @@ class TestPlotPrimal:
     def test_primal_custom_cmap(self, mesh_2d):
         from ddgclib.visualization import plot_primal
         HC, _ = mesh_2d
-        fig, ax = plot_primal(HC, scalar_field='P', cmap='plasma',
+        fig, ax = plot_primal(HC, scalar_field='p', cmap='plasma',
                               save_path=None)
         assert fig is not None
 
@@ -289,7 +289,7 @@ class TestPlotPrimal:
         from ddgclib.visualization import plot_primal
         HC, _ = mesh_2d
         out = tmp_path / 'test_primal.png'
-        fig, ax = plot_primal(HC, scalar_field='P', save_path=str(out))
+        fig, ax = plot_primal(HC, scalar_field='p', save_path=str(out))
         assert out.exists()
         assert out.stat().st_size > 0
 
@@ -304,7 +304,7 @@ class TestPlotDual:
 
     def test_dual_1d_scalar(self, mesh_1d):
         from ddgclib.visualization import plot_dual
-        fig, ax = plot_dual(mesh_1d, scalar_field='P', title='P dual 1D',
+        fig, ax = plot_dual(mesh_1d, scalar_field='p', title='P dual 1D',
                             save_path=None)
         assert fig is not None
 
@@ -414,11 +414,11 @@ class TestDynamicPlotFluid:
 
     def _make_history(self, HC, n_frames=3):
         from ddgclib.data import StateHistory
-        history = StateHistory(fields=['u', 'P'])
+        history = StateHistory(fields=['u', 'p'])
         for i in range(n_frames):
             t = i * 0.1
             for v in HC.V:
-                v.P = v.x_a[0] * 100 + t * 50
+                v.p = v.x_a[0] * 100 + t * 50
             history.append(t, HC)
         return history
 
@@ -439,7 +439,7 @@ class TestDynamicPlotFluid:
         from ddgclib.data import StateHistory
         from ddgclib.visualization import dynamic_plot_fluid
         HC, _ = mesh_2d
-        history = StateHistory(fields=['P'])
+        history = StateHistory(fields=['p'])
         anim = dynamic_plot_fluid(history, HC, save_path=None)
         assert anim is None
 

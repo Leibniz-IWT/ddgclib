@@ -18,6 +18,8 @@ from ddgclib.visualization.matplotlib_2d import (
     plot_scalar_field_2d,
     plot_vector_field_2d,
     plot_mesh_2d,
+    plot_interpolated_scalar_2d,
+    plot_interpolated_vector_2d,
 )
 from ddgclib.visualization.matplotlib_3d import (
     plot_scalar_field_3d,
@@ -38,6 +40,8 @@ __all__ = [
     'plot_scalar_field_2d',
     'plot_vector_field_2d',
     'plot_mesh_2d',
+    'plot_interpolated_scalar_2d',
+    'plot_interpolated_vector_2d',
     'plot_scalar_field_3d',
     'extract_slice_profile',
     'plot_primal',

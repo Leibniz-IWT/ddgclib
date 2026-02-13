@@ -42,8 +42,8 @@ class TestHydrostaticEquilibrium1D:
         rho, g, h = p['rho'], p['g'], p['h']
         for v in HC.V:
             expected = rho * g * (h - v.x_a[0])
-            npt.assert_allclose(v.P, expected, atol=1e-10,
-                                err_msg=f"Wrong P at x={v.x_a[0]}")
+            npt.assert_allclose(v.p, expected, atol=1e-10,
+                                err_msg=f"Wrong p at x={v.x_a[0]}")
 
     def test_zero_velocity(self, hydrostatic_1d):
         HC, _, _, _, _ = hydrostatic_1d
@@ -83,8 +83,8 @@ class TestHydrostaticEquilibrium2D:
         axis = p['gravity_axis']  # 1 for 2D
         for v in HC.V:
             expected = rho * g * (h - v.x_a[axis])
-            npt.assert_allclose(v.P, expected, atol=1e-10,
-                                err_msg=f"Wrong P at x={v.x_a}")
+            npt.assert_allclose(v.p, expected, atol=1e-10,
+                                err_msg=f"Wrong p at x={v.x_a}")
 
     def test_zero_velocity(self, hydrostatic_2d):
         HC, _, _, _, _ = hydrostatic_2d
@@ -164,7 +164,7 @@ class TestSetupFunction:
         pressures = {}
         for v in HC.V:
             x0 = round(v.x_a[0], 10)
-            pressures.setdefault(x0, []).append(v.P)
+            pressures.setdefault(x0, []).append(v.p)
         # Different x0 values should have different pressures
         unique_pressures = set()
         for x0, ps in pressures.items():

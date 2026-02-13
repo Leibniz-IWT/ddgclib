@@ -22,7 +22,7 @@ def mesh_1d():
         if abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - 1.0) < 1e-14:
             bV.add(v)
         v.u = np.array([0.0])
-        v.P = 0.0
+        v.p = 0.0
         v.m = 1.0
 
     return HC, bV
@@ -41,7 +41,7 @@ def mesh_2d():
                 abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - 1.0) < 1e-14):
             bV.add(v)
         v.u = np.array([0.0, 0.0])
-        v.P = 0.0
+        v.p = 0.0
         v.m = 1.0
 
     return HC, bV

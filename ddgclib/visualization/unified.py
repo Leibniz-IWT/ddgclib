@@ -301,7 +301,7 @@ def plot_primal(
     bV : set or None
         Boundary vertices (highlighted differently).
     scalar_field : str or None
-        Vertex attribute name for scalar coloring (e.g. ``'P'``).
+        Vertex attribute name for scalar coloring (e.g. ``'p'``).
     vector_field : str or None
         Vertex attribute name for arrow overlay (e.g. ``'u'``).
     ax : matplotlib Axes or None
@@ -398,6 +398,8 @@ def plot_dual(
     ax=None,
     save_path: str = os.path.join(_DEFAULT_FIG_DIR, 'dual.png'),
     dpi: int = 150,
+    xlim: tuple = None,
+    ylim: tuple = None,
     **kwargs,
 ):
     """Plot the dual mesh with optional scalar/vector field overlays.
@@ -424,6 +426,10 @@ def plot_dual(
         File path to save the figure.
     dpi : int
         Resolution for the saved image (default 150).
+    xlim : tuple of (float, float) or None
+        Restrict x-axis range for zooming into a sub-region.
+    ylim : tuple of (float, float) or None
+        Restrict y-axis range for zooming into a sub-region.
     **kwargs
         Extra options: ``title``, ``cmap``, ``dual_color``,
         ``show_primal``.
@@ -504,6 +510,12 @@ def plot_dual(
             ax.set_title(title)
     else:
         raise ValueError(f"Unsupported dimension: {dim}")
+
+    # Apply zoom limits
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
 
     if save_path is not None:
         _save_fig(fig, save_path, dpi=dpi)
@@ -678,12 +690,14 @@ def plot_fluid(
     t: float = 0.00,
     show_mesh: bool = True,
     face_alpha: float = 0.6,
-    scalar_field: str = 'P',
+    scalar_field: str = 'p',
     vector_field: str = 'u',
     scalar_label: str = 'Pressure [Pa]',
     vector_label: str = 'Velocity [m/s]',
     save_path: str = os.path.join(_DEFAULT_FIG_DIR, 'fluid.png'),
     dpi: int = 150,
+    xlim: tuple = None,
+    ylim: tuple = None,
     **kwargs,
 ):
     """Plot a fluid-state snapshot: pressure + velocity with optional mesh overlay.
@@ -705,7 +719,7 @@ def plot_fluid(
         Transparency for filled triangle faces (default 0.6).
         Set to 0 to hide faces.
     scalar_field : str or None
-        Vertex attribute for colormap panel (default ``'P'``).
+        Vertex attribute for colormap panel (default ``'p'``).
     vector_field : str or None
         Vertex attribute for quiver panel (default ``'u'``).
     scalar_label, vector_label : str
@@ -714,6 +728,10 @@ def plot_fluid(
         File path to save the figure.
     dpi : int
         Resolution for the saved image (default 150).
+    xlim : tuple of (float, float) or None
+        Restrict x-axis range for zooming into a sub-region.
+    ylim : tuple of (float, float) or None
+        Restrict y-axis range for zooming into a sub-region.
 
     Returns
     -------
@@ -756,6 +774,14 @@ def plot_fluid(
                         face_alpha=face_alpha, title=label, save_path=None,
                         **dict(panel_kwargs))
 
+    # Apply zoom limits to all panels
+    if xlim is not None or ylim is not None:
+        for ax_panel in axes:
+            if xlim is not None:
+                ax_panel.set_xlim(xlim)
+            if ylim is not None:
+                ax_panel.set_ylim(ylim)
+
     plt.tight_layout()
 
     if save_path is not None:
@@ -768,7 +794,7 @@ def dynamic_plot_fluid(
     history,
     HC,
     bV=None,
-    scalar_field: str = 'P',
+    scalar_field: str = 'p',
     vector_field: str = 'u',
     scalar_label: str = 'Pressure [Pa]',
     vector_label: str = 'Velocity [m/s]',
@@ -780,6 +806,8 @@ def dynamic_plot_fluid(
     dpi: int = 150,
     interval: int = 100,
     writer: str = None,
+    xlim: tuple = None,
+    ylim: tuple = None,
     **kwargs,
 ):
     """Create a video of the simulation from a ``StateHistory``.
@@ -798,7 +826,7 @@ def dynamic_plot_fluid(
     bV : set or None
         Boundary vertices.
     scalar_field : str or None
-        Scalar field to animate (default ``'P'``).
+        Scalar field to animate (default ``'p'``).
     vector_field : str or None
         Vector field to animate (default ``'u'``).
     scalar_label, vector_label : str
@@ -816,6 +844,10 @@ def dynamic_plot_fluid(
         Animation parameters.
     writer : str or None
         Matplotlib animation writer.
+    xlim : tuple of (float, float) or None
+        Restrict x-axis range for zooming into a sub-region.
+    ylim : tuple of (float, float) or None
+        Restrict y-axis range for zooming into a sub-region.
 
     Returns
     -------
@@ -847,11 +879,16 @@ def dynamic_plot_fluid(
 
     all_coords = np.array(all_coords)
     margin = 0.05
-    xlim = (all_coords[:, 0].min() - margin, all_coords[:, 0].max() + margin)
-    ylim = zlim = None
+    # Use user-provided zoom limits, or auto-detect from data
+    _xlim = xlim if xlim is not None else (
+        all_coords[:, 0].min() - margin, all_coords[:, 0].max() + margin
+    )
+    _ylim = zlim = None
     if dim >= 2:
-        ylim = (all_coords[:, 1].min() - margin,
-                all_coords[:, 1].max() + margin)
+        _ylim = ylim if ylim is not None else (
+            all_coords[:, 1].min() - margin,
+            all_coords[:, 1].max() + margin
+        )
     if dim >= 3:
         zlim = (all_coords[:, 2].min() - margin,
                 all_coords[:, 2].max() + margin)
@@ -943,7 +980,7 @@ def dynamic_plot_fluid(
                     )
                     ax_panel.set_xlabel('x')
                     ax_panel.set_ylabel(field)
-                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_xlim(_xlim)
                 elif dim == 2:
                     _render_edges_from_coords(coords, ax_panel, dim)
                     ax_panel.scatter(
@@ -954,8 +991,8 @@ def dynamic_plot_fluid(
                     ax_panel.set_xlabel('x')
                     ax_panel.set_ylabel('y')
                     ax_panel.set_aspect('equal')
-                    ax_panel.set_xlim(xlim)
-                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_xlim(_xlim)
+                    ax_panel.set_ylim(_ylim)
                 elif dim == 3:
                     _render_edges_from_coords(coords, ax_panel, dim)
                     ax_panel.scatter(
@@ -966,8 +1003,8 @@ def dynamic_plot_fluid(
                     ax_panel.set_xlabel('x')
                     ax_panel.set_ylabel('y')
                     ax_panel.set_zlabel('z')
-                    ax_panel.set_xlim(xlim)
-                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_xlim(_xlim)
+                    ax_panel.set_ylim(_ylim)
                     ax_panel.set_zlim(zlim)
                 ax_panel.set_title(label)
 
@@ -1002,7 +1039,7 @@ def dynamic_plot_fluid(
                     )
                     ax_panel.set_xlabel('x')
                     ax_panel.set_yticks([])
-                    ax_panel.set_xlim(xlim)
+                    ax_panel.set_xlim(_xlim)
                 elif dim == 2:
                     _render_edges_from_coords(coords, ax_panel, dim)
                     ax_panel.quiver(
@@ -1013,8 +1050,8 @@ def dynamic_plot_fluid(
                     ax_panel.set_xlabel('x')
                     ax_panel.set_ylabel('y')
                     ax_panel.set_aspect('equal')
-                    ax_panel.set_xlim(xlim)
-                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_xlim(_xlim)
+                    ax_panel.set_ylim(_ylim)
                 elif dim == 3:
                     _render_edges_from_coords(coords, ax_panel, dim)
                     ax_panel.quiver(
@@ -1027,8 +1064,8 @@ def dynamic_plot_fluid(
                     ax_panel.set_xlabel('x')
                     ax_panel.set_ylabel('y')
                     ax_panel.set_zlabel('z')
-                    ax_panel.set_xlim(xlim)
-                    ax_panel.set_ylim(ylim)
+                    ax_panel.set_xlim(_xlim)
+                    ax_panel.set_ylim(_ylim)
                     ax_panel.set_zlim(zlim)
                 ax_panel.set_title(label)
 
@@ -1082,7 +1119,7 @@ def plot_fluid_ps(
     t : float
         Simulation time (used in window title).
     scalar_fields : list of str or None
-        Scalar fields to display (default ``['P']``).
+        Scalar fields to display (default ``['p']``).
     vector_fields : list of str or None
         Vector fields to display (default ``['u']``).
     name : str
@@ -1101,7 +1138,7 @@ def plot_fluid_ps(
     ps = _check_polyscope()
 
     if scalar_fields is None:
-        scalar_fields = ['P']
+        scalar_fields = ['p']
     if vector_fields is None:
         vector_fields = ['u']
 
@@ -1157,7 +1194,7 @@ def dynamic_plot_fluid_polyscope(
     ps = _check_polyscope()
 
     if scalar_fields is None:
-        scalar_fields = ['P']
+        scalar_fields = ['p']
     if vector_fields is None:
         vector_fields = ['u']
 

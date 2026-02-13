@@ -226,9 +226,9 @@ class DirichletPressureBC(BoundaryCondition):
         count = 0
         for v in verts:
             if callable(self.value):
-                v.P = float(self.value(v))
+                v.p = float(self.value(v))
             else:
-                v.P = float(self.value)
+                v.p = float(self.value)
             count += 1
         return count
 
@@ -245,7 +245,7 @@ class NeumannBC(BoundaryCondition):
     Parameters
     ----------
     field_name : str
-        Vertex attribute to enforce ('u', 'P', etc.).
+        Vertex attribute to enforce ('u', 'p', etc.).
     flux_value : float
         Gradient value at boundary (0 for zero-gradient).
     """
@@ -289,15 +289,21 @@ class OutletDeleteBC(BoundaryCondition):
         Vertices with x[axis] >= outlet_pos are deleted.
     axis : int
         Coordinate axis for position check.
+    bV : set or None
+        Mutable boundary vertex set. If provided, deleted vertices are
+        also removed from this set to avoid stale references.
     """
 
-    def __init__(self, outlet_pos, axis=2):
+    def __init__(self, outlet_pos, axis=2, bV=None):
         super().__init__(axis)
         self.outlet_pos = outlet_pos
+        self.bV = bV
 
     def apply(self, mesh, dt, target_vertices=None):
         to_delete = [v for v in mesh.V if v.x_a[self.axis] >= self.outlet_pos]
         for v in to_delete:
+            if self.bV is not None:
+                self.bV.discard(v)
             mesh.V.remove(v)
         return len(to_delete)
 
@@ -323,7 +329,7 @@ class PeriodicInletBC(BoundaryCondition):
         Vertex merging tolerance.
     fields : list of str or None
         Vertex attribute names to copy from ghost to newly injected vertices.
-        Defaults to ``['u', 'P', 'm']``.
+        Defaults to ``['u', 'p', 'm']``.
     period : float
         Domain length along the flow axis. The ghost resets this far upstream
         after all its vertices have crossed the inlet. Defaults to 1.0.
@@ -336,7 +342,7 @@ class PeriodicInletBC(BoundaryCondition):
         self.velocity = velocity
         self.inlet_pos = inlet_pos
         self.cdist = cdist
-        self.fields = fields if fields is not None else ['u', 'P', 'm']
+        self.fields = fields if fields is not None else ['u', 'p', 'm']
         self.period = period
         self.ghost = self._clone_unit(unit_mesh)
         self._reset_ghost()
@@ -396,7 +402,7 @@ class PeriodicInletBC(BoundaryCondition):
             pos[self.axis] += dx
             self.ghost.V.move(v, tuple(pos))
 
-        # Inject any vertices that crossed the inlet
+        # Inject vertices that just crossed the inlet
         entered = []
         for gv in list(self.ghost.V):
             if gv.x_a[self.axis] >= self.inlet_pos:
@@ -411,18 +417,66 @@ class PeriodicInletBC(BoundaryCondition):
                         else:
                             setattr(new_v, f, val)
 
-        # Copy connections for entered vertices
+        # Copy connections for entered vertices.
+        # Build a lookup of ghost->main vertex for all entered vertices so we
+        # only connect to vertices that were actually injected (avoid auto-
+        # creating bare vertices via mesh.V[key] when original vertices have
+        # moved away in the Lagrangian frame).
+        ghost_to_main = {id(gv): new_v for gv, new_v in entered}
         for gv, new_v in entered:
             for gnb in gv.nn:
-                if gnb.x_a[self.axis] >= self.inlet_pos:
-                    new_nb = mesh.V[tuple(gnb.x_a)]
-                    new_v.connect(new_nb)
+                if id(gnb) in ghost_to_main:
+                    new_v.connect(ghost_to_main[id(gnb)])
 
-        # Periodic reset
-        if all(gv.x_a[self.axis] >= self.inlet_pos for gv in self.ghost.V):
+        # Remove injected vertices from ghost (each injected exactly once)
+        for gv, _ in entered:
+            self.ghost.V.remove(gv)
+
+        # Periodic reset: re-clone when ghost is depleted
+        if sum(1 for _ in self.ghost.V) == 0:
+            self.ghost = self._clone_unit(self.unit_mesh)
             self._reset_ghost()
 
         mesh.V.merge_all(cdist=self.cdist)
+        return len(entered)
+
+
+class PositionalNoSlipWallBC(BoundaryCondition):
+    """No-slip wall that identifies wall vertices by position each step.
+
+    Unlike :class:`NoSlipWallBC` which acts on a fixed set of vertices,
+    this BC dynamically scans all mesh vertices each step and applies
+    no-slip (zero velocity) to any vertex matching the position criterion.
+    New vertices injected by :class:`PeriodicInletBC` at wall positions
+    are automatically detected.
+
+    Parameters
+    ----------
+    criterion_fn : callable
+        ``fn(v) -> bool``.  Returns True for wall vertices.
+    dim : int
+        Spatial dimension (velocity vector length).
+    bV : set or None
+        If provided, wall vertices are added to this mutable set and
+        tagged ``v.boundary = True``.
+    """
+
+    def __init__(self, criterion_fn: Callable, dim: int = 2, bV: set = None):
+        super().__init__()
+        self.criterion_fn = criterion_fn
+        self.dim = dim
+        self.bV = bV
+
+    def apply(self, mesh, dt, target_vertices=None):
+        count = 0
+        for v in mesh.V:
+            if self.criterion_fn(v):
+                v.u = np.zeros(self.dim)
+                v.boundary = True
+                if self.bV is not None:
+                    self.bV.add(v)
+                count += 1
+        return count
 
 
 # Generic time stepper / advancer

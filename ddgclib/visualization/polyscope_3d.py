@@ -7,7 +7,7 @@ Usage
 -----
     from ddgclib.visualization.polyscope_3d import register_point_cloud, update_frame
     ps_cloud = register_point_cloud(HC, name='mesh')
-    update_frame(HC, ps_cloud, scalar_fields=['P'], vector_fields=['u'])
+    update_frame(HC, ps_cloud, scalar_fields=['p'], vector_fields=['u'])
 """
 
 import numpy as np
@@ -121,7 +121,7 @@ def update_frame(
     ps_cloud : polyscope PointCloud
         Previously registered point cloud.
     scalar_fields : list of str or None
-        Scalar fields to add/update (e.g. ['P', 'm']).
+        Scalar fields to add/update (e.g. ['p', 'm']).
     vector_fields : list of str or None
         Vector fields to add/update (e.g. ['u']).
     dim : int
@@ -170,7 +170,7 @@ def update_surface_frame(
     ps_mesh : polyscope SurfaceMesh
         Previously registered surface mesh.
     scalar_fields : list of str or None
-        Scalar fields to add/update (e.g. ['P', 'm']).
+        Scalar fields to add/update (e.g. ['p', 'm']).
     vector_fields : list of str or None
         Vector fields to add/update (e.g. ['u']).
     dim : int

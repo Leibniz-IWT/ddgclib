@@ -2,7 +2,7 @@
 Abstracted initial conditions for dynamic continuum simulations.
 
 Each IC is applied to a simplicial Complex (HC) by setting vertex attributes
-(v.u, v.P, v.m, etc.) in-place. ICs can be composed via CompositeIC.
+(v.u, v.p, v.m, etc.) in-place. ICs can be composed via CompositeIC.
 
 Usage
 -----
@@ -31,7 +31,7 @@ class InitialCondition(ABC):
     def apply(self, HC, bV: set) -> None:
         """Apply initial condition to all vertices in HC.
 
-        Sets vertex attributes (v.u, v.P, v.m, etc.) in-place.
+        Sets vertex attributes (v.u, v.p, v.m, etc.) in-place.
         Boundary vertices in bV may be treated differently by subclasses.
         """
 
@@ -57,7 +57,7 @@ class UniformPressure(InitialCondition):
 
     def apply(self, HC, bV: set) -> None:
         for v in HC.V:
-            v.P = self.P0
+            v.p = self.P0
 
 
 class HydrostaticPressure(InitialCondition):
@@ -88,7 +88,7 @@ class HydrostaticPressure(InitialCondition):
 
     def apply(self, HC, bV: set) -> None:
         for v in HC.V:
-            v.P = self.P_ref + self.rho * self.g * (self.h_ref - v.x_a[self.axis])
+            v.p = self.P_ref + self.rho * self.g * (self.h_ref - v.x_a[self.axis])
 
 
 class LinearPressureGradient(InitialCondition):
@@ -114,7 +114,7 @@ class LinearPressureGradient(InitialCondition):
 
     def apply(self, HC, bV: set) -> None:
         for v in HC.V:
-            v.P = self.P_ref - self.G * v.x_a[self.axis]
+            v.p = self.P_ref - self.G * v.x_a[self.axis]
 
 
 # Vector field ICs (velocity)
@@ -231,7 +231,7 @@ class CustomFieldIC(InitialCondition):
     fn : callable
         Function mapping vertex position (numpy array) to field value.
     field_name : str
-        Vertex attribute to set (e.g., 'u', 'P', 'm').
+        Vertex attribute to set (e.g., 'u', 'p', 'm').
     """
 
     def __init__(self, fn: Callable[[np.ndarray], Union[float, np.ndarray]],

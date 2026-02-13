@@ -49,7 +49,7 @@ class TestAnalyticalProfile:
 
         for v in HC.V:
             expected = -G * v.x_a[0]
-            npt.assert_allclose(v.P, expected, atol=1e-10)
+            npt.assert_allclose(v.p, expected, atol=1e-10)
 
     def test_wall_velocity_zero(self, poiseuille_2d):
         """Velocity at y=0 and y=h should be zero."""

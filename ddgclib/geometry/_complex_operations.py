@@ -13,6 +13,8 @@ from hyperct import Complex
 
 ## Simpler operations
 # Translation
+## Simpler operations
+# Translation
 def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
     """
     Translate all vertices of a Complex along one coordinate axis.
@@ -34,7 +36,7 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
     HC : Complex
         The simplicial complex to translate.
     axis : int, default=0
-        Axis to translate along (0=x, 1=y, 2=z).
+        Axis to translate along (0=x, 1=y, 2=z, ...).
     d : float, default=0.0
         Translation distance.
     copy : bool, default=True
@@ -43,7 +45,6 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
         If > 0, add uniform random noise ∈ [-jitter/2, jitter/2] to each
         coordinate after translation. Recommended value: 1e-12 when large
         translations are needed.
-
 
     Examples
     --------
@@ -56,8 +57,8 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
     Complex
         The translated complex.
     """
-    if axis not in (0, 1, 2):
-        raise ValueError("axis must be 0, 1, or 2")
+    if axis >= HC.dim:
+        raise ValueError(f"axis must be less than the complex dimension {HC.dim}")
 
     if copy_complex:
         HC = copy.deepcopy(HC)
@@ -70,7 +71,7 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
 
         # Optional jitter to prevent exact cache collisions
         if jitter > 0:
-            new_pos += rng.uniform(-jitter/2, jitter/2, size=3)
+            new_pos += rng.uniform(-jitter/2, jitter/2, size=HC.dim)
 
         HC.V.move(v, tuple(new_pos))
 
@@ -85,16 +86,18 @@ def extrude(HC_unit, L, axis=2, cdist=1e-10):
     - Uses ceil(L) segments → minimum one unit per integer length
     - Each segment is scaled to length L/n_segments
     - Manual vertex replication + topology copy (no deepcopy)
-    - Final merge_all glues adjacent segments together
+    - Final merge_all glues adjacent segments together if positions overlap (non-flat case)
+    - For flat bases (span ~0 along axis), adds interlayer connections and side diagonals for triangulation
 
     Parameters
     ----------
     HC_unit : Complex
-        Unit-length mesh (height ≈1 along the extrusion axis, centered at 0)
+        Unit-length mesh (height ≈1 along the extrusion axis, centered at 0 for non-flat;
+        or flat base for prism-like extrusion)
     L : float > 0
         Total extrusion length
     axis : int, default=2
-        Extrusion axis (0=x, 1=y, 2=z)
+        Extrusion axis (0=x, 1=y, 2=z, ...)
     cdist : float, default=1e-10
         Tolerance for merge_all at segment interfaces
 
@@ -105,13 +108,23 @@ def extrude(HC_unit, L, axis=2, cdist=1e-10):
     """
     if L <= 0:
         raise ValueError("L must be positive")
-    if axis not in (0, 1, 2):
-        raise ValueError("axis must be 0, 1, or 2")
+
+    output_dim = max(HC_unit.dim, axis + 1)
+    extruded = Complex(output_dim, domain=None)  # fresh target complex
+
+    # Compute span along axis to detect if flat
+    if HC_unit.V.size() == 0:
+        span = 0.0
+    else:
+        min_coord = min(v.x_a[axis] if axis < HC_unit.dim else 0.0 for v in HC_unit.V)
+        max_coord = max(v.x_a[axis] if axis < HC_unit.dim else 0.0 for v in HC_unit.V)
+        span = max_coord - min_coord
+    is_flat = span < 1e-8
 
     n_segments = max(1, int(np.ceil(L)))
     seg_len = L / n_segments
 
-    extruded = Complex(3, domain=None)   # fresh target complex
+    vertex_maps = []  # list of {old_v: new_v} for each segment
 
     for k in range(n_segments):
         offset = k * seg_len
@@ -119,9 +132,13 @@ def extrude(HC_unit, L, axis=2, cdist=1e-10):
 
         # 1. Create transformed vertices
         for old_v in HC_unit.V:
-            pos = np.array(old_v.x_a, dtype=float)
-            pos[axis] = pos[axis] * seg_len + offset   # scale + shift
-            new_v = extruded.V[tuple(pos)]             # insert into cache
+            old_pos = np.array(old_v.x_a, dtype=float)
+            # Pad with zeros if increasing dimension
+            pos = np.zeros(output_dim)
+            pos[:HC_unit.dim] = old_pos
+            # Scale and shift along axis
+            pos[axis] = pos[axis] * seg_len + offset
+            new_v = extruded.V[tuple(pos)]  # insert into cache
             vertex_map[old_v] = new_v
 
         # 2. Copy connectivity
@@ -129,7 +146,30 @@ def extrude(HC_unit, L, axis=2, cdist=1e-10):
             for old_nb in old_v.nn:
                 new_v.connect(vertex_map[old_nb])
 
-    # 3. Glue segment interfaces
+        vertex_maps.append(vertex_map)
+
+    # 3. If flat, add interlayer connections and side diagonals
+    if is_flat:
+        for k in range(n_segments - 1):
+            map1 = vertex_maps[k]
+            map2 = vertex_maps[k + 1]
+            # Add vertical connections
+            for old_v in HC_unit.V:
+                v1 = map1[old_v]
+                v2 = map2[old_v]
+                v1.connect(v2)
+            # Add diagonals on side quads for triangulation
+            for old_v1 in HC_unit.V:
+                for old_v2 in old_v1.nn:
+                    if old_v1.index < old_v2.index:  # unique edges
+                        v1 = map1[old_v1]
+                        v2 = map1[old_v2]
+                        v3 = map2[old_v1]
+                        v4 = map2[old_v2]
+                        # Add one diagonal (v1 to v4)
+                        v1.connect(v4)
+
+    # 4. Glue segment interfaces if applicable (non-flat case)
     extruded.V.merge_all(cdist=cdist)
 
     return extruded
