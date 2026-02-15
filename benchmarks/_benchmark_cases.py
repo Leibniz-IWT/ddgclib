@@ -7,7 +7,7 @@ import pandas as pd
 # benchmarks/_benchmark_cases.py
 from pathlib import Path
 
-# ------------------------- Generic “just a mesh” case -------------------------
+# Generic “just a mesh” case
 class MshCase(GeometryBenchmarkBase):
     """
     Loads a mesh from a .msh file and sets analytical values to NaN.

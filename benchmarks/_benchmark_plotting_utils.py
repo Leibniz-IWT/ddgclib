@@ -11,7 +11,7 @@ def read_gmsh_tri(path: str):
     points : (N,3) float64
     tris   : (M,3) int64 (0-based)
     """
-    # ---- Preferred: meshio (supports v2/v4, ascii/binary) ----
+    # Preferred: meshio (supports v2/v4, ascii/binary)
     try:
         import meshio  # pip install meshio
         m = meshio.read(path)
@@ -36,7 +36,7 @@ def read_gmsh_tri(path: str):
         return P, T
 
     except Exception:
-        # ---- Fallback: very small ASCII Gmsh v2 parser (triangles only) ----
+        # Fallback: very small ASCII Gmsh v2 parser (triangles only)
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.read().splitlines()
