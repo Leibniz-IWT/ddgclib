@@ -24,7 +24,6 @@ def curvature_tensors(points_glob, E_ij, n_i=None):
     for i in range(nverts):
         # NOTE: THIS MUST BE REPLACED WITH THE LEVEL SET PLANE VECTOR:
         n_i = points_glob[i] - np.array([0.5, 0.5, 0.5])  # First approximation
-        #######################################################################
         # Initiate
         HNdA_ij = np.zeros([len(E_ij), 3])
         for j in E_ij[i]:

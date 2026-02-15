@@ -465,7 +465,7 @@ def u_ic(x):
 def P_IC(HC):
     for v in HC.V:
         P_i = P_ic(v.x_a[0])
-        v.P = np.array([P_i, P_i])
+        v.p = np.array([P_i, P_i])
 
 # Run
 x_lb = 0

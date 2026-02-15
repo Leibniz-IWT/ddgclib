@@ -27,24 +27,20 @@ def curvature_cell_i(cell_i, cell_corners_and_intersections):
 
     # Compute the curvatures at each vertex:
     HNdA_i = np.sum(HNdA_ijk, axis=(1, 2))
-    ######
     # NOTE: the above line is equivalent to (possibly easier in C++):
     # HNdA_i = np.zeros([nverts, 3])
     # for i in range(nverts):
     #    for HNdA_jk in HNdA_ijk[i]:
     #        for HNdA_k in HNdA_jk:
     #            HNdA_i[i] += HNdA_k
-    ######
 
     C_i = np.sum(C_ijk, axis=(1, 2))
-    ######
     # NOTE: the above line is equivalent to (possibly easier in C++):
     # C_i = np.zeros([nverts])
     # for i in range(nverts):
     #    for C_jk in C_ijk[i]:
     #        for C_k in C_jk:
     #            C_i[i] += C_k
-    ######
 
     # Finally we compute the curvature of the local cell i:
     hndA_i = hndA_i_cell(cell_i, cell_corners_and_intersections, E_ij, C_i, HNdA_i, points_hash, C_ijk)
@@ -162,7 +158,6 @@ def curvature_tensors(points_glob, E_ij, n_i=None):
     for i in range(nverts):
         # NOTE: THIS MUST BE REPLACED WITH THE LEVEL SET PLANE VECTOR:
         n_i = points_glob[i] - np.array([0.5, 0.5, 0.5])  # First approximation
-        #######################################################################
         # Initiate
         HNdA_ij = np.zeros([len(E_ij), 3])
         for j in E_ij[i]:
@@ -251,7 +246,6 @@ def curvature_tensors_new(points_glob, E_ij, n_i=None):
     for i in range(nverts):
         # NOTE: THIS MUST BE REPLACED WITH THE LEVEL SET PLANE VECTOR:
         n_i = points_glob[i] - np.array([0.5, 0.5, 0.5])  # First approximation
-        #######################################################################
         # Initiate
         HNdA_ij = np.zeros([len(E_ij), 3])
         for j in E_ij[i]:

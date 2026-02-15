@@ -33,30 +33,25 @@ from ddgclib._eos import *
 from ddgclib._misc import *
 from ddgclib._plotting import *
 
-# barycentric imports (from ddgclib.barycentric subpackage)
-from ddgclib.barycentric._duals import compute_vd, triang_dual, _set_boundary
-from ddgclib.visualization.plot_dual import plot_dual_mesh_2D, plot_dual_mesh_3D
+# DDG dual computations (from hyperct.ddg)
+from hyperct.ddg import compute_vd, e_star, v_star, d_area
+from hyperct.ddg._geometry import (
+    _set_boundary, _merge_local_duals_vector,
+    _reflect_vertex_over_edge, _find_intersection, _find_plane_equation,
+    area_of_polygon, volume_of_geometric_object,
+)
+
+# Dual mesh plotting
+from hyperct.ddg.plot_dual import plot_dual_mesh_2D, plot_dual_mesh_3D
 from ddgclib._plotting import plot_dual
 
-# compute duals (and Delaunay dual from a set of points)
-from ddgclib.barycentric._duals import compute_vd, _merge_local_duals_vector, triang_dual, plot_dual
+# Compatibility utilities (not yet in hyperct)
+from ddgclib._compat import triang_dual, _signed_volume_parallelepiped, _volume_parallelepiped
 
-# Plots
-from ddgclib.barycentric._duals import  plot_dual_mesh_2D
-
-# Geometry and dual computations
-from ddgclib.barycentric._duals import area_of_polygon, e_star, volume_of_geometric_object, plot_dual, v_star
-
-# Boundary geometry
-from ddgclib.barycentric._duals import  _set_boundary, _find_plane_equation, _find_intersection, _reflect_vertex_over_edge
-
-# Area computations
-from ddgclib.barycentric._duals import d_area
-
-# Volume computations (including helper functions)
-from ddgclib.barycentric._duals import _signed_volume_parallelepiped, _volume_parallelepiped
-# DDG gradient operations on primary edges (for continuum)
-from ddgclib.barycentric._duals import dP, du, dudt
+# DDG gradient operators for continuum
+from ddgclib.operators.gradient import pressure_gradient as dP
+from ddgclib.operators.gradient import velocity_laplacian as du
+from ddgclib.operators.gradient import acceleration as dudt
 
 
 

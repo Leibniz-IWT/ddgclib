@@ -33,9 +33,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_HERE, 'fig')
 os.makedirs(_FIG, exist_ok=True)
 
-# ============================================================================
 # Step 1: Define the domain and boundary set
-# ============================================================================
 # Create a simplicial complex on [0, L] x [0, h]
 
 d = 2                  # dimension (1, 2, or 3)
@@ -75,9 +73,7 @@ print(f"Mesh: {sum(1 for _ in HC.V)} vertices, {len(bV)} boundary, "
       f"{len(bV_walls)} wall, {len(bV_inlet)} inlet, {len(bV_outlet)} outlet")
 
 
-# ============================================================================
 # Step 2: Define the boundary conditions
-# ============================================================================
 # BCs are collected in a BoundaryConditionSet and applied each time step
 # automatically by the integrator (when bc_set is passed).
 
@@ -96,10 +92,8 @@ bc_set.add(DirichletPressureBC(value=0.0), bV_outlet)
 print(f"Boundary conditions: {len(bc_set._bcs)} BCs registered")
 
 
-# ============================================================================
 # Step 3: Define the initial conditions
-# ============================================================================
-# ICs set vertex fields (v.u, v.P, v.m) on the entire mesh.
+# ICs set vertex fields (v.u, v.p, v.m) on the entire mesh.
 # Use CompositeIC to combine multiple ICs — they are applied in order.
 
 from ddgclib.initial_conditions import (
@@ -134,20 +128,18 @@ ic = ic_from_rest
 ic.apply(HC, bV)
 
 print(f"Initial conditions applied. Sample vertex: "
-      f"u={list(next(iter(HC.V)).u)}, P={next(iter(HC.V)).P:.4f}")
+      f"u={list(next(iter(HC.V)).u)}, p={next(iter(HC.V)).p:.4f}")
 
 
-# ============================================================================
 # Step 4: Specify the integrator and run the simulation
-# ============================================================================
 # Choose an acceleration function (du/dt) and a time integrator.
 #
 # The acceleration function computes forces on each vertex:
 #   acceleration(v) = (-grad_P + mu * laplacian_u) / m
 #
-# For problems requiring the full DDG operators with barycentric duals:
-#   from ddgclib.barycentric._duals import compute_vd
-#   compute_vd(HC, cdist=1e-10)
+# For problems requiring the full DDG operators with duals:
+#   from hyperct.ddg import compute_vd
+#   compute_vd(HC, method="barycentric")
 #   from ddgclib.operators.gradient import acceleration as dudt_fn
 #
 # For this template, we use a simple mock acceleration for demonstration:
@@ -160,12 +152,12 @@ def dudt_fn(v, dim=2, mu=0.1, **kwargs):
     return mu * (avg_u - v.u[:dim])
 
 
-# --- Option A: Direct integrator call ---
+# Option A: Direct integrator call
 from ddgclib.dynamic_integrators import euler_velocity_only
 
 # Record history for post-processing
 from ddgclib.data import StateHistory
-history = StateHistory(fields=['u', 'P'], record_every=50)
+history = StateHistory(fields=['u', 'p'], record_every=50)
 
 dt = 0.001
 n_steps = 500
@@ -181,7 +173,7 @@ t_final = euler_velocity_only(
 print(f"Simulation complete: t = {t_final:.4f}, {history.n_snapshots} snapshots recorded")
 
 
-# --- Option B: DynamicSimulation runner (convenience wrapper) ---
+# Option B: DynamicSimulation runner (convenience wrapper)
 # Bundles everything into a single object. Uncomment to use instead of Option A:
 #
 # from ddgclib.dynamic_integrators import DynamicSimulation, SimulationParams
@@ -194,34 +186,32 @@ print(f"Simulation complete: t = {t_final:.4f}, {history.n_snapshots} snapshots 
 # t_final = sim.run(callback=history.callback)
 
 
-# ============================================================================
 # Step 5: Post-processing — save, visualize, analyze
-# ============================================================================
 
-# --- 5a: Save state to disk (JSON format) ---
+# 5a: Save state to disk (JSON format)
 from ddgclib.data import save_state
 
-save_state(HC, bV, t=t_final, fields=['u', 'P', 'm'],
+save_state(HC, bV, t=t_final, fields=['u', 'p', 'm'],
            path=os.path.join(_FIG, 'final_state.json'),
            extra_meta={'case': 'template_channel', 'mu': mu, 'G': G})
 print(f"State saved to {_FIG}/final_state.json")
 
 
-# --- 5b: Load a saved state (round-trip) ---
+# 5b: Load a saved state (round-trip)
 from ddgclib.data import load_state
 HC_loaded, bV_loaded, meta = load_state(os.path.join(_FIG, 'final_state.json'))
 print(f"Loaded state at t={meta['time']}, case={meta.get('case')}")
 
 
-# --- 5c: Query history ---
+# 5c: Query history
 some_vertex = next(iter(HC.V))
 vertex_key = tuple(float(x) for x in some_vertex.x_a)
-times, pressures = history.query_vertex(vertex_key, 'P')
+times, pressures = history.query_vertex(vertex_key, 'p')
 if times:
     print(f"Vertex at {vertex_key}: P went from {pressures[0]:.4f} to {pressures[-1]:.4f}")
 
 
-# --- 5d: Visualization ---
+# 5d: Visualization
 import matplotlib
 matplotlib.use('Agg')  # use 'TkAgg' for interactive display
 
@@ -235,7 +225,7 @@ import matplotlib.pyplot as plt
 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
 plot_mesh_2d(HC, bV=bV, ax=axes[0], title='Mesh')
-plot_scalar_field_2d(HC, field='P', ax=axes[1], title='Pressure')
+plot_scalar_field_2d(HC, field='p', ax=axes[1], title='Pressure')
 plot_vector_field_2d(HC, bV=bV, ax=axes[2], title='Velocity')
 
 plt.tight_layout()
@@ -245,6 +235,6 @@ print(f"Plot saved to {_FIG}/template_results.png")
 
 # Animation from history:
 from ddgclib.visualization.animation import animate_scalar_2d
-anim = animate_scalar_2d(history, field='P')
+anim = animate_scalar_2d(history, field='p')
 anim.save(os.path.join(_FIG, 'pressure_evolution.gif'), writer='pillow', fps=10)
 print(f"Animation saved to {_FIG}/pressure_evolution.gif")
