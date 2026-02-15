@@ -284,6 +284,8 @@ def cauchy_stress(
         Cauchy stress tensor, shape ``(dim, dim)``.
     """
     return -p * np.eye(dim) + 2.0 * mu * strain_rate(du)
+   # Vol_i = dual_volume(v, HC, dim)
+   # return -p * np.eye(dim) * Vol_i + 2.0 * mu * strain_rate(du)
 
 
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
