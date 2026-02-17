@@ -380,13 +380,13 @@ def bubbleProfile(capLen, RadTop, contactAng=-1, fname=None):
   centroid /= Volume
   return Volume*capLen**3, r*capLen, z*capLen, (z-centroid)*capLen, psi
 
-def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0):
+def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0, radSave=0):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
   #capLen = RadTop / capLen**.5
-  ds = min( 1e-3*abs(capLen), 1e-2 )
+  ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
   psi=0
   r=0
   z=0
@@ -394,7 +394,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
   #VolPrev=0
   centroid=0
   area=0
-  dPsiPrev=1
+  dPsiPrev=0
   if fname: adams_txt = open(fname, "w") 
   for i in range(int(1e5)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
@@ -412,26 +412,62 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
     area+= 2*np.pi*r*ds
-    if fname: 
-      if not i%100 or dPsi>1e-2: 
-        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
-    angBin = int(psi*180/np.pi // angleSave)
-    angBinPrev = int((psi-dPsi)*180/np.pi // angleSave)
-    if angleSave and angBin != angBinPrev:
-      angFname=f'data/angle{max(angBin,angBinPrev):05}.txt'
-      ang_txt = open(angFname) 
-      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
     #if contactAng>0 and Volume*r**-3<VolPrev: break
     #if contactAng<0 and dPsi<0: break
-    if psi<0: break
+    if psi<0-1.5*angleSave*np.pi/180: break
+    if psi>np.pi+1.5*angleSave*np.pi/180: break
     if dPsi>0 and dPsiPrev<0: break
     dPsiPrev=dPsi
     #if contactAng>0 and dPsi<0 and psi<contactAng: break
     #VolPrev = Volume*r**-3
+    if fname: 
+      if not i%100 or dPsi>1e-2: 
+        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
+    if angleSave:
+      angBin = int(psi*180/np.pi // angleSave)
+      angBinPrev = int((psi-dPsi)*180/np.pi // angleSave)
+      if angBin != angBinPrev:
+        #if dPsi<0: nam='angleM'
+        #else: 
+        angFname=f'data/ang{max(angBin,angBinPrev):05}.txt'
+        ang_txt = open(angFname, "a") 
+        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
+    if radSave:
+      radBin = int(r // radSave)
+      radBinPrev = int((r-dr) // radSave)
+      if radBin != radBinPrev:
+        angFname=f'data/rad{max(radBin,radBinPrev):05}.txt'
+        ang_txt = open(angFname, "a") 
+        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
   #if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
-  if fname: print('saved',fname,'capLen',capLen,'i',i)
+  if fname: print('saved',fname,'capLen',capLen,f'RadTop{RadTop:20g}','i',i)
   centroid /= Volume
   return Volume, r, z, centroid, psi
+
+def reorder_drop_height_vs_vol(nam=''): 
+  import os
+  folName = 'data/'
+  for fname in sorted(os.listdir(folName)):
+    if 'loop' in fname: continue
+    if 'txt' not in fname: continue
+    if nam not in fname: continue
+    with open(folName+fname, encoding = 'utf-8') as f:
+      #print('plot',folName+fname)
+      df = np.loadtxt(f)
+    if df.ndim<2: continue
+    dfLoop=np.zeros_like(df)
+    for j in range(len(dfLoop[:,0])):
+      angMin=2*np.pi
+      for i in range(len(df[:,0])):
+        if df[i,0]!=df[i,0]:continue
+        ang = np.arctan2(df[i,1]-dfLoop[j-1,1], df[i,6]**.333-dfLoop[j-1,6]**.333)
+        if ang<angMin:
+          iMin=i
+          angMin=ang
+      print('ang',ang,j,iMin)
+      dfLoop[j,:]=df[iMin,:]
+      df[iMin,:]=np.nan
+    np.savetxt(folName+'loop_'+fname, dfLoop)  
 
 def AdamsBashforthBoProfile(Bo, RadTop, contactAng=-1, fname=None):
 #compute analytical interface shape according to eq 1 of Demirkir2024Langmuir
