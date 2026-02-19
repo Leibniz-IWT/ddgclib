@@ -449,6 +449,7 @@ def reorder_drop_height_vs_vol(nam=''):
   folName = 'data/'
   for fname in sorted(os.listdir(folName)):
     if 'loop' in fname: continue
+    #if '00018' not in fname: continue
     if 'txt' not in fname: continue
     if nam not in fname: continue
     with open(folName+fname, encoding = 'utf-8') as f:
@@ -457,15 +458,21 @@ def reorder_drop_height_vs_vol(nam=''):
     if df.ndim<2: continue
     dfLoop=np.zeros_like(df)
     for j in range(len(dfLoop[:,0])):
-      angMin=2*np.pi
+      disMin=100
+      #angMin=2*np.pi
       for i in range(len(df[:,0])):
         if df[i,0]!=df[i,0]:continue
-        ang = np.arctan2(df[i,1]-dfLoop[j-1,1], df[i,6]**.333-dfLoop[j-1,6]**.333)
-        if ang<angMin:
+        #ang = np.arctan2(df[i,1]-dfLoop[j-1,1], dfLoop[j-1,6]**.333-df[i,6]**.333)
+        #print('ang',ang*180/np.pi,i)
+        dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
+        #if ang<angMin:
+        if dis<disMin:
           iMin=i
-          angMin=ang
-      print('ang',ang,j,iMin)
+          #angMin=ang
+          disMin=dis
+      #print('angMin',angMin*180/np.pi,j)
       dfLoop[j,:]=df[iMin,:]
+      if j>1 and disMin>1: dfLoop[j-1,:]=np.nan
       df[iMin,:]=np.nan
     np.savetxt(folName+'loop_'+fname, dfLoop)  
 

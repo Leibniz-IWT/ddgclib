@@ -446,13 +446,18 @@ def plot_drop_size_vs_ang():
   figAng, axAng = plt.subplots(1)
   x=np.array([0,180])
   axAng.plot(x, .0104*x, '--', c='k')
-  for fname in sorted(os.listdir(folName)):
+  for fname in reversed(sorted(os.listdir(folName))):
     if 'txt' not in fname: continue
     if 'loop_ang' not in fname: continue
+    #if 'ang' not in fname: continue
+    #if 'loop' in fname: continue
+    #if '0000' not in fname: continue
     with open(folName+fname, encoding = 'utf-8') as f:
       #print('plot',folName+fname)
       df = np.loadtxt(f)
     if df.ndim<2: continue
+    #if df[0,2]/np.pi*180>10:continue
+    print(fname)
     col=( min(abs(df[0,2]/np.pi)**.5, 1), 0, 0)
     #ind = np.argsort(df[:,1])
     indVol = np.argmax(df[:,6])
@@ -460,12 +465,36 @@ def plot_drop_size_vs_ang():
     #  if df[indVol,0]>df[i,0]: df[i,6]=np.nan
       #if df[i,3]<0: col='r'
       #else: col='b'
-      #ax.plot((df[i,6]*3/4/np.pi)**(1/3), -df[i,1], '.', color=col, ms=.2)
+    #ax.plot((df[:,6]*3/4/np.pi)**(1/3), -df[:,1], '.', color=col, ms=.2)
     #ax.plot((df[ind,6]*3/4/np.pi)**(1/3), -df[ind,1], color=col)
     ax.plot((df[:,6]*3/4/np.pi)**(1/3), -df[:,1], color=col)
     #ax.plot((df[0,6]*3/4/np.pi)**(1/3), -df[0,1], '+', ms=20, color=col)
-    #ax.plot((df[-1,6]*3/4/np.pi)**(1/3), -df[-1,1], 'x', ms=2, color=col)
+    #ax.plot((df[-1,6]*3/4/np.pi)**(1/3), -df[-1,1], 'x', ms=20, color=col)
+    #x = (df[:,6] * 3 / 4 / np.pi)**(1/3)
+    #y = -df[:,1]
+    #cx = (np.nanmax(x) + np.nanmin(x))/2
+    #cy = (np.nanmax(y) + np.nanmin(y))/2
+    ##cx, cy = x.mean(), y.mean()
+    #print('cxcy',cx,cy)
+    #theta = np.arctan2(-cy+y, -cx+x)
+    #idx = np.argsort(theta)
+    #ax.plot(x[idx], y[idx], color=col)
+    #ax.plot(x[idx], y[idx], '.', ms=.2, color=col)
+    #ax.plot(cx, cy, 'o', ms=20, c='None', mec=col)
+    step = 1#2#max(len(x)//20, 1)
+    #ax.quiver(
+    #    x[::step],
+    #    y[::step],
+    #    np.diff(x, append=x[-1])[::step],
+    #    np.diff(y, append=y[-1])[::step],
+    #    angles='xy',
+    #    scale_units='xy',
+    #    scale=1,
+    #    width=0.003,
+    #    color='k',zorder=10
+    #)
     axAng.plot(180-df[indVol,2]*180/np.pi, (df[indVol,6]*3/4/np.pi)**(1/3), '.', color=col, markersize=.2)
+    #break
   fname = 'Ling25effectRadTopVsVol.txt'
   print('open',fname)
   with open(fname) as f:
@@ -482,8 +511,8 @@ def plot_drop_size_vs_ang():
   ax.tick_params(which='both', direction='in', top=True, right=True)
   ax.set_xlabel('$R_V/\\lambda$')
   ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22)
-  ax.set_ylim([0,4])
-  ax.set_xlim([0,2])
+  #ax.set_ylim([0,4])
+  #ax.set_xlim([0,2])
   axAng.tick_params(which='both', direction='in', top=True, right=True)
   axAng.set_xlabel('$\\theta$')
   axAng.set_ylabel('$\\frac{ R_d }{\\lambda}$',rotation=0,size=22)
