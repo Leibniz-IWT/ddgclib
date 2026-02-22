@@ -376,25 +376,63 @@ def plot_drop_growing(radInd=-1, rads=()):
   for r in range(len(rads)):
     fig, ax = plt.subplots(1)
     for fname in sorted(os.listdir(folName)):
-      if '0.txt' not in fname: continue
+      if 'txt' not in fname: continue
       if 'bub' not in fname: continue
       with open(folName+fname, encoding = 'utf-8') as f:
-        print('open',folName+fname)
         df = np.loadtxt(f)
       if df.ndim<2: continue
-      col=(rads[r]/np.pi,0,0)
+      col = (min(rads[r]/np.pi,1), 0, 0)
       for p in range(len(df[:,0]) - 1, -1, -1):
         if (df[p,radInd]-rads[r])*(df[p-1,radInd]-rads[r])<0: ax.plot(df[:p,0], df[:p,1]-df[p,1], color=col)
     ax.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_xlabel('$r/\\lambda$')
     ax.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22)
-    #ax.set_ylim([-2,2])
-    #ax.set_xlim([0,1])
+    ax.set_xlim(left=0)
+    ax.set_ylim([0,4])
     ax.set_aspect('equal', adjustable='box')
     if radInd==0: fname = folName+f'pin{r}.pdf'
     if radInd==2: fname = folName+f'spread{r}.pdf'
     print('savin ',fname)
     fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
+  return
+
+def plot_drops_growing(radInd=-1, rads=()): 
+  import os
+  folName = 'data/'
+  fig, ax = plt.subplots(1)
+  fig.set_figwidth(10)
+  if radInd==0: 
+    outName = folName+f'pin.pdf'
+    #spc=(.3,1.2,3,5,8.5,14)
+  if radInd==2: 
+    outName = folName+f'spr.pdf'
+    #spc=(.5,2,4,7,12,14)
+  spc=(.3,1.2,3,5,8.5,14)
+  for r in range(len(rads)):
+    for fname in reversed(sorted(os.listdir(folName))):
+      if 'txt' not in fname: continue
+      if 'bub' not in fname: continue
+      with open(folName+fname, encoding = 'utf-8') as f:
+        df = np.loadtxt(f)
+      if df.ndim<2: continue
+      if df[0,5]<1: col = ( 1-df[0,5], 0, 0)
+      else: col = ( 0, 0, 1-1/df[0,5])
+      for p in range(1, len(df[:,0])):
+        if (df[p,radInd] - rads[r]) * (df[p-1,radInd] - rads[r]) < 0: 
+          ax.plot(spc[r] + df[:p,0], df[:p,1]-df[p,1], c=col, alpha=1, clip_on=False, label=rf"$R_t={df[0,5]:.1f}$")
+          ax.plot(spc[r] - df[:p,0], df[:p,1]-df[p,1], c=col, alpha=1, clip_on=False)
+  handles, labels = ax.get_legend_handles_labels()
+  by_label = dict(zip(labels, handles))
+  #ax.legend(by_label.values(), by_label.keys())
+  ax.tick_params(which='both', direction='in', top=True, right=True)
+  ax.set_xlabel('$x/\\lambda$')
+  ax.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22)
+  #ax.set_xlim(left=0)
+  ax.set_ylim([0,4])
+  ax.set_xlim([0,17])
+  ax.set_aspect('equal', adjustable='box')
+  print('savin ',outName)
+  fig.savefig(outName, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
 def plot_drop_profile(name='pin spread'): 
@@ -439,89 +477,90 @@ def plot_drop_profile(name='pin spread'):
     fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf', dpi=600)
   return
 
-def plot_drop_size_vs_ang(): 
+def plot_drop_height_vs_rad(nam='rad ang bub'): 
   import os
   folName = 'data/'
-  fig, ax = plt.subplots(1)
-  figAng, axAng = plt.subplots(1)
-  x=np.array([0,180])
-  axAng.plot(x, .0104*x, '--', c='k')
-  for fname in reversed(sorted(os.listdir(folName))):
-    if 'txt' not in fname: continue
-    if 'loop_ang' not in fname: continue
-    #if 'ang' not in fname: continue
-    #if 'loop' in fname: continue
-    #if '0000' not in fname: continue
-    with open(folName+fname, encoding = 'utf-8') as f:
-      #print('plot',folName+fname)
-      df = np.loadtxt(f)
-    if df.ndim<2: continue
-    #if df[0,2]/np.pi*180>10:continue
-    print(fname)
-    col=( min(abs(df[0,2]/np.pi)**.5, 1), 0, 0)
-    #ind = np.argsort(df[:,1])
-    indVol = np.argmax(df[:,6])
-    #for i in range(len(df[:,6])):
-    #  if df[indVol,0]>df[i,0]: df[i,6]=np.nan
-      #if df[i,3]<0: col='r'
-      #else: col='b'
-    #ax.plot((df[:,6]*3/4/np.pi)**(1/3), -df[:,1], '.', color=col, ms=.2)
-    #ax.plot((df[ind,6]*3/4/np.pi)**(1/3), -df[ind,1], color=col)
-    ax.plot((df[:,6]*3/4/np.pi)**(1/3), -df[:,1], color=col)
-    #ax.plot((df[0,6]*3/4/np.pi)**(1/3), -df[0,1], '+', ms=20, color=col)
-    #ax.plot((df[-1,6]*3/4/np.pi)**(1/3), -df[-1,1], 'x', ms=20, color=col)
-    #x = (df[:,6] * 3 / 4 / np.pi)**(1/3)
-    #y = -df[:,1]
-    #cx = (np.nanmax(x) + np.nanmin(x))/2
-    #cy = (np.nanmax(y) + np.nanmin(y))/2
-    ##cx, cy = x.mean(), y.mean()
-    #print('cxcy',cx,cy)
-    #theta = np.arctan2(-cy+y, -cx+x)
-    #idx = np.argsort(theta)
-    #ax.plot(x[idx], y[idx], color=col)
-    #ax.plot(x[idx], y[idx], '.', ms=.2, color=col)
-    #ax.plot(cx, cy, 'o', ms=20, c='None', mec=col)
-    step = 1#2#max(len(x)//20, 1)
-    #ax.quiver(
-    #    x[::step],
-    #    y[::step],
-    #    np.diff(x, append=x[-1])[::step],
-    #    np.diff(y, append=y[-1])[::step],
-    #    angles='xy',
-    #    scale_units='xy',
-    #    scale=1,
-    #    width=0.003,
-    #    color='k',zorder=10
-    #)
-    axAng.plot(180-df[indVol,2]*180/np.pi, (df[indVol,6]*3/4/np.pi)**(1/3), '.', color=col, markersize=.2)
-    #break
-  fname = 'Ling25effectRadTopVsVol.txt'
-  print('open',fname)
-  with open(fname) as f:
-    df = np.loadtxt(f)
-  col=( (1-159/180)**.5, 0, 0)
-  for i in range(0):#len(df[:,0])):
-    ax.plot((.75*df[i,0]/np.pi)**(1/3)/27e-4, 27e-4/df[i,1], 's', mec=col, mfc='None', clip_on=False)
-  fname = 'Ling25effect.txt'
-  print('open',fname)
-  with open(fname) as f:
-    df = np.loadtxt(f)
-  for i in range(len(df[:,0])):
-    axAng.plot(df[i,2], (.75*df[i,4]*1e-6/np.pi)**(1/3)/df[i,5]/1e-3, 's', mec='k', mfc='None', clip_on=False)
-  ax.tick_params(which='both', direction='in', top=True, right=True)
-  ax.set_xlabel('$R_V/\\lambda$')
-  ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22)
-  #ax.set_ylim([0,4])
-  #ax.set_xlim([0,2])
-  axAng.tick_params(which='both', direction='in', top=True, right=True)
-  axAng.set_xlabel('$\\theta$')
-  axAng.set_ylabel('$\\frac{ R_d }{\\lambda}$',rotation=0,size=22)
-  fname = folName+'RadSphVsRadTop.pdf'
-  print('savin ',fname)
-  fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf')
-  #fname = folName+'MaxRadVsAng.pdf'
-  #print('savin ',fname)
-  #figAng.savefig(fname, bbox_inches='tight', transparent=True, format='pdf')
+  for cont in nam.split():
+    fig, ax = plt.subplots(1)
+    figV, axV = plt.subplots(1)
+    if 'ang' in cont:
+      x=np.array([0,180])
+      axV.plot(x, .0104*x, '--', c='k')
+      axV.set_xlabel('$\\theta$')
+    if 'rad' in cont:
+      x=np.linspace(0,2)
+      axV.plot(2*x**3/3, x, '+')#linestyle='dotted', c='k')
+    if 'bub' in cont:
+      axV.set_xlabel('$R_t$')
+      axV.set_xscale('log')
+    #for fname in reversed(sorted(os.listdir(folName))):
+    for fname in sorted(os.listdir(folName)):
+      if 'txt' not in fname: continue
+      if cont not in fname: continue
+      #if 'loop' not in fname: continue
+      with open(folName+fname, encoding = 'utf-8') as f:
+        df = np.loadtxt(f)
+      if df.ndim<2: continue
+      indVol = np.argmax(df[:,6])
+      if 'ang' in cont: 
+        x=180-df[indVol,2]*180/np.pi
+        col=( min(abs(df[0,2]/np.pi)**.5, 1), 0, 0)
+      if 'rad' in cont: 
+        x=df[indVol,0]
+        col=( min(df[0,0]/np.pi, 1), 0, 0)
+      if 'bub' in cont: 
+        x=df[indVol,5]
+        col=( min(df[0,5]/np.pi, 1), 0, 0)
+      r = (df[:,6]*3/4/np.pi) ** (1/3)
+      #for i in range(1, len(df[:,0])):
+      #  if abs(r[i]-r[i-1]) > .05: r[i-1]=np.nan
+      ax.plot(r, -df[:,1])#, alpha=.5)#, c=col
+      print('indVol',indVol,len(r),cont,x,r[indVol])
+      if indVol<len(r)-1: axV.plot(x, r[indVol], '.', c=col)#, markersize=.2)
+      else: axV.plot(x, r[indVol], 'o', c=col, mfc='None', ms=4)
+      #else: axV.plot(x, r[indVol], 'o', c=col, ms=1, mfc='None', mew=1)
+    if 'ang' in cont:
+      axV.set_xlim([0,180])
+      fname = 'Ling25effectRadTopVsVol.txt'
+      print('open',fname)
+      with open(fname) as f:
+        df = np.loadtxt(f)
+      col=( (1-159/180)**.5, 0, 0)
+      for i in range(0):#len(df[:,0])):
+        ax.plot((.75*df[i,0]/np.pi)**(1/3)/27e-4, 27e-4/df[i,1], 's', mec=col, mfc='None', clip_on=False)
+      fname = 'Ling25effect.txt'
+      print('open',fname)
+      with open(fname) as f:
+        df = np.loadtxt(f)
+      for i in range(len(df[:,0])):
+        axV.plot(df[i,2], (.75*df[i,4]*1e-6/np.pi)**(1/3)/df[i,5]/1e-3, 's', mec='k', mfc='None', clip_on=False)
+    if 'rad' in cont:
+      fname = 'LesageVolVsContRadSq.txt'
+      print('open',fname)
+      with open(fname) as f:
+        df = np.loadtxt(f)
+      for i in range(len(df[:,0])):
+        if df[i,2]>1:continue
+        axV.plot(df[i,0]**.5, (.75*df[i,1]/np.pi)**(1/3)*df[i,0]**.5, 's', mec=(0,0,df[i,2]/3), mfc='None', clip_on=False)
+      fname = 'MoriVolByContCubeVsContSqByCapSq.txt'
+      print('open',fname)
+      with open(fname) as f:
+        df = np.loadtxt(f)
+      axV.plot(.5/df[:,0]**.5, (.75*df[:,1]/np.pi)**(1/3)/df[:,0]**.5, 'd', mec=(0,0,0), mfc='None', clip_on=False)
+    ax.tick_params(which='both', direction='in', top=True, right=True)
+    ax.set_xlabel('$R_V/\\lambda$')
+    ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22)
+    ax.set_ylim([0,4])
+    ax.set_xlim([0,1.75])
+    axV.set_ylim([0,1.8])
+    axV.tick_params(which='both', direction='in', top=True, right=True)
+    axV.set_ylabel('$\\frac{ R_d }{\\lambda}$',rotation=0,size=22)
+    fname = folName+'heightVsVol_'+cont+'.pdf'
+    print('savin ',fname)
+    fig.savefig(fname, bbox_inches='tight', transparent=True, format='pdf')
+    fname = folName+'MaxVolVs_'+cont+'.pdf'
+    print('savin ',fname)
+    figV.savefig(fname, bbox_inches='tight', transparent=True, format='pdf')
   return
 
 def plot_drop_size_vs_rad(): 

@@ -396,7 +396,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
   area=0
   dPsiPrev=0
   if fname: adams_txt = open(fname, "w") 
-  for i in range(int(1e5)):
+  for i in range(int(1e6)):
     #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
     #if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
@@ -414,8 +414,18 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     area+= 2*np.pi*r*ds
     #if contactAng>0 and Volume*r**-3<VolPrev: break
     #if contactAng<0 and dPsi<0: break
-    if psi<0-1.5*angleSave*np.pi/180: break
-    if psi>np.pi+1.5*angleSave*np.pi/180: break
+    if Volume<0: 
+      print('Volume',Volume)
+      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid)
+      break
+    if r<0: 
+      print('r',r)
+      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid)
+      break
+    if psi<0: break
+    if psi>np.pi: break
+    #if psi<0-.1*angleSave*np.pi/180: break
+    #if psi>np.pi+.1*angleSave*np.pi/180: break
     if dPsi>0 and dPsiPrev<0: break
     dPsiPrev=dPsi
     #if contactAng>0 and dPsi<0 and psi<contactAng: break
@@ -440,7 +450,8 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
         ang_txt = open(angFname, "a") 
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
   #if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
-  if fname: print('saved',fname,'capLen',capLen,f'RadTop{RadTop:20g}','i',i)
+  #if fname: print('saved',fname,'capLen',capLen,f'RadTop{RadTop:20g}','i',i)
+  print('saved',fname,'capLen',capLen,f'RadTop{RadTop:10g}','i',i)
   centroid /= Volume
   return Volume, r, z, centroid, psi
 
@@ -458,21 +469,22 @@ def reorder_drop_height_vs_vol(nam=''):
     if df.ndim<2: continue
     dfLoop=np.zeros_like(df)
     for j in range(len(dfLoop[:,0])):
-      disMin=100
+      disMin=np.inf
       #angMin=2*np.pi
       for i in range(len(df[:,0])):
         if df[i,0]!=df[i,0]:continue
         #ang = np.arctan2(df[i,1]-dfLoop[j-1,1], dfLoop[j-1,6]**.333-df[i,6]**.333)
         #print('ang',ang*180/np.pi,i)
         dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
+        #dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]-df[i,6])**2
         #if ang<angMin:
         if dis<disMin:
           iMin=i
           #angMin=ang
           disMin=dis
-      #print('angMin',angMin*180/np.pi,j)
+      #print('disMin',disMin,'dis',dis)
       dfLoop[j,:]=df[iMin,:]
-      if j>1 and disMin>1: dfLoop[j-1,:]=np.nan
+      #if j>1 and disMin>.1: dfLoop[j-1,:]=np.nan
       df[iMin,:]=np.nan
     np.savetxt(folName+'loop_'+fname, dfLoop)  
 
