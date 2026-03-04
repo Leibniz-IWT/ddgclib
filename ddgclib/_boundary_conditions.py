@@ -281,7 +281,12 @@ class NeumannBC(BoundaryCondition):
 # Open (Transparent/Absorbing) Boundary Condition
 
 class OutletDeleteBC(BoundaryCondition):
-    """Simple open outlet: delete vertices that leave the domain.
+    """Open outlet: delete vertices that leave the domain and prevent backflow.
+
+    Truncated dual cells at the outlet boundary produce imbalanced stress
+    forces that push vertices backward.  The *backflow_clamp* parameter
+    defines a zone upstream of the deletion threshold where the flow-
+    direction velocity component is clamped to be non-negative.
 
     Parameters
     ----------
@@ -292,12 +297,18 @@ class OutletDeleteBC(BoundaryCondition):
     bV : set or None
         Mutable boundary vertex set. If provided, deleted vertices are
         also removed from this set to avoid stale references.
+    backflow_clamp : float or None
+        Width of the no-backflow zone upstream of *outlet_pos*.
+        Vertices at ``x[axis] >= outlet_pos - backflow_clamp`` have
+        their velocity along *axis* clamped to ``max(u[axis], 0)``.
+        Set to ``None`` to disable (default for backward compatibility).
     """
 
-    def __init__(self, outlet_pos, axis=2, bV=None):
+    def __init__(self, outlet_pos, axis=2, bV=None, backflow_clamp=None):
         super().__init__(axis)
         self.outlet_pos = outlet_pos
         self.bV = bV
+        self.backflow_clamp = backflow_clamp
 
     def apply(self, mesh, dt, target_vertices=None):
         to_delete = [v for v in mesh.V if v.x_a[self.axis] >= self.outlet_pos]
@@ -305,6 +316,102 @@ class OutletDeleteBC(BoundaryCondition):
             if self.bV is not None:
                 self.bV.discard(v)
             mesh.V.remove(v)
+
+        # Prevent backflow in the outlet buffer zone
+        if self.backflow_clamp is not None:
+            clamp_start = self.outlet_pos - self.backflow_clamp
+            for v in mesh.V:
+                if (v.x_a[self.axis] >= clamp_start
+                        and v.u[self.axis] < 0.0):
+                    v.u[self.axis] = 0.0
+
+        return len(to_delete)
+
+
+class OutletBufferedDeleteBC(BoundaryCondition):
+    """Open outlet with a buffer ghost zone for complete dual cells.
+
+    Maintains a buffer zone ``[outlet_pos, outlet_pos + buffer_width]``
+    beyond the physical outlet.  When domain vertices cross *outlet_pos*
+    they enter the buffer where:
+
+    * Their velocity is frozen to the value at entry.
+    * Their position advances at the frozen velocity each step (the
+      integrator's stress-contaminated update is corrected).
+    * They are deleted when they reach ``outlet_pos + buffer_width``.
+
+    Because buffer vertices remain in the mesh, domain vertices near the
+    outlet always have neighbours from Delaunay retriangulation.  Their
+    dual cells are therefore complete and stress computation is balanced
+    — eliminating the backflow caused by truncated duals.
+
+    Parameters
+    ----------
+    outlet_pos : float
+        Physical outlet position.  Vertices crossing this enter the
+        buffer (not the physical domain).
+    buffer_width : float
+        Width of the ghost buffer zone beyond *outlet_pos*.
+    axis : int
+        Coordinate axis for position check (flow direction).
+    bV : set or None
+        Mutable boundary vertex set.  Deleted vertices are removed.
+    """
+
+    def __init__(self, outlet_pos, buffer_width, axis=0, bV=None):
+        super().__init__(axis)
+        self.outlet_pos = outlet_pos
+        self.buffer_width = buffer_width
+        self.bV = bV
+        # id(vertex) → (vertex_ref, frozen_velocity, correct_position)
+        # Keyed by id() because mesh.V.move() changes vertex hash.
+        self._buffer: dict = {}
+
+    @property
+    def buffer_vertices(self):
+        """Set of vertex objects currently in the buffer."""
+        return {rec[0] for rec in self._buffer.values()}
+
+    def apply(self, mesh, dt, target_vertices=None):
+        ax = self.axis
+        buffer_end = self.outlet_pos + self.buffer_width
+
+        # 1. Delete vertices past buffer end
+        to_delete = [v for v in list(mesh.V)
+                     if v.x_a[ax] >= buffer_end]
+        for v in to_delete:
+            self._buffer.pop(id(v), None)
+            if self.bV is not None:
+                self.bV.discard(v)
+            mesh.V.remove(v)
+
+        # 2. Detect new buffer entries (just crossed outlet_pos)
+        buf_ids = set(self._buffer.keys())
+        for v in list(mesh.V):
+            if id(v) not in buf_ids and v.x_a[ax] > self.outlet_pos:
+                self._buffer[id(v)] = (v, v.u.copy(), v.x_a.copy())
+
+        # 3. Correct position and reset velocity for all buffer vertices.
+        new_buffer = {}
+        for vid, (v, frozen_u, correct_pos) in self._buffer.items():
+            try:
+                _ = v.x_a
+            except (KeyError, AttributeError):
+                continue  # vertex removed by another BC
+
+            # Advance correct position at frozen velocity
+            new_correct = correct_pos.copy()
+            new_correct[:len(frozen_u)] += frozen_u * dt
+
+            # Move vertex to the correct position
+            mesh.V.move(v, tuple(new_correct))
+
+            # Reset velocity to frozen value
+            v.u[:] = frozen_u
+
+            new_buffer[id(v)] = (v, frozen_u, new_correct)
+
+        self._buffer = new_buffer
         return len(to_delete)
 
 
@@ -402,10 +509,12 @@ class PeriodicInletBC(BoundaryCondition):
             pos[self.axis] += dx
             self.ghost.V.move(v, tuple(pos))
 
-        # Inject vertices that just crossed the inlet
+        # Inject vertices that just crossed the inlet (strict >
+        # so that ghost vertices exactly at the inlet boundary
+        # are not injected until they actually enter the domain)
         entered = []
         for gv in list(self.ghost.V):
-            if gv.x_a[self.axis] >= self.inlet_pos:
+            if gv.x_a[self.axis] > self.inlet_pos:
                 new_v = mesh.V[tuple(gv.x_a)]
                 entered.append((gv, new_v))
                 # Copy field values from ghost vertex to new mesh vertex

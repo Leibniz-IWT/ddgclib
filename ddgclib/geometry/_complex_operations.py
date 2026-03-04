@@ -57,6 +57,7 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
     Complex
         The translated complex.
     """
+    #TODO: We need to reset the domain after this so that plotting the complex has the right coverage
     if axis >= HC.dim:
         raise ValueError(f"axis must be less than the complex dimension {HC.dim}")
 
@@ -106,6 +107,8 @@ def extrude(HC_unit, L, axis=2, cdist=1e-10):
     Complex
         Extruded mesh of exact length L
     """
+    #TODO: We need to reset the domain after this so that plotting the complex has the right coverage
+
     if L <= 0:
         raise ValueError("L must be positive")
 

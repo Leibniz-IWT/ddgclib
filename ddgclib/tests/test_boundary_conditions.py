@@ -13,6 +13,7 @@ from ddgclib._boundary_conditions import (
     NeumannBC,
     NoSlipWallBC,
     OutletDeleteBC,
+    OutletBufferedDeleteBC,
     identify_boundary_vertices,
     identify_cube_boundaries,
 )
@@ -158,6 +159,109 @@ class TestOutletDeleteBC:
         # No vertex should be past outlet
         for v in HC.V:
             assert v.x_a[0] < 8.0
+
+
+class TestOutletBufferedDeleteBC:
+    """Tests for the buffered outlet BC with ghost zone."""
+
+    def _make_1d_mesh(self, domain_end=10.0):
+        """1D mesh on [0, domain_end] with velocity and fields."""
+        HC = Complex(1, domain=[(0.0, domain_end)])
+        HC.triangulate()
+        HC.refine_all()
+        HC.refine_all()
+        for v in HC.V:
+            v.u = np.array([1.0])
+            v.p = 0.0
+            v.m = 1.0
+        return HC
+
+    def test_buffer_entry_detection(self):
+        HC = self._make_1d_mesh(10.0)
+        bV = set()
+        bc = OutletBufferedDeleteBC(outlet_pos=8.0, buffer_width=3.0,
+                                    axis=0, bV=bV)
+        bc.apply(HC, dt=0.01)
+        # Vertices past 8.0 should be in buffer
+        buffer_verts = bc.buffer_vertices
+        mesh_past_outlet = {v for v in HC.V if v.x_a[0] > 8.0}
+        assert len(buffer_verts) == len(mesh_past_outlet)
+        assert len(buffer_verts) > 0
+
+    def test_velocity_freeze(self):
+        HC = self._make_1d_mesh(10.0)
+        bc = OutletBufferedDeleteBC(outlet_pos=8.0, buffer_width=3.0, axis=0)
+        bc.apply(HC, dt=0.01)
+
+        # Contaminate buffer vertex velocities (simulate integrator update)
+        for v in bc.buffer_vertices:
+            v.u[0] = -99.0
+
+        # Apply again — velocities should be reset to frozen values
+        bc.apply(HC, dt=0.01)
+        for vid, (v, frozen_u, _) in bc._buffer.items():
+            npt.assert_array_equal(v.u, frozen_u)
+
+    def test_position_correction(self):
+        HC = self._make_1d_mesh(10.0)
+        bc = OutletBufferedDeleteBC(outlet_pos=8.0, buffer_width=5.0, axis=0)
+        dt = 0.1
+
+        # First apply to populate buffer
+        bc.apply(HC, dt=dt)
+
+        # Pick a buffer vertex and record its expected trajectory
+        first_vid = next(iter(bc._buffer))
+        buf_v, frozen_u, correct_pos = bc._buffer[first_vid]
+        expected_pos = correct_pos.copy()
+
+        # Simulate 10 steps: each step, scramble the position (as an
+        # integrator would), then let the BC correct it.
+        for _ in range(10):
+            expected_pos[:1] += frozen_u * dt
+            # Simulate integrator moving vertex to wrong position
+            wrong_pos = buf_v.x_a.copy()
+            wrong_pos[0] += 0.5  # arbitrary wrong displacement
+            HC.V.move(buf_v, tuple(wrong_pos))
+            bc.apply(HC, dt=dt)
+
+        npt.assert_allclose(buf_v.x_a[:1], expected_pos[:1], atol=1e-12)
+
+    def test_deletion_at_buffer_end(self):
+        HC = self._make_1d_mesh(10.0)
+        bc = OutletBufferedDeleteBC(outlet_pos=6.0, buffer_width=2.0, axis=0)
+        # buffer_end = 8.0, so vertices at 8.0+ should be deleted
+        initial = sum(1 for _ in HC.V)
+        deleted = bc.apply(HC, dt=0.01)
+        assert deleted > 0
+        for v in HC.V:
+            assert v.x_a[0] < 8.0
+
+    def test_bV_cleanup(self):
+        HC = self._make_1d_mesh(10.0)
+        bV = set()
+        # Add some vertices to bV that are past buffer_end
+        for v in HC.V:
+            if v.x_a[0] >= 8.0:
+                bV.add(v)
+        bc = OutletBufferedDeleteBC(outlet_pos=6.0, buffer_width=2.0,
+                                    axis=0, bV=bV)
+        bc.apply(HC, dt=0.01)
+        # Deleted vertices must not remain in bV
+        for v in bV:
+            assert v.x_a[0] < 8.0
+
+    def test_domain_vertices_untouched(self):
+        HC = self._make_1d_mesh(10.0)
+        bc = OutletBufferedDeleteBC(outlet_pos=8.0, buffer_width=3.0, axis=0)
+        # Record domain vertex velocities before apply
+        domain_vels = {id(v): v.u.copy() for v in HC.V
+                       if v.x_a[0] <= 8.0}
+        bc.apply(HC, dt=0.01)
+        # Domain vertices should be unchanged
+        for v in HC.V:
+            if id(v) in domain_vels:
+                npt.assert_array_equal(v.u, domain_vels[id(v)])
 
 
 # BoundaryConditionSet tests
