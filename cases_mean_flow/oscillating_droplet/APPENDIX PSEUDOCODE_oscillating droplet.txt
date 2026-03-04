@@ -1,0 +1,85 @@
+APPENDIX PSEUDOCODE (oscillating droplet, l=2; quadric curved-volume patch ON)
+
+Given
+  - Surface mesh: vertices X ∈ R^{n×3}, triangles F (outward oriented)
+  - Material: ρ0, σ, p_atm
+  - Time controls: N_steps, Δt_cap, N_sub, CFL_edge_frac
+  - Output cadence: SAVE_EVERY
+
+Mass convention (Rayleigh l=2 inertia match)
+  m_i ← (3/2) ρ0 V_i
+
+Initialization
+  1) Generate initial ellipsoid surface mesh (X0, F), recentre and snap to analytical ellipsoid.
+  2) Write surface_iter_0000.msh.
+  3) Quadric curved-volume patch at k=0:
+       - Run curved-volume routine on surface_iter_0000.msh.
+       - Parse per-vertex DualVolume correction ΔV0[i].
+       - Compute barycentric dual volume about O = mean(X0):
+           V_base0[i] = Σ_{t incident to i} ( V_tet(O, t) / 3 )
+       - Set V0[i] = V_base0[i] + ΔV0[i]
+  4) Set m0[i] = (3/2) ρ0 V0[i], set U_prev[i] = 0.
+
+Main loop: for k = 0 .. N_steps-1
+
+  A) Persist current mesh: write surface_iter_k.msh from X.
+
+  B) Dual areas (flat barycentric):
+       For each triangle t=(i,j,k):
+         A_tri = 0.5 * ||(X[j]-X[i]) × (X[k]-X[i])||
+         Ai += A_tri/3 to each vertex
+       (Ai is the per-vertex dual area used below)
+
+  C) Quadric curved-volume patch (dual volumes) and mass update:
+       Run curved-volume on surface_iter_k.msh, parse per-vertex DualVolume correction ΔV[i]
+       V_base[i] = Σ_{t incident to i} ( V_tet(O, t) / 3 ), with O = mean(X)
+       V_i = V_base[i] + ΔV[i]
+       m_i = (3/2) ρ0 V_i
+
+  D) Geometry operators (cotan):
+       Compute outward vertex normals N[i]
+       Build cotan weights W and Laplace-Beltrami vector Lx[i]
+
+  E) Forces:
+       Surface tension:      F_s[i] = σ * Lx[i]
+       Non-pressure force:   F_np[i] = F_s[i]
+
+  F) Provisional acceleration and time step:
+       a_np[i] = F_np[i] / m_i
+       U_prov = U_prev + Δt_cap * a_np
+       Choose Δt ≤ Δt_cap, then apply CFL:
+         L_min = min edge length, U_max = max_i ||U_prov[i]||
+         Δt = min(Δt, CFL_edge_frac * L_min / max(U_max, eps))
+       δt = Δt / N_sub
+
+  G) Global volume-rate projection pressure (uniform p_proj):
+       U_pred = U_prev + δt * a_np
+       dVdt_pred = Σ_i Ai[i] * (U_pred[i] · N[i])
+       C = Σ_i (Ai[i]^2 / m_i)
+       p_proj = - dVdt_pred / (δt * C)
+       Pressure force: F_p[i] = (p_proj * Ai[i]) * N[i]
+
+  H) Final acceleration and velocity update:
+       F_tot[i] = F_np[i] + F_p[i]
+       a[i] = F_tot[i] / m_i
+       U = U_prev
+       repeat s = 1..N_sub:
+         U = U + δt * a
+
+  I) Pin rigid motion (COM):
+       v_com = (Σ_i m_i U[i]) / (Σ_i m_i)
+       U = U - v_com
+
+  J) Position update (AB2):
+       if k == 0:  ΔX = Δt * U
+       else:       ΔX = Δt * (1.5 U - 0.5 U_prev)
+       X = X + ΔX
+
+  K) Recentre COM position:
+       x_com = (Σ_i m_i X[i]) / (Σ_i m_i)
+       X = X - x_com
+
+  L) Output (every SAVE_EVERY):
+       Dump mesh + summary scalars (A_PL, V_PL, A_cross, etc.) and plots.
+
+  M) Advance: U_prev ← U

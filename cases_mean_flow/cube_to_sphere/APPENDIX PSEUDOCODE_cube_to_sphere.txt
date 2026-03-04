@@ -1,0 +1,53 @@
+APPENDIX PSEUDOCODE (cube-to-sphere relaxation; quadric curved-volume patch ON)
+
+Given:
+  Mesh (X,F) closed and outward, material (ρ0, σ, μ, p_atm), EOS P(ρ),
+  time controls (N_steps, Δt_cap, N_sub, CFL_edge_frac), SAVE_EVERY
+
+Init:
+  1) Build cube surface mesh X^0, recenter; set U^0 = 0
+  2) Set reference volume V_ref = V_PL(X^0), reference mass m_i = ρ0 V_base,i(X^0)
+     (V_base,i from barycentric dual volumes about O = mean(X^0))
+
+For n = 0..N_steps-1:
+
+  A) Write surface_iter_n.msh from X^n
+
+  B) Quadric curved-volume patch (where curved volume enters)
+     Run curved-volume patch on surface_iter_n.msh and read:
+       DualVolume_i^n (per-vertex) and (optional) A_curved(t), plus V_corr^n (global sum)
+     Compute barycentric dual volumes: V_base,i^n = Σ_{t∋i} V_tet(O,t)/3, O = mean(X^n)
+     Set V_i^n = V_base,i^n + DualVolume_i^n
+
+  C) Dual areas
+     Aflat_i^n = Σ_{t∋i} A_flat(t)/3
+     If A_curved(t) available: Acurv_i^n = Σ_{t∋i} A_curved(t)/3 else Acurv_i^n = Aflat_i^n
+     Set A_i^n = max(Aflat_i^n, Acurv_i^n), Acurv_i^n = 0 from curved-volume patch.
+
+  D) Geometry operators (cotan)
+     Compute outward normals N_i^n, cotan Laplace-Beltrami vector Lx_i^n
+
+  E) Forces
+     Surface tension:   F_s,i = σ Lx_i
+     EOS pressure:
+       ρ_i = m_i / V_i^n
+       ΔP_i = P(ρ_i) - p_atm
+       F_p,i = (ΔP_i A_i^n) N_i^n
+     Viscous (thin-shell proxy):
+       h_eff = (V_PL(X^n) + V_corr^n) / A_PL(X^n)
+       μ_eff = μ h_eff
+       F_v,i = μ_eff * (A_i^n Δ_s U)_i   (cotan viscosity operator)
+     Total: F_i = F_s,i + F_p,i + F_v,i
+
+  F) Update
+     a_i = F_i / m_i
+     Choose Δt ≤ Δt_cap with CFL: Δt ≤ CFL_edge_frac * L_min / max(||U||,eps)
+     Substep velocity: U ← U + (Δt/N_sub) a  (repeat N_sub times)
+     Position (AB2): X ← X + Δt*(1.5 U - 0.5 U_prev)   (Euler if n=0)
+
+  G) (Optional) mild radial relaxation toward sphere
+     r* = (3 V_ref / 4π)^(1/3);  X_i ← X_i + λ (r* - ||X_i||) X_i/||X_i||
+
+  H) Save diagnostics every SAVE_EVERY
+
+  I) Advance: U_prev ← U
