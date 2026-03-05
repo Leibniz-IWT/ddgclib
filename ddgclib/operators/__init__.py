@@ -20,9 +20,12 @@ from ddgclib.operators.volume import Volume, Volume_i
 from ddgclib.operators.stress import (
     dual_area_vector,
     dual_volume,
+    cache_dual_volumes,
     velocity_difference_tensor,
+    velocity_difference_tensor_pointwise,
     strain_rate,
     cauchy_stress,
+    integrated_cauchy_stress,
     stress_force,
     stress_acceleration,
     dudt_i,
@@ -32,14 +35,21 @@ from ddgclib.operators.gradient import (
     velocity_laplacian,
     acceleration,
 )
+from ddgclib.operators.surface_tension import (
+    surface_tension_force,
+    surface_tension_acceleration,
+    dual_area_heron,
+)
 
 __all__ = [
     'MethodRegistry',
     'Curvature_i', 'Curvature_ijk',
     'Area_i', 'Area_ijk', 'Area', 'DualArea_i',
     'Volume', 'Volume_i',
-    'dual_area_vector', 'dual_volume', 'velocity_difference_tensor',
-    'strain_rate', 'cauchy_stress', 'stress_force', 'stress_acceleration',
-    'dudt_i',
+    'dual_area_vector', 'dual_volume', 'cache_dual_volumes',
+    'velocity_difference_tensor', 'velocity_difference_tensor_pointwise',
+    'strain_rate', 'cauchy_stress', 'integrated_cauchy_stress',
+    'stress_force', 'stress_acceleration', 'dudt_i',
     'pressure_gradient', 'velocity_laplacian', 'acceleration',
+    'surface_tension_force', 'surface_tension_acceleration', 'dual_area_heron',
 ]

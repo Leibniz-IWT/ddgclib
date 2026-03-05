@@ -1,30 +1,30 @@
 """
 Cauchy stress tensor operators for discrete fluid dynamics.
 
-Face-centered integrated FVM formulation.  Forces on each Lagrangian
-parcel (dual cell) are computed via Stokes' theorem as surface integrals
-over dual flux planes:
+Implements the integrated Cauchy momentum equation on Lagrangian parcels:
 
-    F_i = sum_j (F_p_ij + F_v_ij)
+    m_i * dv_i/dt = F_stress_i + F_body
 
-Pressure (half-difference):
-    F_p_ij = -0.5 * (p_j - p_i) * A_ij
+    F_stress_i = int_{S_i} sigma . n dS = sum_j sigma_f @ A_ij
 
-Viscous (face-centered tensor contraction):
-    (grad u)_f = (u_j - u_i) outer d_hat / |d_ij|
-    tau_f = mu * ((grad u)_f + (grad u)_f^T)
-    F_v_ij = tau_f . A_ij
-           = (mu / |d_ij|) * [du * (d_hat . A) + d_hat * (du . A)]
+where:
+    sigma_f = 0.5 * (sigma_i + sigma_j)  — face-averaged Cauchy stress
+    A_ij = sum_k A_ijk                    — oriented dual area vector (outward from i)
+
+For a Newtonian fluid:
+    sigma = -p * I + tau
+    tau = 2 * mu * epsilon
+    epsilon = 0.5 * (du + du^T)
+
+where du_i is the discrete integrated velocity difference tensor:
+    du_i = (1/Vol_i) * sum_j (u_j - u_i) outer A_ij
+
+This is a DDG integrated quantity (analogous to int(grad u) dV / Vol),
+not a gradient approximation.
 
 The old pressure_gradient and velocity_laplacian are special cases:
     pressure-only: sigma = -p * I  (mu = 0)
     Laplacian-only: sigma = mu * (du + du^T)  (p = 0)
-
-Additional diagnostic operators are provided for analytical comparison:
-    velocity_difference_tensor — integrated Du_i (no /Vol)
-    velocity_difference_tensor_pointwise — Du_i / Vol_i
-    cauchy_stress — pointwise sigma from pointwise du
-    integrated_cauchy_stress — volume-integrated sigma from integrated Du
 
 Constitutive relation TODOs
 ---------------------------
@@ -182,55 +182,20 @@ def dual_volume(v, HC, dim: int = 3) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Dual volume caching
-# ---------------------------------------------------------------------------
-
-def cache_dual_volumes(HC, dim: int = 3) -> None:
-    """Compute and cache dual cell volumes on all vertices.
-
-    Sets ``v.dual_vol = dual_volume(v, HC, dim)`` for every vertex in
-    ``HC.V``.  Should be called after ``compute_vd`` (e.g. inside
-    ``_retopologize``) so that operators can read ``v.dual_vol``
-    instead of recomputing on the fly.
-
-    Parameters
-    ----------
-    HC : Complex
-        Simplicial complex with duals computed.
-    dim : int
-        Spatial dimension.
-    """
-    for v in HC.V:
-        v.dual_vol = dual_volume(v, HC, dim)
-
-
-def _get_dual_vol(v, HC, dim: int = 3) -> float:
-    """Return cached dual volume, computing it on demand if missing."""
-    try:
-        return v.dual_vol
-    except AttributeError:
-        v.dual_vol = dual_volume(v, HC, dim)
-        return v.dual_vol
-
-
-# ---------------------------------------------------------------------------
 # Physics: velocity difference tensor, strain rate, stress
 # ---------------------------------------------------------------------------
 
 def velocity_difference_tensor(v, HC, dim: int = 3) -> np.ndarray:
-    """Discrete integrated velocity difference tensor Du_i at vertex v.
+    """Discrete integrated velocity difference tensor du_i at vertex v.
 
-    Computes the DDG volume-integrated quantity:
+    Computes the DDG integrated quantity:
 
-        Du_i = 0.5 * sum_j (u_j - u_i) outer A_ij
+        du_i = (1 / Vol_i) * sum_j (u_j - u_i) outer A_ij
 
-    This is analogous to int_{V_i} grad(u) dV (NOT divided by Vol_i).
-    It is the natural integrated discrete form — not a pointwise gradient
-    approximation.
-
-    To get the pointwise gradient approximation, use
-    :func:`velocity_difference_tensor_pointwise` or divide by
-    ``v.dual_vol``.
+    This is analogous to the volume-averaged velocity gradient
+    int_{V_i} grad(u) dV / Vol_i, but computed purely from discrete data
+    (velocity differences at neighboring parcels and oriented dual area
+    vectors).  It is NOT a pointwise gradient approximation.
 
     Parameters
     ----------
@@ -244,42 +209,20 @@ def velocity_difference_tensor(v, HC, dim: int = 3) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        Integrated velocity difference tensor, shape ``(dim, dim)``.
-        Component ``Du_i[a, b] = 0.5 * sum_j (u_j^a - u_i^a) * A_ij^b``.
+        Velocity difference tensor, shape ``(dim, dim)``.
+        Component ``du_i[a, b] = (1/Vol_i) sum_j (u_j^a - u_i^a) * A_ij^b``.
     """
-    Du_i = np.zeros((dim, dim))
+    Vol_i = dual_volume(v, HC, dim)
+    if Vol_i < 1e-30:
+        return np.zeros((dim, dim))
+    du_i = np.zeros((dim, dim))
     for v_j in v.nn:
         A_ij = dual_area_vector(v, v_j, HC, dim)
         delta_u = v_j.u[:dim] - v.u[:dim]
-        Du_i += np.outer(delta_u, A_ij)
-    Du_i *= 0.5
-    return Du_i
-
-
-def velocity_difference_tensor_pointwise(v, HC, dim: int = 3) -> np.ndarray:
-    """Pointwise velocity gradient approximation at vertex v.
-
-    Returns ``Du_i / Vol_i`` — the volume-averaged velocity gradient.
-    Useful for comparison with analytical solutions.
-
-    Parameters
-    ----------
-    v : vertex object
-        Must have ``v.u``, ``v.nn``, ``v.vd``.
-    HC : Complex
-        Simplicial complex with duals computed.
-    dim : int
-        Spatial dimension.
-
-    Returns
-    -------
-    np.ndarray
-        Pointwise velocity gradient, shape ``(dim, dim)``.
-    """
-    Vol_i = _get_dual_vol(v, HC, dim)
-    if Vol_i < 1e-30:
-        return np.zeros((dim, dim))
-    return velocity_difference_tensor(v, HC, dim) / Vol_i
+        du_i += np.outer(delta_u, A_ij)
+    du_i = 0.5 * du_i  # NEW: Add missing 1/2 factor
+    du_i /= Vol_i  # TODO: This is a mistake as it gives the point-wise gradient approximation, not the integrated quantity. Remove this division.
+    return du_i
 
 
 def strain_rate(du: np.ndarray) -> np.ndarray:
@@ -341,65 +284,26 @@ def cauchy_stress(
         Cauchy stress tensor, shape ``(dim, dim)``.
     """
     return -p * np.eye(dim) + 2.0 * mu * strain_rate(du)
-
-
-def integrated_cauchy_stress(
-    p: float,
-    Du: np.ndarray,
-    mu: float,
-    Vol_i: float,
-    dim: int = 3,
-) -> np.ndarray:
-    """Integrated Cauchy stress tensor over the dual cell volume.
-
-    Computes the volume-integrated stress:
-
-        Sigma_int = -p * Vol_i * I + 2 * mu * strain_rate(Du)
-
-    where ``Du`` is the integrated velocity difference tensor (NOT divided
-    by volume).  This is the natural discrete quantity — the pointwise
-    stress ``cauchy_stress`` is recovered by dividing by ``Vol_i``.
-
-    Parameters
-    ----------
-    p : float
-        Scalar pressure.
-    Du : np.ndarray
-        Integrated velocity difference tensor, shape ``(dim, dim)``.
-        From :func:`velocity_difference_tensor` (without /Vol).
-    mu : float
-        Dynamic viscosity [Pa.s].
-    Vol_i : float
-        Dual cell volume.
-    dim : int
-        Spatial dimension.
-
-    Returns
-    -------
-    np.ndarray
-        Integrated Cauchy stress tensor, shape ``(dim, dim)``.
-    """
-    return -p * Vol_i * np.eye(dim) + 2.0 * mu * strain_rate(Du)
+   # Vol_i = dual_volume(v, HC, dim)
+   # return -p * np.eye(dim) * Vol_i + 2.0 * mu * strain_rate(du)
 
 
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
-    """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
+    """Total stress force on the dual cell of vertex v.
 
-    For each dual flux plane between parcels i and j, the force has two
-    contributions computed directly from edge data:
+    Implements the integrated Cauchy equation over the dual cell surface:
 
-    Pressure (half-difference):
+        F_stress_i = int_{S_i} sigma . n dS
+                   = sum_j sigma_f @ A_ij
 
-        F_p_ij = -0.5 * (p_j - p_i) * A_ij
+    where:
+        sigma_f = 0.5 * (sigma_i + sigma_j)   — face-averaged stress
+        A_ij = oriented dual area vector       — outward from parcel i
 
-    Viscous (face-centered tensor contraction):
+    The pressure part alone gives:
+        -p_f * A_ij  (since  -p * I @ A = -p * A)
 
-        (grad u)_f = (u_j - u_i) outer d_hat / |d_ij|
-        tau_f = mu * ((grad u)_f + (grad u)_f^T)
-        F_v_ij = tau_f . A_ij
-               = (mu / |d_ij|) * [du * (d_hat . A) + d_hat * (du . A)]
-
-    Total: F_i = sum_j (F_p_ij + F_v_ij)
+    which reduces to the old pressure_gradient when mu = 0.
 
     Parameters
     ----------
@@ -417,31 +321,18 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
     np.ndarray
         Force vector, shape ``(dim,)``.
     """
+    du_i = velocity_difference_tensor(v, HC, dim)
     p_i = float(v.p) if np.ndim(v.p) == 0 else float(v.p[0])
-    u_i = v.u[:dim]
-    x_i = v.x_a[:dim]
+    sigma_i = cauchy_stress(p_i, du_i, mu, dim)
 
     F = np.zeros(dim)
     for v_j in v.nn:
         A_ij = dual_area_vector(v, v_j, HC, dim)
-
-        # --- Pressure flux (half-difference) ---
+        du_j = velocity_difference_tensor(v_j, HC, dim)
         p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
-        F -= 0.5 * (p_j - p_i) * A_ij
-
-        # --- Viscous flux (face-centered tensor contraction) ---
-        delta_u = v_j.u[:dim] - u_i
-        d_ij = v_j.x_a[:dim] - x_i
-        d_norm = np.linalg.norm(d_ij)
-        if d_norm < 1e-30:
-            continue
-        d_hat = d_ij / d_norm
-        # tau_f . A_ij = (mu/|d|) * [du*(d_hat.A) + d_hat*(du.A)]
-        F += (mu / d_norm) * (
-            delta_u * np.dot(d_hat, A_ij)
-            + d_hat * np.dot(delta_u, A_ij)
-        )
-
+        sigma_j = cauchy_stress(p_j, du_j, mu, dim)
+        sigma_f = 0.5 * (sigma_i + sigma_j)
+        F += sigma_f @ A_ij
     return F
 
 

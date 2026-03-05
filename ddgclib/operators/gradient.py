@@ -6,7 +6,7 @@ operators in ``ddgclib.operators.stress``.  The old scalar-area approach
 is the special case of the full tensor pipeline:
 
 - ``pressure_gradient``  ->  ``stress_force`` with ``mu=0``
-- ``velocity_laplacian`` ->  computed from ``velocity_difference_tensor``
+- ``velocity_laplacian`` ->  viscous part of ``stress_force`` (p=0, mu=1)
 - ``acceleration``       ->  ``stress_acceleration``
 
 Usage
@@ -28,8 +28,6 @@ from ddgclib.operators.stress import (
     dual_area_vector,
     stress_force,
     stress_acceleration,
-    velocity_difference_tensor,
-    strain_rate,
 )
 
 
@@ -40,10 +38,9 @@ def pressure_gradient(v, dim: int = 3, HC=None) -> np.ndarray:
 
         sigma = -p * I  (no deviatoric stress)
 
-        F_pressure_i = sum_j  -p_f * A_ij
+        F_pressure_i = sum_j  -0.5 * (p_j - p_i) * A_ij
 
-    where p_f = 0.5 * (p_i + p_j) and A_ij is the oriented dual area
-    vector (outward from i).
+    where A_ij is the oriented dual area vector (outward from i).
 
     Parameters
     ----------
@@ -65,13 +62,12 @@ def pressure_gradient(v, dim: int = 3, HC=None) -> np.ndarray:
 def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
     """Discrete integrated viscous diffusion term at vertex v.
 
-    Computed from the velocity difference tensor du_i:
+    Computed using face-centered tensor contraction (same formula as the
+    viscous part of ``stress_force``):
 
-        lap_u_i = sum_j  tau_f @ A_ij
+        F_v_ij = (mu/|d_ij|) * [du*(d_hat.A) + d_hat*(du.A)]
 
-    where tau_f is the deviatoric stress (mu * (du + du^T)) only.
-
-    This is the viscous contribution to stress_force (with p = 0).
+    with mu=1 to give the raw diffusion operator.
 
     Parameters
     ----------
@@ -87,19 +83,29 @@ def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
     np.ndarray
         Integrated velocity Laplacian vector (length dim).
     """
-    # Compute tau-only stress force (p=0, mu=1 to get the raw diffusion term)
-    du_i = velocity_difference_tensor(v, HC, dim)
-    eps_i = strain_rate(du_i)
-    tau_i = 2.0 * eps_i  # mu factored out
+    # Use stress_force with p=0, mu=1 to isolate the viscous term.
+    # We need to temporarily ensure v and neighbors have p=0 for the
+    # pressure part to vanish, but stress_force's pressure flux uses
+    # (p_j - p_i), so as long as we call with mu=1, we need the pressure
+    # contributions to be zero. Instead, compute the viscous flux directly.
+    u_i = v.u[:dim]
+    x_i = v.x_a[:dim]
 
     F = np.zeros(dim)
     for v_j in v.nn:
         A_ij = dual_area_vector(v, v_j, HC, dim)
-        du_j = velocity_difference_tensor(v_j, HC, dim)
-        eps_j = strain_rate(du_j)
-        tau_j = 2.0 * eps_j
-        tau_f = 0.5 * (tau_i + tau_j)
-        F += tau_f @ A_ij
+        delta_u = v_j.u[:dim] - u_i
+        d_ij = v_j.x_a[:dim] - x_i
+        d_norm = np.linalg.norm(d_ij)
+        if d_norm < 1e-30:
+            continue
+        d_hat = d_ij / d_norm
+        # tau_f . A_ij with mu=1
+        F += (1.0 / d_norm) * (
+            delta_u * np.dot(d_hat, A_ij)
+            + d_hat * np.dot(delta_u, A_ij)
+        )
+
     return F
 
 
@@ -110,8 +116,7 @@ def acceleration(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
     module.  This implements:
 
         m_i * dv_i/dt = F_stress_i
-        F_stress_i = sum_j  sigma_f @ A_ij
-        sigma = -p * I + 2 * mu * epsilon
+        F_stress_i = sum_j (F_p_ij + F_v_ij)
 
     Can be used directly as ``dudt_fn`` for the dynamic integrators::
 
