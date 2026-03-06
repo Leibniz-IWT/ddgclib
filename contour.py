@@ -2,29 +2,40 @@
 import numpy as np
 from ddgclib._plotting import plot_drop_height_vs_rad, plot_drops_growing
 from ddgclib._bubble import AdamsBashforthProfile, reorder_drop_height_vs_vol
-for b in range(0):#7#1,11#
+for b in range(0):#100#7#1,11#20
   RadTop = .1*b+.1
   print(b,'RadTop',RadTop)
   AdamsBashforthProfile(1, RadTop, fname=f'data/bub{b:05}.txt')
-  #RadTop = 10**(.5*b)
-  #print(b,'RadTop',RadTop)
-  #AdamsBashforthProfile(1, RadTop, fname=f'data/bub{b+20:05}.txt')
-rads=np.array((.01,.2,.5,1,2,3,4))
-plot_drops_growing(radInd=0, rads=rads)
-#angs=np.array((175,150,90,30,5))
-#angs=np.array((135,90,45))
-angs=np.array((165,150,120,90,60,30))
-plot_drops_growing(radInd=2, rads=angs*np.pi/180)
+#rads=np.array((.5,1,1.5,2,2.5,3))#,3.5))
+#plot_drops_growing(radInd=0, rads=rads)
+#angs=np.array((150,120,90,60,30,0))
+#plot_drops_growing(radInd=2, rads=angs*np.pi/180)
 #rads=np.array((1.005,1.01,1.05,1.1,1.5))
-for r in rads:
-  for b in range(0):#100):
-    print(r,b)
-    RadTop = r**(b-50)
-    AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1)
-#for b in range(500):#1200):
-#  print(b)
-#  RadTop = 1.05**(b-100)
-#  AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1)
+#for r in range(len(rads)):
+#  for b in range(0):#100):
+#    print(r,b)
+#    RadTop = rads[r]**(b-50)
+#    AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1, fname=f'data/bub{100*r+b:05}.txt')
+RadTops = np.concatenate([
+    np.logspace(2, 0.5, 100, endpoint=False),
+    np.logspace(.5,-.5, 200, endpoint=False),
+    np.logspace(-.5,-2, 100)
+    ])
+for b in range(0):#len(RadTops)):#100):
+  #RadTop = (1+1e-4)**( (b-200) * abs(b-200) )
+  RadTop = RadTops[b]
+  print(b,RadTop)
+  AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1, fname=f'data/bub{b:05}.txt')
 #reorder_drop_height_vs_vol(nam='ang')
 #reorder_drop_height_vs_vol(nam='rad')
-#plot_drop_height_vs_rad(nam='loop_rad loop_ang bub')
+plot_drop_height_vs_rad(nam='loop_rad loop_ang bub')
+for b in range(0):#500
+  #RadTop = (1+b)/100
+  print(b,RadTop)
+  AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1, fname=f'data/bub{b:05}.txt')
+RadTops = np.logspace(np.log10(5), 2, 50)
+for b in range(0):#len(RadTops)):
+  RadTop = RadTops[b]
+  print(b,RadTop)
+  AdamsBashforthProfile(1, RadTop, fname=f'data/bub{500+b:05}.txt')
+#plot_drop_height_vs_rad(nam='bub')
