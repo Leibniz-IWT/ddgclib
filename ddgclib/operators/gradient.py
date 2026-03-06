@@ -38,7 +38,7 @@ def pressure_gradient(v, dim: int = 3, HC=None) -> np.ndarray:
 
         sigma = -p * I  (no deviatoric stress)
 
-        F_pressure_i = sum_j  -0.5 * (p_j - p_i) * A_ij
+        F_pressure_i = sum_j  -0.5 * (p_i + p_j) * A_ij
 
     where A_ij is the oriented dual area vector (outward from i).
 
@@ -62,10 +62,10 @@ def pressure_gradient(v, dim: int = 3, HC=None) -> np.ndarray:
 def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
     """Discrete integrated viscous diffusion term at vertex v.
 
-    Computed using face-centered tensor contraction (same formula as the
-    viscous part of ``stress_force``):
+    Computed using face-centered diffusion (same formula as the viscous
+    part of ``stress_force``):
 
-        F_v_ij = (mu/|d_ij|) * [du*(d_hat.A) + d_hat*(du.A)]
+        F_v_ij = (1/|d_ij|) * du * (d_hat . A_ij)
 
     with mu=1 to give the raw diffusion operator.
 
@@ -83,11 +83,6 @@ def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
     np.ndarray
         Integrated velocity Laplacian vector (length dim).
     """
-    # Use stress_force with p=0, mu=1 to isolate the viscous term.
-    # We need to temporarily ensure v and neighbors have p=0 for the
-    # pressure part to vanish, but stress_force's pressure flux uses
-    # (p_j - p_i), so as long as we call with mu=1, we need the pressure
-    # contributions to be zero. Instead, compute the viscous flux directly.
     u_i = v.u[:dim]
     x_i = v.x_a[:dim]
 
@@ -100,11 +95,8 @@ def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
         if d_norm < 1e-30:
             continue
         d_hat = d_ij / d_norm
-        # tau_f . A_ij with mu=1
-        F += (1.0 / d_norm) * (
-            delta_u * np.dot(d_hat, A_ij)
-            + d_hat * np.dot(delta_u, A_ij)
-        )
+        # mu * (grad u)_f . A with mu=1
+        F += (1.0 / d_norm) * delta_u * np.dot(d_hat, A_ij)
 
     return F
 

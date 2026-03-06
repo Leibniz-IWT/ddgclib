@@ -1,41 +1,35 @@
 """
-Cauchy stress tensor operators for discrete fluid dynamics.
+ARCHIVED — Vertex-centered point-wise stress formulation.
 
-Implements the integrated Cauchy momentum equation on Lagrangian parcels:
+Superseded by the face-centered integrated formulation in stress.py.
+Kept for reference only; not used in the production pipeline.
 
-    m_i * dv_i/dt = F_stress_i + F_body
+This module implements a **vertex-centered point-wise** approach:
 
-    F_stress_i = int_{S_i} sigma . n dS = sum_j sigma_f @ A_ij
+    1. Compute point-wise velocity gradient du_i = (1/Vol_i) * sum_j du outer A_ij
+    2. Build point-wise Cauchy stress sigma_i = -p_i*I + 2*mu*eps(du_i)
+    3. Face-average: sigma_f = 0.5 * (sigma_i + sigma_j)
+    4. Integrate: F_i = sum_j sigma_f @ A_ij
 
-where:
-    sigma_f = 0.5 * (sigma_i + sigma_j)  — face-averaged Cauchy stress
-    A_ij = sum_k A_ijk                    — oriented dual area vector (outward from i)
+Known issues with this formulation
+-----------------------------------
+1. The symmetric stress tensor tau = mu*(du + du^T) introduces a spurious
+   mu*grad(div u) term because the rank-1 face gradient (du outer d_hat / |d|)
+   has nonzero discrete divergence on non-aligned edges, even for exactly
+   divergence-free velocity fields.  This causes O(h^0) acceleration residuals
+   at equilibrium (e.g. ~0.34 on Poiseuille) instead of machine-precision zero.
 
-For a Newtonian fluid:
-    sigma = -p * I + tau
-    tau = 2 * mu * epsilon
-    epsilon = 0.5 * (du + du^T)
+2. The vertex-centered approach divides by Vol_i to get a point-wise gradient,
+   then multiplies by A_ij during integration — mixing two approximation levels.
+   The face-centered approach avoids this by computing fluxes directly from
+   velocity differences across primal edges.
 
-where du_i is the discrete integrated velocity difference tensor:
-    du_i = (1/Vol_i) * sum_j (u_j - u_i) outer A_ij
+The current formulation (stress.py) uses face-centered fluxes:
+    Pressure:  F_p_ij = -0.5*(p_i + p_j) * A_ij      (conservative)
+    Viscous:   F_v_ij = (mu/|d|) * du * (d_hat . A)   (diffusion form)
 
-This is a DDG integrated quantity (analogous to int(grad u) dV / Vol),
-not a gradient approximation.
-
-The old pressure_gradient and velocity_laplacian are special cases:
-    pressure-only: sigma = -p * I  (mu = 0)
-    Laplacian-only: sigma = mu * (du + du^T)  (p = 0)
-
-Constitutive relation TODOs
----------------------------
-# TODO: Add viscoelastic constitutive relation (Maxwell/Oldroyd-B)
-#   sigma = -p*I + tau_elastic + tau_viscous
-# TODO: Add non-Newtonian (power-law / Carreau) viscosity
-#   mu_eff = K * |strain_rate|^(n-1)
-# TODO: Add elastic solid constitutive relation (Hookean)
-#   sigma = C : epsilon  (4th-order stiffness tensor)
-# TODO: Add surface tension stress (interface parcels)
-#   sigma += gamma * (I - n outer n) * kappa
+See Fundamentals.md for the derivation and Fundamentals_pointwise.md for this
+archived formulation's documentation.
 """
 
 import numpy as np
@@ -220,8 +214,9 @@ def velocity_difference_tensor(v, HC, dim: int = 3) -> np.ndarray:
         A_ij = dual_area_vector(v, v_j, HC, dim)
         delta_u = v_j.u[:dim] - v.u[:dim]
         du_i += np.outer(delta_u, A_ij)
-    du_i = 0.5 * du_i  # NEW: Add missing 1/2 factor
-    du_i /= Vol_i  # TODO: This is a mistake as it gives the point-wise gradient approximation, not the integrated quantity. Remove this division.
+    du_i = 0.5 * du_i
+    du_i /= Vol_i  # NOTE: This divides by volume to get point-wise gradient.
+    # The face-centered formulation in stress.py avoids this entirely.
     return du_i
 
 

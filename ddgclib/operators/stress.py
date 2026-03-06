@@ -7,18 +7,21 @@ over dual flux planes:
 
     F_i = sum_j (F_p_ij + F_v_ij)
 
-Pressure (half-difference):
-    F_p_ij = -0.5 * (p_j - p_i) * A_ij
+Pressure (face-average, conservative):
+    F_p_ij = -0.5 * (p_i + p_j) * A_ij
 
-Viscous (face-centered tensor contraction):
-    (grad u)_f = (u_j - u_i) outer d_hat / |d_ij|
-    tau_f = mu * ((grad u)_f + (grad u)_f^T)
-    F_v_ij = tau_f . A_ij
-           = (mu / |d_ij|) * [du * (d_hat . A) + d_hat * (du . A)]
+Viscous (face-centered diffusion):
+    F_v_ij = mu * (grad u)_f . A_ij
+           = (mu / |d_ij|) * du * (d_hat . A_ij)
+
+This is the "diffusion form" (mu * Laplacian u), which equals
+div(mu * (grad u + grad u^T)) for incompressible flow (div u = 0).
+The symmetric (transpose) term is omitted because the rank-1 face
+gradient has spurious discrete compressibility on non-orthogonal edges.
 
 The old pressure_gradient and velocity_laplacian are special cases:
     pressure-only: sigma = -p * I  (mu = 0)
-    Laplacian-only: sigma = mu * (du + du^T)  (p = 0)
+    Laplacian-only: mu * grad(u) . A  (p = 0)
 
 Additional diagnostic operators are provided for analytical comparison:
     velocity_difference_tensor — integrated Du_i (no /Vol)
@@ -388,16 +391,22 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
     For each dual flux plane between parcels i and j, the force has two
     contributions computed directly from edge data:
 
-    Pressure (half-difference):
+    Pressure (face-average, conservative):
 
-        F_p_ij = -0.5 * (p_j - p_i) * A_ij
+        F_p_ij = -0.5 * (p_i + p_j) * A_ij
 
-    Viscous (face-centered tensor contraction):
+    Viscous (face-centered diffusion):
 
-        (grad u)_f = (u_j - u_i) outer d_hat / |d_ij|
-        tau_f = mu * ((grad u)_f + (grad u)_f^T)
-        F_v_ij = tau_f . A_ij
-               = (mu / |d_ij|) * [du * (d_hat . A) + d_hat * (du . A)]
+        F_v_ij = mu * (grad u)_f . A_ij
+               = (mu / |d_ij|) * du * (d_hat . A_ij)
+
+    where du = u_j - u_i, d_hat = (x_j - x_i) / |x_j - x_i|.
+
+    This is the "diffusion form" of the viscous term (mu * Laplacian u),
+    which is equivalent to the full symmetric stress divergence
+    div(mu * (grad u + grad u^T)) for incompressible flow (div u = 0).
+    The symmetric (transpose) term mu * grad(div u) is omitted because
+    the rank-1 face gradient has spurious discrete compressibility.
 
     Total: F_i = sum_j (F_p_ij + F_v_ij)
 
@@ -425,22 +434,19 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
     for v_j in v.nn:
         A_ij = dual_area_vector(v, v_j, HC, dim)
 
-        # --- Pressure flux (half-difference) ---
+        # --- Pressure flux (face-average, conservative) ---
         p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
-        F -= 0.5 * (p_j - p_i) * A_ij
+        F -= 0.5 * (p_i + p_j) * A_ij
 
-        # --- Viscous flux (face-centered tensor contraction) ---
+        # --- Viscous flux (face-centered diffusion) ---
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
         d_norm = np.linalg.norm(d_ij)
         if d_norm < 1e-30:
             continue
         d_hat = d_ij / d_norm
-        # tau_f . A_ij = (mu/|d|) * [du*(d_hat.A) + d_hat*(du.A)]
-        F += (mu / d_norm) * (
-            delta_u * np.dot(d_hat, A_ij)
-            + d_hat * np.dot(delta_u, A_ij)
-        )
+        # mu * (grad u)_f . A = (mu/|d|) * du * (d_hat . A)
+        F += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
 
     return F
 
