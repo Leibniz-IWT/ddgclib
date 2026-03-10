@@ -36,20 +36,20 @@
 | $\boldsymbol{\tau}$ | rank-2 tensor | Viscous (deviatoric) stress tensor |
 | $\boldsymbol{\varepsilon}$ | rank-2 tensor | Symmetric rate-of-strain tensor |
 | $\mu$ | scalar | Dynamic viscosity |
-| $v_i$ | vertex | $i$-th primary vertex of the simplicial complex |
-| $V_i$ | 3-D cell | Barycentric dual cell associated with $v_i$ |
-| $S_i = \partial V_i$ | closed surface | Boundary of the dual cell $V_i$ |
-| $m_i$ | scalar | Fixed mass of parcel $i$ |
-| $\rho_i$ | scalar | Density of parcel $i$ |
-| $\mathrm{Vol}_i^{\mathrm{dual}}$ | scalar | Volume of the barycentric dual cell $V_i$ |
-| $\mathbf{x}_i$ | vector | Position of vertex $i$ |
-| $\mathbf{u}_i$ | vector | Velocity of parcel $i$ (stored as `v.u`) |
-| $p_i$ | scalar | Pressure of parcel $i$ (stored as `v.p`) |
+| $v\_i$ | vertex | $i$-th primary vertex of the simplicial complex |
+| $V\_i$ | 3-D cell | Barycentric dual cell associated with $v\_i$ |
+| $S\_i = \partial V\_i$ | closed surface | Boundary of the dual cell $V\_i$ |
+| $m\_i$ | scalar | Fixed mass of parcel $i$ |
+| $\rho\_i$ | scalar | Density of parcel $i$ |
+| $\mathrm{Vol}\_i^{\mathrm{dual}}$ | scalar | Volume of the barycentric dual cell $V\_i$ |
+| $\mathbf{x}\_i$ | vector | Position of vertex $i$ |
+| $\mathbf{u}\_i$ | vector | Velocity of parcel $i$ (stored as `v.u`) |
+| $p\_i$ | scalar | Pressure of parcel $i$ (stored as `v.p`) |
 | $N(i)$ | index set | Set of vertices $j$ sharing a primal edge with $i$ |
-| $\mathbf{A}_{ij}$ | vector | Exact dual-face area vector on the face between parcels $i$ and $j$, pointing outward from $i$ |
-| $\mathbf{d}_{ij}$ | vector | Vector from $\mathbf{x}_i$ to $\mathbf{x}_j$; $\mathbf{d}_{ij} = \mathbf{x}_j - \mathbf{x}_i$ |
-| $\hat{\mathbf{d}}_{ij}$ | unit vector | $\mathbf{d}_{ij} / \lvert\mathbf{d}_{ij}\rvert$ |
-| $\mathbf{F}_{\star,i}$ | vector | Discrete force of type $\star$ acting on parcel $i$ |
+| $\mathbf{A}\_{ij}$ | vector | Exact dual-face area vector on the face between parcels $i$ and $j$, pointing outward from $i$ |
+| $\mathbf{d}\_{ij}$ | vector | Vector from $\mathbf{x}\_i$ to $\mathbf{x}\_j$; $\mathbf{d}\_{ij} = \mathbf{x}\_j - \mathbf{x}\_i$ |
+| $\hat{\mathbf{d}}\_{ij}$ | unit vector | $\mathbf{d}\_{ij} / \lvert\mathbf{d}\_{ij}\rvert$ |
+| $\mathbf{F}\_{\star,i}$ | vector | Discrete force of type $\star$ acting on parcel $i$ |
 
 > **Orientation convention.** The area vector $\mathbf{A}_{ij}$ always points *outward* from parcel $i$, so $\mathbf{A}_{ji} = -\mathbf{A}_{ij}$. This guarantees exact pairwise cancellation (Newton's third law) in the discrete setting.
 
@@ -171,12 +171,12 @@ $$
 | Symbol | Meaning |
 |---|---|
 | $\mu$ | Dynamic viscosity of the fluid |
-| $(\nabla\mathbf{u})_f$ | Face-centred approximation of the velocity gradient |
-| $\mathbf{d}_{ij} = \mathbf{x}_j - \mathbf{x}_i$ | Edge vector pointing from parcel $i$ to parcel $j$ |
-| $\lvert\mathbf{d}_{ij}\rvert$ | Euclidean length of the edge |
-| $\hat{\mathbf{d}}_{ij} = \mathbf{d}_{ij}/\lvert\mathbf{d}_{ij}\rvert$ | Unit vector along the edge |
-| $\Delta\mathbf{u} = \mathbf{u}_j - \mathbf{u}_i$ | Velocity difference across the edge |
-| $\hat{\mathbf{d}}_{ij}\cdot\mathbf{A}_{ij}$ | Projection of the dual-face area onto the edge direction |
+| $(\nabla\mathbf{u})\_f$ | Face-centred approximation of the velocity gradient |
+| $\mathbf{d}\_{ij} = \mathbf{x}\_j - \mathbf{x}\_i$ | Edge vector pointing from parcel $i$ to parcel $j$ |
+| $\lvert\mathbf{d}\_{ij}\rvert$ | Euclidean length of the edge |
+| $\hat{\mathbf{d}}\_{ij} = \mathbf{d}\_{ij}/\lvert\mathbf{d}\_{ij}\rvert$ | Unit vector along the edge |
+| $\Delta\mathbf{u} = \mathbf{u}\_j - \mathbf{u}\_i$ | Velocity difference across the edge |
+| $\hat{\mathbf{d}}\_{ij}\cdot\mathbf{A}\_{ij}$ | Projection of the dual-face area onto the edge direction |
 
 > **Why not the full symmetric form?** The complete Newtonian viscous stress includes a transpose term $(\nabla\mathbf{v})^{\top}$. Including it on non-orthogonal edges introduces a spurious discrete compressibility and prevents machine-precision equilibria on divergence-free flows such as Poiseuille flow. The diffusion form above recovers exact zero residual on all such benchmarks (verified by 488 regression tests).
 
@@ -227,7 +227,7 @@ $$
 
 | Symbol | Meaning |
 |---|---|
-| $\Gamma_i$ | Portion of the interface contained within parcel $V_i$ |
+| $\Gamma\_i$ | Portion of the interface contained within parcel $V\_i$ |
 | $\gamma$ | Surface-tension coefficient |
 | $\kappa$ | Mean curvature of the interface (positive for a convex surface) |
 | $\mathbf{n}$ | Interface outward normal |
@@ -259,13 +259,27 @@ $$
 **Full operator skeleton** (`ddgclib/operators/stress.py`):
 
 ```python
-# ddgclib/operators/stress.py
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
-    ...
-    for v_j in v.nn:
+    """Return the total stress force vector on parcel v."""
+    F   = np.zeros(dim)
+    x_i = v.x_a[:dim]
+    u_i = v.u[:dim]
+    p_i = float(v.p) if np.ndim(v.p) == 0 else float(v.p[0])
+
+    for v_j in v.nn:                          # loop over neighbours j ∈ N(i)
         A_ij = dual_area_vector(v, v_j, HC, dim)
-        # pressure line above
-        # viscous line above
+
+        # 4.1 Pressure flux
+        p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
+        F  -= 0.5 * (p_i + p_j) * A_ij
+
+        # 4.2 Viscous flux (diffusion form)
+        delta_u = v_j.u[:dim] - u_i
+        d_ij    = v_j.x_a[:dim] - x_i
+        d_norm  = np.linalg.norm(d_ij)
+        d_hat   = d_ij / d_norm
+        F      += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+
     return F
 ```
 
@@ -288,9 +302,9 @@ Each vertex `v` stores:
 
 | Attribute | Symbol | Description |
 |---|---|---|
-| `v.p` | $p_i$ | Cell-averaged pressure |
-| `v.u` | $\mathbf{u}_i$ | Parcel velocity vector |
-| `v.m` | $m_i$ | Fixed parcel mass (never modified) |
+| `v.p` | $p\_i$ | Cell-averaged pressure |
+| `v.u` | $\mathbf{u}\_i$ | Parcel velocity vector |
+| `v.m` | $m\_i$ | Fixed parcel mass (never modified) |
 
 ### Step 2 — Mesh construction
 
@@ -338,8 +352,8 @@ The force loop uses only the two vertices sharing each primal edge. This keeps t
 
 | Property | Status |
 |---|---|
-| Mass conservation (per parcel) | Exact — $m_i = \text{const}$ by construction |
-| Momentum conservation (pairwise) | Exact — $\mathbf{F}_{p,ij} + \mathbf{F}_{p,ji} = \mathbf{0}$ |
+| Mass conservation (per parcel) | Exact — $m\_i = \text{const}$ by construction |
+| Momentum conservation (pairwise) | Exact — $\mathbf{F}\_{p,ij} + \mathbf{F}\_{p,ji} = \mathbf{0}$ |
 | Linear pressure recovery | Exact — by the discrete divergence theorem on the barycentric dual |
 | Poiseuille equilibrium residual | Machine precision — verified by 488 regression tests |
 
@@ -358,7 +372,7 @@ from ddgclib.operators.gradient import acceleration         # → stress_force()
 | Feature | Entry point |
 |---|---|
 | Surface tension | Replace `F_gamma = 0` with the integral in Section 4.4 |
-| Non-Newtonian / viscoelastic fluids | Replace or augment the viscous flux $\mathbf{F}_{v,ij}$ |
+| Non-Newtonian / viscoelastic fluids | Replace or augment the viscous flux $\mathbf{F}\_{v,ij}$ |
 | Full compressible bulk viscosity | Add the $\tfrac{2}{3}\mu(\nabla\cdot\mathbf{v})\mathbf{I}$ term to $\boldsymbol{\tau}$ |
 
 All extensions plug in by modifying `stress_force()` while the dual-geometry foundation (Steps 1–2 of the pipeline) remains unchanged.
