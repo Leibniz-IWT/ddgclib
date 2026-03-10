@@ -30,7 +30,7 @@
 | $\rho$ | scalar field | Mass density |
 | $\mathbf{v}$ | vector field | Continuum velocity |
 | $\boldsymbol{\sigma}$ | rank-2 tensor | Cauchy stress tensor |
-| $\mathbf{b}$ | vector field | Body force per unit mass (e.g.\ gravity $\mathbf{g}$) |
+| $\mathbf{b}$ | vector field | Body force per unit mass (e.g. gravity $\mathbf{g}$) |
 | $p$ | scalar field | Thermodynamic pressure |
 | $\mathbf{I}$ | rank-2 tensor | Identity tensor |
 | $\boldsymbol{\tau}$ | rank-2 tensor | Viscous (deviatoric) stress tensor |
@@ -60,9 +60,9 @@
 The method discretises the **integral (weak) form** of the Cauchy momentum equation. For an arbitrary material control volume $V(t)$ that moves with the fluid, Newton's second law reads:
 
 $$
-\frac{d}{dt}\int_{V(t)}\rho\,\mathbf{v}\;\mathrm{d}V
-= \underbrace{\int_{S(t)}\boldsymbol{\sigma}\cdot\mathbf{n}\;\mathrm{d}S}_{\text{surface forces}}
-+ \underbrace{\int_{V(t)}\rho\,\mathbf{b}\;\mathrm{d}V}_{\text{body forces}}
+\frac{d}{dt}\int_{V(t)}\rho\thinspace\mathbf{v}\medspace\mathrm{d}V
+= \underbrace{\int_{S(t)}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\text{surface forces}}
++ \underbrace{\int_{V(t)}\rho\thinspace\mathbf{b}\medspace\mathrm{d}V}_{\text{body forces}}
 $$
 
 Because $V(t)$ moves with the material, there is no convective flux through $S(t)$; the left-hand side is a pure material (Lagrangian) time derivative of momentum.
@@ -72,13 +72,13 @@ Because $V(t)$ moves with the material, there is no convective flux through $S(t
 The Cauchy stress tensor is decomposed into an isotropic pressure part and a viscous deviatoric part:
 
 $$
-\boldsymbol{\sigma} = -p\,\mathbf{I} + \boldsymbol{\tau}
+\boldsymbol{\sigma} = -p\thinspace\mathbf{I} + \boldsymbol{\tau}
 $$
 
 For a Newtonian fluid the viscous stress is proportional to the symmetric rate-of-strain tensor:
 
 $$
-\boldsymbol{\tau} = 2\mu\,\boldsymbol{\varepsilon},
+\boldsymbol{\tau} = 2\mu\thinspace\boldsymbol{\varepsilon},
 \qquad
 \boldsymbol{\varepsilon} = \tfrac{1}{2}\bigl(\nabla\mathbf{v} + (\nabla\mathbf{v})^{\top}\bigr)
 $$
@@ -106,7 +106,7 @@ is computed by `dual_area_vector()` / `e_star()` (in `ddgclib/operators/stress.p
 Each parcel $i$ carries a **fixed mass**
 
 $$
-m_i = \rho_i\,\mathrm{Vol}_i^{\mathrm{dual}} = \text{const},
+m_i = \rho_i\thinspace\mathrm{Vol}_i^{\mathrm{dual}} = \text{const},
 $$
 
 so mass conservation is satisfied identically throughout the simulation — there are no continuity equations to solve. As the parcel moves and deforms, $\rho_i$ and $\mathrm{Vol}_i^{\mathrm{dual}}$ change in tandem while their product stays fixed.
@@ -116,8 +116,8 @@ so mass conservation is satisfied identically throughout the simulation — ther
 Applying the integral momentum balance to the dual cell $V_i$ and using fixed mass gives the **parcel equation of motion**:
 
 $$
-m_i\,\frac{d\mathbf{u}_i}{dt}
-= \underbrace{\int_{S_i}\boldsymbol{\sigma}\cdot\mathbf{n}\;\mathrm{d}S}_{\mathbf{F}_{\mathrm{stress},i}}
+m_i\thinspace\frac{d\mathbf{u}_i}{dt}
+= \underbrace{\int_{S_i}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\mathbf{F}_{\mathrm{stress},i}}
 + \mathbf{F}_{\mathrm{body},i}
 + \mathbf{F}_{\gamma,i}
 $$
@@ -132,14 +132,14 @@ All operators are implemented in `ddgclib/operators/stress.py`.
 
 ### 4.1 Pressure Force
 
-The pressure contribution to the surface integral comes from the $-p\,\mathbf{I}$ term in the stress:
+The pressure contribution to the surface integral comes from the $-p\thinspace\mathbf{I}$ term in the stress:
 
 $$
 \mathbf{F}_{p,i}
-= -\int_{S_i} p\,\mathbf{n}\;\mathrm{d}S
+= -\int_{S_i} p\thinspace\mathbf{n}\medspace\mathrm{d}S
 = \sum_{j \in N(i)} \mathbf{F}_{p,ij},
 \qquad
-\mathbf{F}_{p,ij} = -\tfrac{1}{2}(p_i + p_j)\,\mathbf{A}_{ij}
+\mathbf{F}_{p,ij} = -\tfrac{1}{2}(p_i + p_j)\thinspace\mathbf{A}_{ij}
 $$
 
 The face-average pressure $\tfrac{1}{2}(p_i + p_j)$ is a linear interpolation of the two vertex values, which is exact for any linear pressure field. The resulting force is **pairwise momentum-conserving**:
@@ -150,7 +150,7 @@ $$
 \text{Newton's third law holds exactly.}
 $$
 
-By the discrete divergence theorem on the barycentric dual, this scheme recovers $-\int_{V_i}\nabla p\,\mathrm{d}V$ exactly for linear $p$.
+By the discrete divergence theorem on the barycentric dual, this scheme recovers $-\int_{V_i}\nabla p\thinspace\mathrm{d}V$ exactly for linear $p$.
 
 **Source code** (inside `stress_force()`):
 
@@ -164,11 +164,11 @@ F -= 0.5 * (p_i + p_j) * A_ij
 
 ### 4.2 Viscous Force
 
-For liquids whose compressibility is handled entirely by an equation of state (e.g.\ Tait–Murnaghan), the deviatoric stress integral reduces to a **vector-Laplacian diffusion** form. The viscous flux across the dual face between parcels $i$ and $j$ is approximated using a two-point gradient:
+For liquids whose compressibility is handled entirely by an equation of state (e.g. Tait–Murnaghan), the deviatoric stress integral reduces to a **vector-Laplacian diffusion** form. The viscous flux across the dual face between parcels $i$ and $j$ is approximated using a two-point gradient:
 
 $$
 \mathbf{F}_{v,ij}
-= \mu\,(\nabla\mathbf{u})_f \cdot \mathbf{A}_{ij}
+= \mu\thinspace(\nabla\mathbf{u})_f \cdot \mathbf{A}_{ij}
 = \frac{\mu}{\lvert\mathbf{d}_{ij}\rvert}
   \underbrace{(\mathbf{u}_j - \mathbf{u}_i)}_{\Delta\mathbf{u}}
   \underbrace{\bigl(\hat{\mathbf{d}}_{ij}\cdot\mathbf{A}_{ij}\bigr)}_{\text{projected area}}
@@ -209,10 +209,10 @@ $$
 
 ### 4.3 Body Force
 
-For a body force field $\mathbf{b}$ (acceleration per unit mass, e.g.\ $\mathbf{b} = \mathbf{g}$ for gravity), the volume integral over the dual cell gives:
+For a body force field $\mathbf{b}$ (acceleration per unit mass, e.g. $\mathbf{b} = \mathbf{g}$ for gravity), the volume integral over the dual cell gives:
 
 $$
-\mathbf{F}_{\mathrm{body},i} = \int_{V_i} \rho\,\mathbf{b}\;\mathrm{d}V = m_i\,\mathbf{b}_i
+\mathbf{F}_{\mathrm{body},i} = \int_{V_i} \rho\thinspace\mathbf{b}\medspace\mathrm{d}V = m_i\thinspace\mathbf{b}_i
 $$
 
 The last equality holds exactly when $\mathbf{b}$ is uniform over $V_i$ (the constant-body-force case):
@@ -230,7 +230,7 @@ For a spatially varying body force, the integral is evaluated by quadrature over
 For parcels lying on a free surface or a fluid–fluid interface, a surface-tension term will be added:
 
 $$
-\mathbf{F}_{\gamma,i} = \int_{\Gamma_i} \gamma\,\kappa\,\mathbf{n}\;\mathrm{d}S
+\mathbf{F}_{\gamma,i} = \int_{\Gamma_i} \gamma\thinspace\kappa\thinspace\mathbf{n}\medspace\mathrm{d}S
 $$
 
 | Symbol | Meaning |
@@ -281,10 +281,8 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
 The parcel acceleration is exposed through two convenience aliases:
 
 ```python
-from ddgclib.operators.stress import dudt_i          # alias for stress_acceleration
-
-# or the thin wrapper in gradient.py
-from ddgclib.operators.gradient import acceleration
+from ddgclib.operators.stress   import dudt_i       # alias: stress_acceleration
+from ddgclib.operators.gradient import acceleration  # thin wrapper, same result
 ```
 
 ---
@@ -331,7 +329,7 @@ Advance velocity and position using any integrator from `ddgclib/dynamic_integra
 
 ### Step 5 — Equation of state update
 
-Recompute $p_i$ from the new dual volume $\mathrm{Vol}_i^{\mathrm{dual}}$ using the chosen equation of state (e.g.\ Tait–Murnaghan for liquids).
+Recompute $p_i$ from the new dual volume $\mathrm{Vol}_i^{\mathrm{dual}}$ using the chosen equation of state (e.g. Tait–Murnaghan for liquids).
 
 ### Step 6 — Retopologisation
 
