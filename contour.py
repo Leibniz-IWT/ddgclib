@@ -1,7 +1,8 @@
 #Ianto Cannon 2026 Feb 4. Find the maximum volume for each contact angle.
 import numpy as np
-from ddgclib._plotting import plot_drop_height_vs_rad, plot_drops_growing
+from ddgclib._plotting import plot_drop_height_vs_rad, plot_drops_growing, plot_bubble_coords
 from ddgclib._bubble import AdamsBashforthProfile, reorder_drop_height_vs_vol
+#plot_bubble_coords()
 for b in range(0):#100#7#1,11#20
   RadTop = .1*b+.1
   print(b,'RadTop',RadTop)

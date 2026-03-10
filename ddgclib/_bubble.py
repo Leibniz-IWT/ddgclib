@@ -403,6 +403,8 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     #ds = min( abs(capLen)**2, 1e-3*abs(np.pi-psi), 1e-1 )
     #ds = 1e-4 #* min( abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = 1e-0 * min( abs(capLen)**2, 1e-2*abs(psi), 1e-2*abs(np.pi-psi), 1e-1 )
+    if r>0: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4*r, 1e-4 )
+    else: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
     dr = ds * np.cos(psi)
     dz = ds * np.sin(psi)
     r += dr
@@ -468,7 +470,7 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     if False:# psi>np.pi: 
       print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
       break
-    #if psi<0-.1*angleSave*np.pi/180: break
+    if psi<0-.1*angleSave*np.pi/180: break
     #if psi>np.pi+.1*angleSave*np.pi/180: break
     if dPsi>0 and dPsiPrev<0: break
     dPsiPrev=dPsi
