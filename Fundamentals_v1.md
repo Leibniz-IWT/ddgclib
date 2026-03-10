@@ -259,27 +259,13 @@ $$
 **Full operator skeleton** (`ddgclib/operators/stress.py`):
 
 ```python
+# ddgclib/operators/stress.py
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
-    """Return the total stress force vector on parcel v."""
-    F   = np.zeros(dim)
-    x_i = v.x_a[:dim]
-    u_i = v.u[:dim]
-    p_i = float(v.p) if np.ndim(v.p) == 0 else float(v.p[0])
-
-    for v_j in v.nn:                          # loop over neighbours j ∈ N(i)
+    ...
+    for v_j in v.nn:
         A_ij = dual_area_vector(v, v_j, HC, dim)
-
-        # 4.1 Pressure flux
-        p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
-        F  -= 0.5 * (p_i + p_j) * A_ij
-
-        # 4.2 Viscous flux (diffusion form)
-        delta_u = v_j.u[:dim] - u_i
-        d_ij    = v_j.x_a[:dim] - x_i
-        d_norm  = np.linalg.norm(d_ij)
-        d_hat   = d_ij / d_norm
-        F      += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
-
+        # pressure line above
+        # viscous line above
     return F
 ```
 
