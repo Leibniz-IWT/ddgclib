@@ -60,9 +60,7 @@
 The method discretises the **integral (weak) form** of the Cauchy momentum equation. For an arbitrary material control volume $V(t)$ that moves with the fluid, Newton's second law reads:
 
 $$
-\frac{d}{dt}\int_{V(t)}\rho\thinspace\mathbf{v}\medspace\mathrm{d}V
-= \underbrace{\int_{S(t)}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\text{surface forces}}
-+ \underbrace{\int_{V(t)}\rho\thinspace\mathbf{b}\medspace\mathrm{d}V}_{\text{body forces}}
+\frac{d}{dt}\int_{V(t)}\rho\thinspace\mathbf{v}\medspace\mathrm{d}V = \underbrace{\int_{S(t)}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\text{surface forces}} + \underbrace{\int_{V(t)}\rho\thinspace\mathbf{b}\medspace\mathrm{d}V}_{\text{body forces}}
 $$
 
 Because $V(t)$ moves with the material, there is no convective flux through $S(t)$; the left-hand side is a pure material (Lagrangian) time derivative of momentum.
@@ -116,10 +114,7 @@ so mass conservation is satisfied identically throughout the simulation — ther
 Applying the integral momentum balance to the dual cell $V_i$ and using fixed mass gives the **parcel equation of motion**:
 
 $$
-m_i\thinspace\frac{d\mathbf{u}_i}{dt}
-= \underbrace{\int_{S_i}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\mathbf{F}_{\mathrm{stress},i}}
-+ \mathbf{F}_{\mathrm{body},i}
-+ \mathbf{F}_{\gamma,i}
+m_i\thinspace\frac{d\mathbf{u}_i}{dt} = \underbrace{\int_{S_i}\boldsymbol{\sigma}\cdot\mathbf{n}\medspace\mathrm{d}S}_{\mathbf{F}_{\mathrm{stress},i}} + \mathbf{F}_{\mathrm{body},i} + \mathbf{F}_{\gamma,i}
 $$
 
 where $\mathbf{F}_{\gamma,i}$ is the surface-tension contribution (Section 4.4). All surface integrals are evaluated by summing face-centred fluxes over the exact dual geometry.
@@ -136,8 +131,7 @@ The pressure contribution to the surface integral comes from the $-p\thinspace\m
 
 $$
 \mathbf{F}_{p,i}
-= -\int_{S_i} p\thinspace\mathbf{n}\medspace\mathrm{d}S
-= \sum_{j \in N(i)} \mathbf{F}_{p,ij},
+= -\int_{S_i} p\thinspace\mathbf{n}\medspace\mathrm{d}S = \sum_{j \in N(i)} \mathbf{F}_{p,ij},
 \qquad
 \mathbf{F}_{p,ij} = -\tfrac{1}{2}(p_i + p_j)\thinspace\mathbf{A}_{ij}
 $$
@@ -167,9 +161,7 @@ F -= 0.5 * (p_i + p_j) * A_ij
 For liquids whose compressibility is handled entirely by an equation of state (e.g. Tait–Murnaghan), the deviatoric stress integral reduces to a **vector-Laplacian diffusion** form. The viscous flux across the dual face between parcels $i$ and $j$ is approximated using a two-point gradient:
 
 $$
-\mathbf{F}_{v,ij}
-= \mu\thinspace(\nabla\mathbf{u})_f \cdot \mathbf{A}_{ij}
-= \frac{\mu}{\lvert\mathbf{d}_{ij}\rvert}
+\mathbf{F}_{v,ij} = \mu\thinspace(\nabla\mathbf{u})_f \cdot \mathbf{A}_{ij} = \frac{\mu}{\lvert\mathbf{d}_{ij}\rvert}
   \underbrace{(\mathbf{u}_j - \mathbf{u}_i)}_{\Delta\mathbf{u}}
   \underbrace{\bigl(\hat{\mathbf{d}}_{ij}\cdot\mathbf{A}_{ij}\bigr)}_{\text{projected area}}
 $$
@@ -249,8 +241,7 @@ Curvature $\kappa$ will be estimated using the Laplace–Beltrami method in `ddg
 The complete stress contribution on parcel $i$ combines pressure and viscous parts:
 
 $$
-\mathbf{F}_{\mathrm{stress},i}
-= \sum_{j \in N(i)} \bigl(\mathbf{F}_{p,ij} + \mathbf{F}_{v,ij}\bigr)
+\mathbf{F}_{\mathrm{stress},i} = \sum_{j \in N(i)} \bigl(\mathbf{F}_{p,ij} + \mathbf{F}_{v,ij}\bigr)
 $$
 
 The total force is:
@@ -268,13 +259,27 @@ $$
 **Full operator skeleton** (`ddgclib/operators/stress.py`):
 
 ```python
-# ddgclib/operators/stress.py
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None) -> np.ndarray:
-    ...
-    for v_j in v.nn:
+    """Return the total stress force vector on parcel v."""
+    F   = np.zeros(dim)
+    x_i = v.x_a[:dim]
+    u_i = v.u[:dim]
+    p_i = float(v.p) if np.ndim(v.p) == 0 else float(v.p[0])
+
+    for v_j in v.nn:                          # loop over neighbours j ∈ N(i)
         A_ij = dual_area_vector(v, v_j, HC, dim)
-        # pressure line above
-        # viscous line above
+
+        # 4.1 Pressure flux
+        p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
+        F  -= 0.5 * (p_i + p_j) * A_ij
+
+        # 4.2 Viscous flux (diffusion form)
+        delta_u = v_j.u[:dim] - u_i
+        d_ij    = v_j.x_a[:dim] - x_i
+        d_norm  = np.linalg.norm(d_ij)
+        d_hat   = d_ij / d_norm
+        F      += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+
     return F
 ```
 
