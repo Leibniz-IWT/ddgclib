@@ -403,13 +403,26 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     #ds = min( abs(capLen)**2, 1e-3*abs(np.pi-psi), 1e-1 )
     #ds = 1e-4 #* min( abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
     #ds = 1e-0 * min( abs(capLen)**2, 1e-2*abs(psi), 1e-2*abs(np.pi-psi), 1e-1 )
-    if r>0: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4*r, 1e-4 )
-    else: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
+    #if r>0: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4*r, 1e-4 )
+    #else: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
     dr = ds * np.cos(psi)
     dz = ds * np.sin(psi)
     r += dr
     z += dz
     dPsi = ds * (2/RadTop - z/capLen**2 - np.sin(psi)/r)
+    #ds2=0
+    #if abs(dPsi)*180/np.pi>1:
+    #  ds2=ds*np.pi/180/abs(dPsi)
+    #if r<1 and abs(np.cos(psi))<.1:
+    #  ds2=ds*1e-1#abs(np.cos(psi))
+    #if ds2:
+    #  r -= dr
+    #  z -= dz
+    #  dr = ds2 * np.cos(psi)
+    #  dz = ds2 * np.sin(psi)
+    #  r += dr
+    #  z += dz
+    #  dPsi = ds2 * (2/RadTop - z/capLen**2 - np.sin(psi)/r)
     psi += dPsi
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
@@ -418,8 +431,8 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
       if not i%100 or dPsi>1e-2: 
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
     if angleSave:
-      angBin = int(psi*180/np.pi // angleSave)
-      angBinPrev = int((psi-dPsi)*180/np.pi // angleSave)
+      angBin = int(np.floor(psi*180/np.pi / angleSave))
+      angBinPrev = int(np.floor((psi-dPsi)*180/np.pi / angleSave))
       if angBin != angBinPrev:
         #if dPsi<0: nam='angleM'
         #else: 
@@ -428,26 +441,28 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
     if radSave:
       nam='rad'
-      radBin = int(r // radSave)
-      radBinPrev = int( (r-dr) // radSave)
-      if radBin==radBinPrev and r<.2:
+      radBin = int(np.floor(r / radSave))
+      radBinLimit = radBin*radSave
+      radBinPrev = int(np.floor( (r-dr) / radSave))
+      if False:#radBin==radBinPrev and r<.2:
         nam='radLo'
-        radBin = int(np.log(r) // radSave)
+        radBin = int(np.floor(np.log(r) / radSave))
+        radBinLimit = np.exp(radSave*radBin)
         try:
-          radBinPrev = int(np.log(r - dr) // radSave)
-        except (ValueError, FloatingPointError):
+          radBinPrev = int(np.floor(np.log(r - dr) / radSave))
+        except (ValueError, FloatingPointError, OverflowError):
           radBinPrev = radBin
       if False:#radBin==radBinPrev and np.pi<r:
         nam='radHi'
         #radBin = int(np.log(3.83148-r) // radSave)
         #radBinPrev = int(np.log(3.83148-r+dr) // radSave)
-        radBin = int(np.log(3.832-r) // radSave)
-        radBinPrev = int(np.log(3.832-r+dr) // radSave)
+        radBin = int(np.floor(np.log(3.832-r) / radSave))
+        radBinPrev = int(np.floor(np.log(3.832-r+dr) / radSave))
       if radBin != radBinPrev:
         #print(nam,r,dr,radBin,radBinPrev)
         angFname=f'data/'+nam+f'{max(radBin,radBinPrev):05}.txt'
         ang_txt = open(angFname, "a") 
-        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
+        print(radBinLimit, -z, psi-dPsi*(r-radBinLimit)/dr, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
       #radBin = int(r // sv)
       #radBinPrev = int((r-dr) // sv)
       #if radBin != radBinPrev:
@@ -496,23 +511,38 @@ def reorder_drop_height_vs_vol(nam=''):
     if df.ndim<2: continue
     dfLoop=np.zeros_like(df)
     for j in range(len(dfLoop[:,0])):
+    #prev=np.zeros_like(df[0,:])
+    #fname=folName+'loop_'+fname
+    #loop_txt = open(fname, "w") 
+    #for j in range(len(df[:,0])):
       disMin=np.inf
       #angMin=2*np.pi
       for i in range(len(df[:,0])):
         if df[i,0]!=df[i,0]:continue
+        #if df[i,6]<prev[6]:
+        #  df[i,:]=np.nan
+        #  continue
         #ang = np.arctan2(df[i,1]-dfLoop[j-1,1], dfLoop[j-1,6]**.333-df[i,6]**.333)
         #print('ang',ang*180/np.pi,i)
+        #dis = (df[i,1]-prev[1])**2 + (prev[6]**.333-df[i,6]**.333)**2
+        #if 'ang' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
+        #if 'rad' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]-df[i,6])**2
         dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
-        #dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]-df[i,6])**2
+        if df[i,6]<dfLoop[j-1,6]:
+          dis+=1
         #if ang<angMin:
         if dis<disMin:
           iMin=i
           #angMin=ang
           disMin=dis
+      #if disMin>.1:continue
+      #prev=df[iMin,:]
+      #print(*prev, file=loop_txt)
       #print('disMin',disMin,'dis',dis)
       dfLoop[j,:]=df[iMin,:]
       #if j>1 and disMin>.1: dfLoop[j-1,:]=np.nan
       df[iMin,:]=np.nan
+    print('save',folName+'loop_'+fname)
     np.savetxt(folName+'loop_'+fname, dfLoop)  
 
 def AdamsBashforthBoProfile(Bo, RadTop, contactAng=-1, fname=None):

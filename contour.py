@@ -17,12 +17,20 @@ for b in range(0):#100#7#1,11#20
 #    print(r,b)
 #    RadTop = rads[r]**(b-50)
 #    AdamsBashforthProfile(1, RadTop, angleSave=5, radSave=0.1, fname=f'data/bub{100*r+b:05}.txt')
+#RadTops = np.concatenate([
+#    np.logspace(-2,-.5, 100, endpoint=False),
+#    np.logspace(-.5,.5, 200, endpoint=False),
+#    np.logspace(.5,  2, 100)
+#    ])
 RadTops = np.concatenate([
-    np.logspace(2, 0.5, 100, endpoint=False),
-    np.logspace(.5,-.5, 200, endpoint=False),
-    np.logspace(-.5,-2, 100)
+    np.logspace(np.log10(1e-2),np.log10(.5),  200, endpoint=False),
+    np.logspace(np.log10(.5),  np.log10(1.5), 200, endpoint=False),
+    np.logspace(np.log10(1.5), np.log10(1e2), 100)
     ])
-for b in range(0):#len(RadTops)):#100):
+#RadTops = np.logspace(np.log10(.5),np.log10(1.5), 500)
+#RadTops = np.logspace(np.log10(.5),np.log10(1.5), 200)
+#for b in range(len(RadTops)):#100):
+for b in range(0):
   #RadTop = (1+1e-4)**( (b-200) * abs(b-200) )
   RadTop = RadTops[b]
   print(b,RadTop)
@@ -30,6 +38,7 @@ for b in range(0):#len(RadTops)):#100):
 #reorder_drop_height_vs_vol(nam='ang')
 #reorder_drop_height_vs_vol(nam='rad')
 plot_drop_height_vs_rad(nam='loop_rad loop_ang bub')
+#plot_drop_height_vs_rad(nam='loop_rad bub')
 for b in range(0):#500
   #RadTop = (1+b)/100
   print(b,RadTop)
