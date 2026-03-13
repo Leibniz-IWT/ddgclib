@@ -431,8 +431,8 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
       if not i%100 or dPsi>1e-2: 
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
     if angleSave:
-      angBin = int(np.floor(psi*180/np.pi / angleSave))
-      angBinPrev = int(np.floor((psi-dPsi)*180/np.pi / angleSave))
+      angBin = int(np.floor(psi/np.pi / angleSave))
+      angBinPrev = int(np.floor((psi-dPsi)/np.pi / angleSave))
       if angBin != angBinPrev:
         #if dPsi<0: nam='angleM'
         #else: 
@@ -485,8 +485,9 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     if False:# psi>np.pi: 
       print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
       break
-    if psi<0-.1*angleSave*np.pi/180: break
-    #if psi>np.pi+.1*angleSave*np.pi/180: break
+    if psi<0: break
+    #if psi<0-.1*angleSave*np.pi: break
+    #if psi>np.pi+.1*angleSave*np.pi: break
     if dPsi>0 and dPsiPrev<0: break
     dPsiPrev=dPsi
     #if contactAng>0 and dPsi<0 and psi<contactAng: break
@@ -528,7 +529,8 @@ def reorder_drop_height_vs_vol(nam=''):
         #if 'ang' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
         #if 'rad' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]-df[i,6])**2
         dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
-        if df[i,6]<dfLoop[j-1,6]:
+        dis = ( df[i,1]/df[i,4] - dfLoop[j-1,1]/dfLoop[j-1,4] )**2 + ( dfLoop[j-1,6]**.333/dfLoop[j-1,4] - df[i,6]**.333/df[i,4] )**2
+        if df[i,6]/df[i,4]**3 < dfLoop[j-1,6]/dfLoop[j-1,4]**3:
           dis+=1
         #if ang<angMin:
         if dis<disMin:
