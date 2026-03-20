@@ -1,5 +1,14 @@
 """
-Mesh refinement study N_REFINE in (1,2,3) — same-y divergence + correct pressure plot.
+Mesh Refinement Study for 2D Incompressible Poiseuille Flow
+============================================================
+Runs the Lagrangian DEC Poiseuille simulation for N_REFINE = 1, 2, 3.
+Each run uses the Chorin pressure Poisson projection to enforce div u = 0.
+
+Output folders:
+    fig/poiseuille_nrefine_1/   coarsest
+    fig/poiseuille_nrefine_2/   medium
+    fig/poiseuille_nrefine_3/   finest
+    fig/poiseuille_parametric/  comparison plots
 """
 
 
@@ -55,9 +64,9 @@ tau_visc = H**2 / (np.pi**2 * nu)        # approx 0.1013 s
 
 # ── Adaptive time-stepping limits ───────────────────────────
 DT_INITIAL = 0.005
-DT_MAX     = 0.005
+DT_MAX     = 0.5
 DT_MIN     = 1e-6
-CFL_TARGET = 0.4    # advective CFL:   dt < CFL * dy_min / U_max
+CFL_TARGET = 0.98    # advective CFL:   dt < CFL * dy_min / U_max
 VN_COEFF   = 0.20   # von Neumann:     dt < VN  * dy_min^2 / nu
 T_END      = 8.0
 
@@ -1177,8 +1186,7 @@ def plot_frame(step, t, HC, fig_dir,
     ax_err.axvline(tau_visc,   color='gray', lw=1.2, ls=':',  label='tau')
     ax_err.axvline(5*tau_visc, color='gray', lw=1.8, ls='--', label='5 tau')
     ax_err.set_xlabel('t [s]'); ax_err.set_ylabel('$L_2$ velocity error [m/s]')
-    _, current_div_l2, _ = compute_divergence(HC)
-    ax_err.set_title(f'Residuals: L2_SS={l2_ss:.2e}  div_L2={current_div_l2:.1e}', fontsize=11)
+    ax_err.set_title(f'Residuals: L2_SS={l2_ss:.2e}', fontsize=11)
     ax_err.legend(fontsize=8); ax_err.grid(True, which='both', alpha=0.3)
     if hist_l2_ss and max(hist_l2_ss) > 0:
         ymin = max(1e-14, min(hist_l2_ss) * 0.5)
@@ -1210,7 +1218,7 @@ def run_case(n_refine):
     _FIG    = os.path.join(_HERE, 'fig', f'poiseuille_nrefine_{n_refine}')
     _FRAMES = os.path.join(_FIG, '_frames')
     os.makedirs(_FRAMES, exist_ok=True)
-    print(f"\n{'='*60}\n  Mesh refinement study RUN: N_REFINE = {n_refine}\n  Output -> {_FIG}\n{'='*60}")
+    print(f"\n{'='*60}\n  PARAMETRIC RUN: N_REFINE = {n_refine}\n  Output -> {_FIG}\n{'='*60}")
     n_tiles   = int(round(L_domain / L_period))
     unit_mesh = build_unit_mesh()
     HC, bV    = build_tiled_mesh(unit_mesh, n_tiles)
@@ -1952,9 +1960,9 @@ def run_case(n_refine):
 
 
 # ============================================================
-# Mesh refinement study loop
+# Parametric loop
 # ============================================================
-N_REFINE_VALUES = [1, 2, 3]
+N_REFINE_VALUES = [0, 1, 2]
 results = {}
 
 for _nr in N_REFINE_VALUES:
@@ -1965,11 +1973,16 @@ print("\n" + "="*60)
 print("  ALL RUNS COMPLETE — generating comparison plots")
 print("="*60)
 
-_COMP_DIR = os.path.join(_HERE, 'fig', 'poiseuille_mesh_refinement_study')
+_COMP_DIR = os.path.join(_HERE, 'fig', 'poiseuille_parametric')
 os.makedirs(_COMP_DIR, exist_ok=True)
 
-colors_nr = {1: 'royalblue', 2: 'darkorange', 3: 'green'}
-ls_nr     = {1: '-', 2: '--', 3: '-.'}
+# Build colour/linestyle maps dynamically from actual results keys
+# so the comparison works for any N_REFINE_VALUES (including 0-indexed)
+_all_colors = ['royalblue', 'darkorange', 'green', 'crimson', 'purple']
+_all_ls     = ['-', '--', '-.', ':', (0,(3,1,1,1))]
+_nr_keys    = sorted(results.keys())
+colors_nr   = {nr: _all_colors[i % len(_all_colors)] for i, nr in enumerate(_nr_keys)}
+ls_nr       = {nr: _all_ls[i % len(_all_ls)]         for i, nr in enumerate(_nr_keys)}
 y_fine    = np.linspace(0, H, 400)
 
 fig, axes = plt.subplots(3, 3, figsize=(21, 18))
@@ -2094,16 +2107,16 @@ ax.set_title('Max pointwise div(u) violation', fontsize=13)
 ax.legend(fontsize=10); ax.grid(True, which='both', alpha=0.3)
 
 plt.suptitle(
-    f'Mesh refinement study: N_REFINE = {N_REFINE_VALUES}\n'
+    f'Mesh Refinement Study — 2D Incompressible Poiseuille Flow\nN_REFINE = {N_REFINE_VALUES}\n'
     f'Lagrangian DEC Poiseuille  |  Re={rho*U_mean*H/mu:.1f}  |  '
     f't_end={T_END:.1f} s  |  Incompressibility: div(u) = 0',
     fontsize=14)
 plt.tight_layout()
-p_comp = os.path.join(_COMP_DIR, 'comparison_n_refine.png')
+p_comp = os.path.join(_COMP_DIR, 'mesh_refinement_comparison.png')
 plt.savefig(p_comp, dpi=180, bbox_inches='tight')
 plt.close()
-print(f"\nComparison plot saved: {p_comp}")
-print("\nMesh refinement study complete.  Output folders:")
+print(f"\nMesh refinement comparison saved: {p_comp}")
+print("\nParametric study complete.  Output folders:")
 for nr in N_REFINE_VALUES:
     print(f"  N_REFINE={nr} -> {os.path.join(_HERE, 'fig', f'poiseuille_nrefine_{nr}')}")
 print(f"  Comparison -> {_COMP_DIR}")
