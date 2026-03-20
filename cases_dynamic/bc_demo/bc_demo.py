@@ -120,7 +120,6 @@ inlet_bc = PeriodicInletBC(
     velocity=U,
     axis=0,
     inlet_pos=0.0,
-    cdist=1e-10,
     fields=['u', 'p', 'm'],
     period=L_period,
 )

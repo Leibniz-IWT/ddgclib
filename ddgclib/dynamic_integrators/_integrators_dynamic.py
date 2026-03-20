@@ -46,7 +46,7 @@ from scipy.spatial import Delaunay
 
 # Helpers
 
-def _retopologize(HC, bV, dim, boundary_filter=None):
+def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -69,8 +69,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None):
         interior and participate in integration.  Typical usage: pass
         the wall criterion so that only wall vertices are frozen while
         inlet/outlet boundary vertices advect freely.
+    merge_cdist : float or None
+        If provided, merge vertices closer than this distance before
+        retriangulation.  Prevents accumulation of near-duplicate
+        vertices (e.g. from periodic inlet injection at wall positions).
+        A good default is ``0.5 * min_edge_length``.
 
     Steps:
+        0. (Optional) Merge close vertices via ``HC.V.merge_all``
         1. Retriangulation — Delaunay for dim >= 2, sorted chain for dim == 1
         2. Boundary recomputation via ``HC.boundary()`` — update *bV* in-place
         3. Tag ``v.boundary`` on all vertices
@@ -81,6 +87,15 @@ def _retopologize(HC, bV, dim, boundary_filter=None):
     verts = list(HC.V)
     if len(verts) < dim + 1:
         return  # not enough vertices for a simplex
+
+    # 0. Merge close vertices before retriangulation
+    if merge_cdist is not None and merge_cdist > 0:
+        HC.V.merge_all(cdist=merge_cdist)
+        # Refresh vertex list and clean up stale bV references
+        bV.intersection_update(set(HC.V))
+        verts = list(HC.V)
+        if len(verts) < dim + 1:
+            return
 
     # 1. Disconnect ALL existing edges
     for v in verts:
@@ -113,6 +128,10 @@ def _retopologize(HC, bV, dim, boundary_filter=None):
     # 5. Recompute barycentric duals (uses v.boundary)
     compute_vd(HC, method="barycentric")
 
+    # 5b. Cache dual volumes on all vertices for FVM operators
+    from ddgclib.operators.stress import cache_dual_volumes
+    cache_dual_volumes(HC, dim)
+
     # 6. Populate bV — controls which vertices are frozen (excluded
     #    from integration).  When boundary_filter is set, only matching
     #    vertices (e.g. walls) are frozen; the rest remain interior.
@@ -120,6 +139,29 @@ def _retopologize(HC, bV, dim, boundary_filter=None):
         dV = {v for v in dV if boundary_filter(v)}
     bV.clear()
     bV.update(dV)
+
+
+def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
+                     merge_cdist=None):
+    """Dispatch topology management to custom or default function.
+
+    Parameters
+    ----------
+    retopologize_fn : callable, False, or None
+        - ``None`` (default): use :func:`_retopologize` (Delaunay + compute_vd).
+        - ``False``: skip topology management entirely.
+        - callable: call ``retopologize_fn(HC, bV, dim)`` instead of the default.
+          Useful for surface meshes where Delaunay/compute_vd don't apply.
+    merge_cdist : float or None
+        Forwarded to :func:`_retopologize`.  See its docstring.
+    """
+    if retopologize_fn is False:
+        return
+    if retopologize_fn is not None:
+        retopologize_fn(HC, bV, dim)
+    else:
+        _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
+                      merge_cdist=merge_cdist)
 
 
 def _recompute_duals(HC):
@@ -275,7 +317,8 @@ def _sync_mesh(verts, x_flat, u_flat, dim, HC, bV):
 
 def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           save_every=None, save_dir=None, workers=None,
-          boundary_filter=None, **dudt_kwargs):
+          boundary_filter=None, retopologize_fn=None, merge_cdist=None,
+          **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
     Update rule per step::
@@ -310,6 +353,9 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         Directory for periodic state dumps (JSON via ``save_state``).
     boundary_filter : callable or None
         See :func:`_retopologize`.
+    retopologize_fn : callable, False, or None
+        See :func:`_do_retopologize`.  Use a custom callable for surface
+        meshes where Delaunay/compute_vd don't apply.
     **dudt_kwargs
         Forwarded to *dudt_fn* (e.g. ``dim=3, mu=8.9e-4``).
 
@@ -320,7 +366,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     """
     t = 0.0
     for step in range(n_steps):
-        _retopologize(HC, bV, dim, boundary_filter=boundary_filter)
+        _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
+                             merge_cdist)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -348,7 +395,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
 
 def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      bc_set=None, save_every=None, save_dir=None,
-                     workers=None, boundary_filter=None, **dudt_kwargs):
+                     workers=None, boundary_filter=None,
+                     retopologize_fn=None, merge_cdist=None, **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
     Update rule per step::
@@ -371,6 +419,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         Directory for periodic state dumps (JSON via ``save_state``).
     boundary_filter : callable or None
         See :func:`_retopologize`.
+    retopologize_fn : callable, False, or None
+        See :func:`_do_retopologize`.
 
     Returns
     -------
@@ -379,7 +429,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     """
     t = 0.0
     for step in range(n_steps):
-        _retopologize(HC, bV, dim, boundary_filter=boundary_filter)
+        _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
+                             merge_cdist)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -407,7 +458,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
 
 def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           rtol=1e-6, atol=1e-9, save_every=None, save_dir=None,
-          workers=None, boundary_filter=None, **dudt_kwargs):
+          workers=None, boundary_filter=None, retopologize_fn=None,
+          merge_cdist=None, **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
     The full coupled ODE system is solved::
@@ -446,6 +498,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         Directory for periodic state dumps (JSON via ``save_state``).
     boundary_filter : callable or None
         See :func:`_retopologize`.
+    retopologize_fn : callable, False, or None
+        See :func:`_do_retopologize`.
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -467,7 +521,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     """
     t = 0.0
     for step in range(n_steps):
-        _retopologize(HC, bV, dim, boundary_filter=boundary_filter)
+        _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
+                             merge_cdist)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -522,7 +577,9 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
 
 def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         bc_set=None, save_every=None, save_dir=None,
-                        workers=None, boundary_filter=None, **dudt_kwargs):
+                        workers=None, boundary_filter=None,
+                        retopologize_fn=None, merge_cdist=None,
+                        **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
     Useful for Eulerian CFD (e.g. Poiseuille flow on a static mesh) where
@@ -541,6 +598,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         Directory for periodic state dumps (JSON via ``save_state``).
     boundary_filter : callable or None
         See :func:`_retopologize`.
+    retopologize_fn : callable, False, or None
+        See :func:`_do_retopologize`.
 
     Returns
     -------
@@ -549,7 +608,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     """
     t = 0.0
     for step in range(n_steps):
-        _retopologize(HC, bV, dim, boundary_filter=boundary_filter)
+        _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
+                             merge_cdist)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -569,7 +629,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
 def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    bc_set=None, cfl_target=0.5, dt_min=1e-12, dt_max=None,
                    velocity_only=True, save_every=None, save_dir=None,
-                   workers=None, boundary_filter=None, **dudt_kwargs):
+                   workers=None, boundary_filter=None,
+                   retopologize_fn=None, merge_cdist=None, **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
     The time step is adjusted each step based on the CFL condition::
@@ -612,6 +673,8 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
         Directory for periodic state dumps (JSON via ``save_state``).
     boundary_filter : callable or None
         See :func:`_retopologize`.
+    retopologize_fn : callable, False, or None
+        See :func:`_do_retopologize`.
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -631,7 +694,8 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
         # Don't overshoot t_end
         dt = min(dt, t_end - t)
 
-        _retopologize(HC, bV, dim, boundary_filter=boundary_filter)
+        _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
+                             merge_cdist)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

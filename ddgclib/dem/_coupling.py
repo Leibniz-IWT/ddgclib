@@ -248,6 +248,28 @@ class FluidParticleCoupler:
         # Per-particle drag forces (stored for feedback phase)
         self._drag_forces: dict[int, np.ndarray] = {}
 
+        # Cached mesh data (call cache_mesh_data() for fixed meshes)
+        self._cached_vertices: Optional[list] = None
+        self._cached_positions: Optional[np.ndarray] = None
+        self._cached_kdtree = None
+
+    def cache_mesh_data(self) -> None:
+        """Pre-compute and cache vertex list, positions, and KDTree.
+
+        Call once after mesh setup for fixed (non-moving) meshes.  Avoids
+        rebuilding these data structures every coupling step.
+        """
+        self._cached_vertices, self._cached_positions = (
+            self._get_vertices_and_positions()
+        )
+        self._cached_kdtree = _build_kdtree(self._cached_positions)
+
+    def invalidate_cache(self) -> None:
+        """Clear cached mesh data (call after mesh topology changes)."""
+        self._cached_vertices = None
+        self._cached_positions = None
+        self._cached_kdtree = None
+
     def _get_vertices_and_positions(self) -> tuple[list, np.ndarray]:
         """Extract vertex list and position array from the fluid mesh."""
         vertices = list(self.HC.V)
@@ -260,11 +282,17 @@ class FluidParticleCoupler:
 
         Call after fluid step, before DEM step.
         """
-        vertices, positions = self._get_vertices_and_positions()
+        if self._cached_vertices is not None:
+            vertices = self._cached_vertices
+            positions = self._cached_positions
+            kdtree = self._cached_kdtree
+        else:
+            vertices, positions = self._get_vertices_and_positions()
+            kdtree = _build_kdtree(positions)
+
         if len(vertices) == 0:
             return
 
-        kdtree = _build_kdtree(positions)
         self._drag_forces.clear()
 
         for p in self.ps.particles:
@@ -283,11 +311,8 @@ class FluidParticleCoupler:
             else:
                 F_drag = self._drag_fn(u_rel, p.radius, self.mu, self.rho_f)
 
-            # Store for feedback phase
+            # Store for feedback phase and for get_external_forces_fn()
             self._drag_forces[p.id] = F_drag
-
-            # Add to particle force accumulator
-            p.force[:self.dim] += F_drag
 
     def particle_to_fluid(self, dt: float) -> None:
         """Distribute reaction drag forces back onto mesh vertices.
@@ -297,11 +322,16 @@ class FluidParticleCoupler:
         if not self._drag_forces:
             return
 
-        vertices, positions = self._get_vertices_and_positions()
+        if self._cached_vertices is not None:
+            vertices = self._cached_vertices
+            positions = self._cached_positions
+            kdtree = self._cached_kdtree
+        else:
+            vertices, positions = self._get_vertices_and_positions()
+            kdtree = _build_kdtree(positions)
+
         if len(vertices) == 0:
             return
-
-        kdtree = _build_kdtree(positions)
 
         for p in self.ps.particles:
             if p.id not in self._drag_forces:

@@ -2,7 +2,27 @@
 #from ddgclib._capillary_rise import *
 #from ddgclib._cube_droplet import *
 
-__all__ = [s for s in dir() if not s.startswith('_')]
+from ddgclib.geometry._parametric_surfaces import (
+    parametric_surface,
+    sphere,
+    catenoid,
+    cylinder,
+    hyperboloid,
+    torus,
+    plane,
+    translate_surface,
+    scale_surface,
+    rotate_surface,
+    rotation_matrix_align,
+)
+from ddgclib.geometry._complex_operations import translate, extrude
+
+__all__ = [
+    'parametric_surface',
+    'sphere', 'catenoid', 'cylinder', 'hyperboloid', 'torus', 'plane',
+    'translate_surface', 'scale_surface', 'rotate_surface', 'rotation_matrix_align',
+    'translate', 'extrude',
+]
 
 #from ._eos import *
 #from ._complex import *

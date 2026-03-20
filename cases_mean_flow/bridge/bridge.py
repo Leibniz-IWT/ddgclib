@@ -113,7 +113,6 @@ if 1:
                 )
 
                 new_HNdA_ij_dot_hnda_i = HNdA_ij_dot_hnda_i
-                #########################################
                 HNda_v_cache[v.x] = c_outd['HNdA_ij']
                 HNdA_i.append(c_outd['HNdA_i'])
                 HNdA_ij.append(c_outd['HNdA_ij'])
@@ -121,7 +120,6 @@ if 1:
                 HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
 
                 HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
-
 
 
                 #print(f"np.sum(HNdA_i_Cij) = {np.dot(c_outd['HNdA_ij'], c_outd['n_i'])}")
@@ -379,7 +377,6 @@ if 1:
                 )
 
                 new_HNdA_ij_dot_hnda_i = HNdA_ij_dot_hnda_i
-                #########################################
                 HNda_v_cache[v.x] = c_outd['HNdA_ij']
                 HNdA_i.append(c_outd['HNdA_i'])
                 HNdA_ij.append(c_outd['HNdA_ij'])
@@ -387,7 +384,6 @@ if 1:
                 HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
 
                 HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
-
 
 
                 #print(f"np.sum(HNdA_i_Cij) = {np.dot(c_outd['HNdA_ij'], c_outd['n_i'])}")
@@ -574,7 +570,6 @@ if 1:
          plt.legend()
 
 
-
 sum_HNdA_i = 0.0
 for hndA_i, c_ij in zip(HNdA_i_list, C_ij_i_list):
     #print(f'hndA_i = {hndA_i}')
@@ -615,8 +610,6 @@ if 1:
 
     #erange.append(max_int_e / r)
     print(f'geo erange = {ern }')
-
-
 
 
 # Plot complex
@@ -803,7 +796,6 @@ if 1:
 
 if 1:
     plt.show()
-
 
 
 def plot_polyscope(HC):
@@ -892,7 +884,6 @@ def plot_polyscope(HC):
 plot_polyscope(HC)
 
 
-
 # visualize!
 #ps_cloud = ps.register_point_cloud("my points", points)
 #ps.show()
@@ -940,7 +931,6 @@ if 1:
      plt.legend()
 
 
-
 sum_HNdA_i = 0.0
 for hndA_i, c_ij in zip(HNdA_i_list, C_ij_i_list):
     #print(f'hndA_i = {hndA_i}')
@@ -981,8 +971,6 @@ if 1:
 
     #erange.append(max_int_e / r)
     print(f'geo erange = {ern }')
-
-
 
 
 # Plot complex
@@ -1171,7 +1159,6 @@ if 1:
     plt.show()
 
 
-
 def plot_polyscope(HC):
     # Initialize polyscope
     ps.init()
@@ -1256,7 +1243,6 @@ def plot_polyscope(HC):
 
 
 plot_polyscope(HC)
-
 
 
 # visualize!

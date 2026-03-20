@@ -33,6 +33,7 @@ from ddgclib.operators.stress import (
     stress_acceleration,
     stress_force,
     velocity_difference_tensor,
+    velocity_difference_tensor_pointwise,
 )
 
 

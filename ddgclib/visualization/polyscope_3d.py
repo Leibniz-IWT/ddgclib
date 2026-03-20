@@ -5,10 +5,28 @@ is not installed.
 
 Usage
 -----
+::
+
     from ddgclib.visualization.polyscope_3d import register_point_cloud, update_frame
     ps_cloud = register_point_cloud(HC, name='mesh')
     update_frame(HC, ps_cloud, scalar_fields=['p'], vector_fields=['u'])
+
+Interactive viewer with frame slider::
+
+    from ddgclib.visualization.polyscope_3d import interactive_viewer
+
+    # Register polyscope structures first, then:
+    interactive_viewer(
+        n_frames=len(frames),
+        update_fn=lambda idx: cloud.update_point_positions(positions[idx]),
+        info_fn=lambda idx: imgui.Text(f"Frame {idx}"),
+    )
 """
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -208,3 +226,94 @@ def update_surface_frame(
             ps_mesh.add_vector_quantity(field, np.array(vecs))
 
     return ps_mesh
+
+
+def interactive_viewer(
+    n_frames: int,
+    update_fn: Callable[[int], None],
+    info_fn: Callable[[int], None] | None = None,
+    screenshot_dir: Path | str | None = None,
+    init: bool = True,
+):
+    """Launch an interactive polyscope viewer with frame slider and playback.
+
+    Register all polyscope structures **before** calling this function,
+    then provide callbacks to update them per frame.
+
+    Parameters
+    ----------
+    n_frames : int
+        Total number of frames.
+    update_fn : callable(idx: int)
+        Called when the current frame changes.  Should update all
+        registered polyscope structures for frame *idx*.
+    info_fn : callable(idx: int) | None
+        Called every UI tick to display ``imgui.Text(...)`` info.
+        Receives ``polyscope.imgui`` as the first implicit import
+        within the callback scope.
+    screenshot_dir : Path or str or None
+        If set, saves a PNG screenshot for every visited frame.
+    init : bool
+        Whether to call ``polyscope.init()`` (set False if you already
+        initialised polyscope yourself).
+
+    Example
+    -------
+    ::
+
+        import polyscope as ps
+        import numpy as np
+
+        ps.init()
+        cloud = ps.register_point_cloud("pts", positions[0])
+
+        def update(idx):
+            cloud.update_point_positions(positions[idx])
+
+        def info(idx):
+            import polyscope.imgui as imgui
+            imgui.Text(f"t = {times[idx]:.3f} s")
+
+        interactive_viewer(len(positions), update, info, init=False)
+    """
+    ps = _check_polyscope()
+    if init:
+        ps.init()
+
+    if screenshot_dir is not None:
+        screenshot_dir = Path(screenshot_dir)
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+    state = {"idx": 0, "playing": False, "speed": 1}
+
+    def _callback():
+        import polyscope.imgui as imgui
+
+        changed, state["idx"] = imgui.SliderInt(
+            "Frame", state["idx"], 0, n_frames - 1,
+        )
+        _, state["playing"] = imgui.Checkbox("Play", state["playing"])
+
+        imgui.SameLine()
+        _, state["speed"] = imgui.SliderInt(
+            "Speed", state["speed"], 1, 20,
+        )
+
+        if state["playing"]:
+            state["idx"] = (state["idx"] + state["speed"]) % n_frames
+            changed = True
+
+        if changed:
+            update_fn(state["idx"])
+            if screenshot_dir is not None:
+                ps.screenshot(
+                    str(screenshot_dir / f"frame_{state['idx']:05d}.png")
+                )
+
+        imgui.Separator()
+        if info_fn is not None:
+            info_fn(state["idx"])
+
+    update_fn(0)
+    ps.set_user_callback(_callback)
+    ps.show()

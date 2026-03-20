@@ -18,6 +18,7 @@ import json
 import pickle
 
 import numpy as np
+from scipy.spatial import Delaunay
 
 import matplotlib
 matplotlib.use('Agg')
@@ -57,8 +58,43 @@ _FIG = os.path.join(_HERE, 'fig')
 _RESULTS = os.path.join(_HERE, 'results')
 os.makedirs(_FIG, exist_ok=True)
 
-n_refine = 3  # must match simulation script
+n_refine = 1  # must match simulation script
 d = 2
+
+
+def prepare_loaded_state(HC, dim=2):
+    """Retriangulate a loaded state and compute duals.
+
+    Saved states store edges from the simulation snapshot, but these may
+    not form a valid Delaunay triangulation after loading.  This function
+    disconnects all edges, rebuilds the Delaunay, tags boundaries, and
+    computes the barycentric dual mesh — the same sequence as
+    ``_retopologize`` in the integrators.
+    """
+    verts = list(HC.V)
+    if len(verts) < dim + 1:
+        return
+
+    # Disconnect all edges
+    for v in verts:
+        for nb in list(v.nn):
+            v.disconnect(nb)
+
+    # Delaunay retriangulation
+    coords = np.array([v.x_a[:dim] for v in verts])
+    tri = Delaunay(coords)
+    for simplex in tri.simplices:
+        for i in range(len(simplex)):
+            for j in range(i + 1, len(simplex)):
+                verts[simplex[i]].connect(verts[simplex[j]])
+
+    # Recompute boundary and tag
+    dV = HC.boundary()
+    for v in HC.V:
+        v.boundary = v in dV
+
+    # Compute barycentric duals
+    compute_vd(HC, method="barycentric")
 
 
 # ============================================================
@@ -68,10 +104,8 @@ print("Loading final state...")
 HC, bV, meta = load_state(os.path.join(_RESULTS, 'hp2d_final_state.json'))
 t_final = meta['time']
 
-# Tag boundary and compute duals (required for interpolated & dual plots)
-for v in HC.V:
-    v.boundary = v in bV
-compute_vd(HC, method="barycentric")
+# Retriangulate and compute duals (saved edges may not form valid triangulation)
+prepare_loaded_state(HC, dim=d)
 
 n_verts = sum(1 for _ in HC.V)
 print(f"Loaded: t={t_final:.4f}, dim={d}, {n_verts} vertices, {len(bV)} boundary")
@@ -117,6 +151,50 @@ else:
         print(f"  {history.n_snapshots} snapshots from state files")
     else:
         print("  No history data found; animations will be skipped")
+
+
+# ============================================================
+# Plot 0: First timestep — confirm initial domain geometry
+# ============================================================
+print("Plotting first timestep mesh...")
+state_files_sorted = sorted(glob.glob(os.path.join(_RESULTS, 'state_*.json')))
+if state_files_sorted:
+    HC_t0, bV_t0, meta_t0 = load_state(state_files_sorted[0])
+    prepare_loaded_state(HC_t0, dim=d)
+
+    t0_time = meta_t0.get('time', 0.0)
+    n_t0 = sum(1 for _ in HC_t0.V)
+
+    # Full domain mesh
+    fig, ax = plot_mesh_2d(HC_t0, bV=bV_t0,
+                           title=f'First saved state — t={t0_time:.4f}, {n_t0} verts',
+                           xlim=(-0.5, L + 0.5), ylim=(-0.1, D + 0.1))
+    plt.tight_layout()
+    plt.savefig(os.path.join(_FIG, 'hp2d_first_timestep.png'), dpi=DPI)
+    plt.close(fig)
+    print(f"  -> {_FIG}/hp2d_first_timestep.png")
+
+    # Inlet zoom
+    fig, ax = plot_mesh_2d(HC_t0, bV=bV_t0,
+                           title=f'First state — inlet zoom (t={t0_time:.4f})',
+                           xlim=(-0.2, 2.0), ylim=(-0.1, D + 0.1))
+    plt.tight_layout()
+    plt.savefig(os.path.join(_FIG, 'hp2d_first_timestep_inlet.png'), dpi=DPI)
+    plt.close(fig)
+    print(f"  -> {_FIG}/hp2d_first_timestep_inlet.png")
+
+    # Outlet zoom
+    fig, ax = plot_mesh_2d(HC_t0, bV=bV_t0,
+                           title=f'First state — outlet zoom (t={t0_time:.4f})',
+                           xlim=(L - 2.0, L + 0.5), ylim=(-0.1, D + 0.1))
+    plt.tight_layout()
+    plt.savefig(os.path.join(_FIG, 'hp2d_first_timestep_outlet.png'), dpi=DPI)
+    plt.close(fig)
+    print(f"  -> {_FIG}/hp2d_first_timestep_outlet.png")
+
+    del HC_t0, bV_t0  # free memory
+else:
+    print("  No state files found; skipping first timestep plot")
 
 
 # ============================================================
@@ -307,9 +385,7 @@ def create_dual_animation(state_dir, fig_dir, zoom_xlim, zoom_ylim,
 
     for i, sf in enumerate(state_files):
         hc_i, bv_i, meta_i = load_state(sf)
-        for v in hc_i.V:
-            v.boundary = v in bv_i
-        compute_vd(hc_i, method="barycentric")
+        prepare_loaded_state(hc_i, dim=2)
 
         fig_i, ax_i = plot_dual_mesh_2D(hc_i, ax=None, show=False)
         ax_i.set_xlim(zoom_xlim)

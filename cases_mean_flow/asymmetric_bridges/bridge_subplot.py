@@ -114,7 +114,6 @@ if 1:
                 )
 
                 new_HNdA_ij_dot_hnda_i = HNdA_ij_dot_hnda_i
-                #########################################
                 HNda_v_cache[v.x] = c_outd['HNdA_ij']
                 HNdA_i.append(c_outd['HNdA_i'])
                 HNdA_ij.append(c_outd['HNdA_ij'])
@@ -122,7 +121,6 @@ if 1:
                 HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
 
                 HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
-
 
 
                 #print(f"np.sum(HNdA_i_Cij) = {np.dot(c_outd['HNdA_ij'], c_outd['n_i'])}")
@@ -363,7 +361,6 @@ if 1:
                 )
 
                 new_HNdA_ij_dot_hnda_i = HNdA_ij_dot_hnda_i
-                #########################################
                 HNda_v_cache[v.x] = c_outd['HNdA_ij']
                 HNdA_i.append(c_outd['HNdA_i'])
                 HNdA_ij.append(c_outd['HNdA_ij'])
@@ -371,7 +368,6 @@ if 1:
                 HNdA_ij_dot.append(np.sum(np.dot(c_outd['HNdA_ij'], c_outd['n_i'])))
 
                 HNdA_i_Cij.append(c_outd['HNdA_ij_Cij'])
-
 
 
                 #print(f"np.sum(HNdA_i_Cij) = {np.dot(c_outd['HNdA_ij'], c_outd['n_i'])}")
@@ -542,7 +538,6 @@ if 1:
          # yr = HNdA_ij_Cij_dot_NdA_i - H_f
          ax2.plot(xr, yr, 'x', label='$|\hat{H}N_i(u, v)  - H(u, v)$|')
          
-
 
          yr = HN_i_2  - H_f
        #  plt.plot(xr, yr, 'x', label='$\hat{H}N_i_2(u, v)  - H(u, v)$')

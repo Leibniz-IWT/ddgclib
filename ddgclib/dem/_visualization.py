@@ -283,3 +283,137 @@ def plot_particles_polyscope(
         cloud.set_color(color)
 
     return cloud
+
+
+def plot_bridges_polyscope(
+    ps: ParticleSystem,
+    bridge_manager,
+    name: str = "bridges",
+    color: tuple[float, float, float] = (0.0, 1.0, 1.0),
+    radius: float = 0.0002,
+):
+    """Register liquid bridge connections as a polyscope curve network.
+
+    Parameters
+    ----------
+    ps : ParticleSystem
+    bridge_manager : LiquidBridgeManager
+    name : str
+        Curve network name in polyscope.
+    color : tuple
+        RGB colour (0-1).
+    radius : float
+        Tube radius for the curve network.
+
+    Returns
+    -------
+    net : polyscope CurveNetwork or None
+        ``None`` if no active bridges.
+    """
+    import polyscope as pols
+
+    dim = ps.dim
+    active = [b for b in bridge_manager.bridges if b.active]
+    if not active:
+        return None
+
+    # Collect unique node positions from bridge endpoints
+    node_map: dict[int, int] = {}  # particle id → node index
+    nodes: list[np.ndarray] = []
+
+    def _get_node(p):
+        if p.id not in node_map:
+            node_map[p.id] = len(nodes)
+            nodes.append(p.x_a[:dim] if dim == 3 else np.append(p.x_a[:dim], 0.0))
+        return node_map[p.id]
+
+    edges = []
+    for b in active:
+        i = _get_node(b.p_i)
+        j = _get_node(b.p_j)
+        edges.append([i, j])
+
+    nodes_arr = np.array(nodes)
+    edges_arr = np.array(edges)
+
+    net = pols.register_curve_network(name, nodes_arr, edges_arr)
+    net.set_color(color)
+    net.set_radius(radius)
+    return net
+
+
+def plot_bonds_polyscope(
+    ps: ParticleSystem,
+    bond_manager,
+    name: str = "bonds",
+    color: tuple[float, float, float] = (1.0, 0.5, 0.0),
+    radius: float = 0.0003,
+):
+    """Register sintered bonds as a polyscope curve network.
+
+    Parameters
+    ----------
+    ps : ParticleSystem
+    bond_manager : BondManager
+    name : str
+        Curve network name in polyscope.
+    color : tuple
+        RGB colour (0-1).
+    radius : float
+        Tube radius for the curve network.
+
+    Returns
+    -------
+    net : polyscope CurveNetwork or None
+        ``None`` if no active bonds.
+    """
+    import polyscope as pols
+
+    dim = ps.dim
+    active = [b for b in bond_manager.bonds if b.active]
+    if not active:
+        return None
+
+    node_map: dict[int, int] = {}
+    nodes: list[np.ndarray] = []
+
+    def _get_node(p):
+        if p.id not in node_map:
+            node_map[p.id] = len(nodes)
+            nodes.append(p.x_a[:dim] if dim == 3 else np.append(p.x_a[:dim], 0.0))
+        return node_map[p.id]
+
+    edges = []
+    for b in active:
+        i = _get_node(b.p_i)
+        j = _get_node(b.p_j)
+        edges.append([i, j])
+
+    nodes_arr = np.array(nodes)
+    edges_arr = np.array(edges)
+
+    net = pols.register_curve_network(name, nodes_arr, edges_arr)
+    net.set_color(color)
+    net.set_radius(radius)
+    return net
+
+
+def update_particles_polyscope(
+    ps: ParticleSystem,
+    cloud,
+    radius_scale: float = 1.0,
+):
+    """Update an existing polyscope point cloud with current particle positions.
+
+    Parameters
+    ----------
+    ps : ParticleSystem
+    cloud : polyscope PointCloud
+        The cloud returned by :func:`plot_particles_polyscope`.
+    radius_scale : float
+        Scale factor for particle radii.
+    """
+    cloud.update_point_positions(ps.positions())
+    cloud.add_scalar_quantity(
+        "radius", ps.radii() * radius_scale, enabled=True,
+    )

@@ -64,7 +64,7 @@ from hyperct.ddg import compute_vd
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet,
     PositionalNoSlipWallBC,
-    OutletDeleteBC,
+    OutletBufferedDeleteBC,
     PeriodicInletBC,
     identify_boundary_vertices,
 )
@@ -75,6 +75,9 @@ from ddgclib.initial_conditions import (
     UniformMass,
     PoiseuillePlanar,
 )
+
+from ddgclib.geometry._complex_operations import extrude
+
 from ddgclib.operators.stress import dudt_i
 from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory, save_state
@@ -102,26 +105,34 @@ print_params()
 # Flow is in the x-direction, walls at y=0 and y=D.
 
 d = 2  # spatial dimension
-n_refine = 3
+n_refine = 1
 
 #TODO: Rebuild extrude method to get a more regular mesh for this simple geometry:
-HC = Complex(d, domain=[(0.0, L), (0.0, D)])
-HC.triangulate()
+HC_unit = Complex(d, domain=[(0.0, 1), (0.0, D)])
+HC_unit.triangulate()
 for _ in range(n_refine):
-    HC.refine_all()
+    HC_unit.refine_all()
 
+#HC_unit.plot_complex()
+
+# Extrude to L
+#HC = extrude(HC_unit, L, axis=1, cdist=1e-10)
+HC = extrude(HC_unit, L, axis=0, cdist=1e-10)
+print(help(HC.plot_complex))
 HC.plot_complex()
-
-
 
 n_verts = sum(1 for _ in HC.V)
 print(f"\nMesh: {n_verts} vertices, {n_refine} refinements")
 
 # Tag boundary vertices (required before compute_vd)
-bV = identify_boundary_vertices(HC, lambda v: (
-    abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - L) < 1e-14 or
-    abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - D) < 1e-14
-))
+if 0:
+    bV = identify_boundary_vertices(HC, lambda v: (
+        abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - L) < 1e-14 or
+        abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - D) < 1e-14
+    ))
+else:
+    bV = HC.boundary(HC.V)
+
 for v in HC.V:
     v.boundary = v in bV
 
@@ -142,22 +153,45 @@ wall_criterion = lambda v: (
 
 # Build the unit mesh for the periodic inlet (a thin strip [0, thickness] x [0, D])
 #TODO: unit mesh should be  domain=[(0.0, 1), (0.0, D)]
-unit_mesh = Complex(d, domain=[(0.0, inlet_layer_thickness), (0.0, D)])
-unit_mesh.triangulate()
-for _ in range(n_refine):
-    unit_mesh.refine_all()
+if 0:
+    unit_mesh = Complex(d, domain=[(0.0, inlet_layer_thickness), (0.0, D)])
+    unit_mesh.triangulate()
+    for _ in range(n_refine):
+        unit_mesh.refine_all()
+else:
+    HC_unit = Complex(d, domain=[(0.0, 1), (0.0, D)])
+    HC_unit.triangulate()
+    for _ in range(n_refine):
+        HC_unit.refine_all()
 
+    unit_mesh = HC_unit
+
+#HC_unit.plot_complex()
 # Set ICs on the unit mesh: plug flow velocity + linear pressure + mass
-unit_ic = CompositeIC(
-    UniformVelocity(u_vec=np.array([U_avg, 0.0])),
-    LinearPressureGradient(G=G, axis=0, P_ref=0.0),
-    UniformMass(total_volume=inlet_layer_thickness * D, rho=rho),
-)
-unit_bV = identify_boundary_vertices(unit_mesh, lambda v: (
-    abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - inlet_layer_thickness) < 1e-14 or
-    abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - D) < 1e-14
-))
-unit_ic.apply(unit_mesh, unit_bV)
+if 0:
+    unit_ic = CompositeIC(
+        UniformVelocity(u_vec=np.array([U_avg, 0.0])),
+        LinearPressureGradient(G=G, axis=0, P_ref=0.0),
+        UniformMass(total_volume=inlet_layer_thickness * D, rho=rho),
+    )
+    unit_bV = identify_boundary_vertices(unit_mesh, lambda v: (
+        abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - inlet_layer_thickness) < 1e-14 or
+        abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - D) < 1e-14
+    ))
+    unit_ic.apply(unit_mesh, unit_bV)
+else:
+    unit_ic = CompositeIC(
+        UniformVelocity(u_vec=np.array([U_avg, 0.0])),
+        LinearPressureGradient(G=G, axis=0, P_ref=0.0),
+        UniformMass(total_volume=1 * D, rho=rho),
+        #UniformMass(total_volume=inlet_layer_thickness  * D, rho=rho),
+    )
+
+    unit_bV = HC.boundary(HC.V)
+    for v in unit_bV:
+        v.boundary = v in bV
+
+    unit_ic.apply(unit_mesh, unit_bV)
 
 # Assemble BCs:
 #   1. PositionalNoSlipWallBC — zeros velocity at wall positions, adds to bV
@@ -168,10 +202,14 @@ bc_set.add(
     PositionalNoSlipWallBC(criterion_fn=wall_criterion, dim=d, bV=bV),
     None,  # scans all vertices
 )
+print(f'L = {L+ outlet_buffer}')
 bc_set.add(
-    OutletDeleteBC(outlet_pos=L + outlet_buffer, axis=0, bV=bV),
+    OutletBufferedDeleteBC(
+        outlet_pos=L, buffer_width=2.0, axis=0, bV=bV,
+    ),
     None,  # scans all vertices
 )
+print(f'inlet_layer_thickness = {inlet_layer_thickness}')
 bc_set.add(
     PeriodicInletBC(
         unit_mesh=unit_mesh,
@@ -180,7 +218,7 @@ bc_set.add(
         inlet_pos=0.0,
         cdist=cdist,
         fields=['u', 'p', 'm'],
-        period=inlet_layer_thickness,
+        period=1.0,  # must match unit mesh x-span (see bc_demo)
     ),
     None,  # manages its own ghost mesh
 )
@@ -235,11 +273,12 @@ history = StateHistory(fields=['u', 'p'], record_every=record_every)
 print(f"\nRunning: dt={dt}, n_steps={n_steps}, t_final={dt*n_steps:.2f}")
 print(f"Recording every {record_every} steps ({n_steps // record_every} snapshots)")
 print(f"Saving state to {_RESULTS}/ every {save_every} steps")
-
+HC.plot_complex()
 t_final = symplectic_euler(
     HC, bV, dudt_fn,
     dt=dt, n_steps=n_steps, dim=d,
     bc_set=bc_set,
+    boundary_filter=wall_criterion,  # only freeze wall vertices, not inlet/outlet
     callback=history.callback,
     save_every=save_every,
     save_dir=_RESULTS,
@@ -248,7 +287,7 @@ t_final = symplectic_euler(
 
 print(f"Simulation complete: t = {t_final:.4f}")
 
-# ============================================================
+# ============================================================`
 # Step 5: Save Results and Analyze
 # ============================================================
 # All visualization is in visualize_hp2d.py (separate script).

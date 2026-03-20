@@ -442,17 +442,35 @@ class PeriodicInletBC(BoundaryCondition):
         after all its vertices have crossed the inlet. Defaults to 1.0.
     """
 
-    def __init__(self, unit_mesh, velocity, axis=2, inlet_pos=0.0, cdist=1e-10,
+    def __init__(self, unit_mesh, velocity, axis=2, inlet_pos=0.0, cdist=None,
                  fields=None, period=1.0):
         super().__init__(axis)
         self.unit_mesh = unit_mesh
         self.velocity = velocity
         self.inlet_pos = inlet_pos
-        self.cdist = cdist
         self.fields = fields if fields is not None else ['u', 'p', 'm']
         self.period = period
+        self.cdist = cdist if cdist is not None else self._auto_merge_cdist(unit_mesh)
         self.ghost = self._clone_unit(unit_mesh)
         self._reset_ghost()
+
+    @staticmethod
+    def _auto_merge_cdist(unit_mesh):
+        """Compute merge distance from minimum edge length of the unit mesh.
+
+        Returns half the minimum edge length so that injected ghost vertices
+        near existing wall/boundary vertices are merged, while distinct mesh
+        vertices are preserved.
+        """
+        min_edge = float('inf')
+        for v in unit_mesh.V:
+            for nb in v.nn:
+                d = np.linalg.norm(v.x_a - nb.x_a)
+                if d < min_edge:
+                    min_edge = d
+        if min_edge == float('inf') or min_edge < 1e-30:
+            return 1e-10
+        return 0.5 * min_edge
 
     def _clone_unit(self, unit_mesh):
         """Clone the unit mesh including vertex fields and connectivity."""

@@ -190,14 +190,13 @@ class TestVelocityDifferenceTensor2D:
             )
 
     def test_linear_velocity_field(self, mesh_2d):
-        """Linear velocity u = [ax + by, cx + dy] -> du_i approximates
+        """Linear velocity u = [ax + by, cx + dy] -> du_pointwise approximates
         the gradient [[a,b],[c,d]].
 
-        The discrete du_i = (1/Vol_i) sum_j (u_j - u_i) ⊗ A_ij is a
-        first-order approximation (uses vertex values, not face integrals).
-        We check that the direction and relative magnitude are correct.
+        Uses velocity_difference_tensor_pointwise (Du/Vol) for comparison
+        with analytical gradients.
         """
-        from ddgclib.operators.stress import velocity_difference_tensor
+        from ddgclib.operators.stress import velocity_difference_tensor_pointwise
 
         HC, bV = mesh_2d
         # u = [2*x + 3*y, -x + y]
@@ -213,7 +212,7 @@ class TestVelocityDifferenceTensor2D:
         for v in HC.V:
             if v in bV:
                 continue
-            du = velocity_difference_tensor(v, HC, dim=2)
+            du = velocity_difference_tensor_pointwise(v, HC, dim=2)
             # Check ratios: du[0,0]/du[0,1] ≈ a/b = 2/3
             if abs(du[0, 1]) > 1e-10:
                 ratio_expected = a / b
@@ -230,8 +229,8 @@ class TestVelocityDifferenceTensor2D:
                             f"Sign mismatch at ({i},{j}): du={du[i,j]}, expected={expected[i,j]}"
 
     def test_linear_velocity_converges(self, mesh_2d, mesh_2d_refined):
-        """du_i error should decrease with mesh refinement."""
-        from ddgclib.operators.stress import velocity_difference_tensor
+        """Pointwise du_i error should decrease with mesh refinement."""
+        from ddgclib.operators.stress import velocity_difference_tensor_pointwise
 
         a, b, c, d = 2.0, 3.0, -1.0, 1.0
         expected = np.array([[a, b], [c, d]])
@@ -246,7 +245,7 @@ class TestVelocityDifferenceTensor2D:
             for v in HC.V:
                 if v in bV:
                     continue
-                du = velocity_difference_tensor(v, HC, dim=2)
+                du = velocity_difference_tensor_pointwise(v, HC, dim=2)
                 # Normalize by expected magnitude to get relative error
                 errs.append(np.linalg.norm(du - expected) / np.linalg.norm(expected))
             errors[label] = np.median(errs)
@@ -255,6 +254,30 @@ class TestVelocityDifferenceTensor2D:
         # (or at least not dramatically worse)
         assert errors["fine"] <= errors["coarse"] * 1.1, \
             f"Error increased with refinement: coarse={errors['coarse']:.4f}, fine={errors['fine']:.4f}"
+
+    def test_integrated_scales_with_volume(self, mesh_2d):
+        """Integrated Du should equal pointwise du * Vol_i."""
+        from ddgclib.operators.stress import (
+            velocity_difference_tensor,
+            velocity_difference_tensor_pointwise,
+            _get_dual_vol,
+        )
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            x, y = v.x_a[0], v.x_a[1]
+            v.u = np.array([2.0 * x + 3.0 * y, -x + y])
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            Du = velocity_difference_tensor(v, HC, dim=2)
+            du_pw = velocity_difference_tensor_pointwise(v, HC, dim=2)
+            Vol_i = _get_dual_vol(v, HC, dim=2)
+            npt.assert_allclose(
+                Du, du_pw * Vol_i, rtol=1e-10,
+                err_msg=f"Du != du_pw * Vol at {v.x}",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -449,21 +472,27 @@ class TestGradientWrappers2D:
 class TestOperatorsExports:
 
     def test_stress_exports(self):
-        """New stress functions should be importable from operators."""
+        """Stress functions should be importable from operators."""
         from ddgclib.operators import (
             dual_area_vector,
             dual_volume,
+            cache_dual_volumes,
             velocity_difference_tensor,
+            velocity_difference_tensor_pointwise,
             strain_rate,
             cauchy_stress,
+            integrated_cauchy_stress,
             stress_force,
             stress_acceleration,
         )
         assert callable(dual_area_vector)
         assert callable(dual_volume)
+        assert callable(cache_dual_volumes)
         assert callable(velocity_difference_tensor)
+        assert callable(velocity_difference_tensor_pointwise)
         assert callable(strain_rate)
         assert callable(cauchy_stress)
+        assert callable(integrated_cauchy_stress)
         assert callable(stress_force)
         assert callable(stress_acceleration)
 
@@ -984,10 +1013,15 @@ class TestHagenPoiseuilleStress2D:
 
     def test_equilibrium_residual_converges(self, poiseuille_equilibrium,
                                             poiseuille_equilibrium_fine):
-        """Residual at equilibrium should decrease with mesh refinement."""
+        """Residual at equilibrium should be near machine precision on both meshes.
+
+        Both coarse and fine meshes achieve machine-precision residuals
+        (~1e-15), so a convergence-rate comparison is meaningless — the
+        ratio is dominated by floating-point noise.  Instead we assert
+        that both residuals stay below an absolute tolerance.
+        """
         from ddgclib.operators.stress import stress_acceleration
 
-        residuals_by_mesh = {}
         for label, (HC, bV, _, params) in [
             ("coarse", poiseuille_equilibrium),
             ("fine", poiseuille_equilibrium_fine),
@@ -999,13 +1033,11 @@ class TestHagenPoiseuilleStress2D:
                     continue
                 a = stress_acceleration(v, dim=2, mu=mu, HC=HC)
                 res.append(np.linalg.norm(a))
-            residuals_by_mesh[label] = np.median(res)
 
-        # Fine mesh residual should not be dramatically worse
-        assert residuals_by_mesh["fine"] <= residuals_by_mesh["coarse"] * 2.0, \
-            (f"Residual increased with refinement: "
-             f"coarse={residuals_by_mesh['coarse']:.4f}, "
-             f"fine={residuals_by_mesh['fine']:.4f}")
+            median_res = np.median(res)
+            assert median_res < 1e-13, \
+                (f"{label} mesh: median residual {median_res:.4e} "
+                 f"exceeds machine-precision tolerance")
 
     def test_pressure_force_direction(self, poiseuille_plug_flow):
         """With dP/dx < 0 (P = -G*x, G > 0), the pressure force should
@@ -1663,3 +1695,218 @@ class TestHydrostaticStress3D:
 
         assert ke_final < ke_initial, \
             f"3D KE not decreasing: initial={ke_initial:.6e}, final={ke_final:.6e}"
+
+
+# ---------------------------------------------------------------------------
+# New tests for face-centered formulation and caching
+# ---------------------------------------------------------------------------
+
+class TestDualVolCaching:
+    """Tests for dual volume caching on vertices."""
+
+    def test_cache_sets_attribute(self, mesh_2d):
+        """cache_dual_volumes should set v.dual_vol on all vertices."""
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, bV = mesh_2d
+        cache_dual_volumes(HC, dim=2)
+        for v in HC.V:
+            assert hasattr(v, 'dual_vol'), f"v.dual_vol not set at {v.x}"
+            assert v.dual_vol > 0 or v in bV
+
+    def test_cache_matches_computed(self, mesh_2d):
+        """Cached dual_vol should match dual_volume() result."""
+        from ddgclib.operators.stress import cache_dual_volumes, dual_volume
+
+        HC, bV = mesh_2d
+        cache_dual_volumes(HC, dim=2)
+        for v in HC.V:
+            if v in bV:
+                continue
+            computed = dual_volume(v, HC, dim=2)
+            npt.assert_allclose(
+                v.dual_vol, computed, rtol=1e-12,
+                err_msg=f"Cached != computed at {v.x}",
+            )
+
+    def test_get_dual_vol_on_demand(self, mesh_2d):
+        """_get_dual_vol should compute on demand if not cached."""
+        from ddgclib.operators.stress import _get_dual_vol, dual_volume
+
+        HC, bV = mesh_2d
+        # Ensure no cached value
+        for v in HC.V:
+            if hasattr(v, 'dual_vol'):
+                del v.dual_vol
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            vol = _get_dual_vol(v, HC, dim=2)
+            expected = dual_volume(v, HC, dim=2)
+            npt.assert_allclose(vol, expected, rtol=1e-12)
+            # Should now be cached
+            assert hasattr(v, 'dual_vol')
+
+
+class TestFaceCenteredViscousFlux:
+    """Tests for the face-centered viscous flux formulation."""
+
+    def test_uniform_velocity_zero_viscous(self, mesh_2d):
+        """Uniform velocity -> zero viscous force (Δu = 0)."""
+        from ddgclib.operators.stress import stress_force
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            v.p = 0.0
+            v.u = np.array([3.0, -1.0])
+            v.m = 1.0
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            F = stress_force(v, dim=2, mu=10.0, HC=HC)
+            npt.assert_allclose(
+                F, np.zeros(2), atol=1e-10,
+                err_msg=f"Non-zero viscous force for uniform velocity at {v.x}",
+            )
+
+    def test_linear_shear_zero_laplacian(self, mesh_2d):
+        """Linear shear u = [y, 0] has zero Laplacian -> zero viscous force
+        on interior cells (face-centered formulation is exact for linear)."""
+        from ddgclib.operators.stress import stress_force
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            v.p = 0.0
+            v.u = np.array([v.x_a[1], 0.0])
+            v.m = 1.0
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            F = stress_force(v, dim=2, mu=1.0, HC=HC)
+            npt.assert_allclose(
+                F, np.zeros(2), atol=1e-10,
+                err_msg=f"Non-zero viscous force for linear shear at {v.x}",
+            )
+
+    def test_quadratic_shear_nonzero(self, mesh_2d):
+        """Quadratic shear u = [y^2, 0] has nonzero Laplacian -> nonzero
+        viscous force on interior cells."""
+        from ddgclib.operators.stress import stress_force
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            v.p = 0.0
+            v.u = np.array([v.x_a[1]**2, 0.0])
+            v.m = 1.0
+
+        forces = []
+        for v in HC.V:
+            if v in bV:
+                continue
+            F = stress_force(v, dim=2, mu=1.0, HC=HC)
+            forces.append(F)
+
+        max_force = max(np.linalg.norm(f) for f in forces)
+        assert max_force > 1e-10, "All viscous forces are zero for quadratic shear"
+
+    def test_pressure_only_equals_pressure_gradient(self, mesh_2d):
+        """stress_force(mu=0) should match pressure_gradient."""
+        from ddgclib.operators.stress import stress_force
+        from ddgclib.operators.gradient import pressure_gradient
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            v.p = -1.0 * v.x_a[0]  # linear pressure
+            v.u = np.array([0.1 * v.x_a[1], 0.0])
+            v.m = 1.0
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            F_stress = stress_force(v, dim=2, mu=0.0, HC=HC)
+            F_grad = pressure_gradient(v, dim=2, HC=HC)
+            npt.assert_allclose(
+                F_stress, F_grad, atol=1e-14,
+                err_msg=f"stress_force(mu=0) != pressure_gradient at {v.x}",
+            )
+
+    def test_half_difference_zero_for_uniform_pressure(self, mesh_2d):
+        """With uniform p, the half-difference formula gives zero per-face."""
+        from ddgclib.operators.stress import dual_area_vector
+
+        HC, bV = mesh_2d
+        p_uniform = 42.0
+        for v in HC.V:
+            v.p = p_uniform
+
+        for v in HC.V:
+            if v in bV:
+                continue
+            F = np.zeros(2)
+            for v_j in v.nn:
+                A_ij = dual_area_vector(v, v_j, HC, dim=2)
+                p_j = v_j.p
+                F -= 0.5 * (p_j - v.p) * A_ij
+            npt.assert_allclose(
+                F, np.zeros(2), atol=1e-14,
+                err_msg=f"Non-zero pressure flux for uniform pressure at {v.x}",
+            )
+
+
+class TestIntegratedCauchyStress:
+    """Tests for the integrated Cauchy stress tensor."""
+
+    def test_integrated_div_vol_equals_pointwise(self, mesh_2d):
+        """integrated_cauchy_stress / Vol should equal cauchy_stress."""
+        from ddgclib.operators.stress import (
+            velocity_difference_tensor,
+            velocity_difference_tensor_pointwise,
+            cauchy_stress,
+            integrated_cauchy_stress,
+            _get_dual_vol,
+        )
+
+        HC, bV = mesh_2d
+        for v in HC.V:
+            x, y = v.x_a[0], v.x_a[1]
+            v.u = np.array([2.0 * x + y, -x + 3.0 * y])
+            v.p = 5.0 * x
+            v.m = 1.0
+
+        mu = 0.5
+        for v in HC.V:
+            if v in bV:
+                continue
+            Du = velocity_difference_tensor(v, HC, dim=2)
+            du_pw = velocity_difference_tensor_pointwise(v, HC, dim=2)
+            Vol_i = _get_dual_vol(v, HC, dim=2)
+            p_i = float(v.p)
+
+            sigma_pw = cauchy_stress(p_i, du_pw, mu, dim=2)
+            sigma_int = integrated_cauchy_stress(p_i, Du, mu, Vol_i, dim=2)
+
+            npt.assert_allclose(
+                sigma_int / Vol_i, sigma_pw, atol=1e-12,
+                err_msg=f"Sigma_int/Vol != sigma_pw at {v.x}",
+            )
+
+    def test_pressure_scales_with_volume(self):
+        """Pressure part of integrated stress: -p * Vol * I."""
+        from ddgclib.operators.stress import integrated_cauchy_stress
+
+        Du = np.zeros((2, 2))
+        sigma = integrated_cauchy_stress(p=3.0, Du=Du, mu=1.0, Vol_i=0.5, dim=2)
+        expected = -3.0 * 0.5 * np.eye(2)
+        npt.assert_allclose(sigma, expected)
+
+    def test_viscous_uses_integrated_du(self):
+        """Viscous part should use Du directly (not Du/Vol)."""
+        from ddgclib.operators.stress import integrated_cauchy_stress, strain_rate
+
+        Du = np.array([[1.0, 2.0], [3.0, 4.0]])
+        sigma = integrated_cauchy_stress(p=0.0, Du=Du, mu=0.5, Vol_i=10.0, dim=2)
+        expected = 2.0 * 0.5 * strain_rate(Du)
+        npt.assert_allclose(sigma, expected)

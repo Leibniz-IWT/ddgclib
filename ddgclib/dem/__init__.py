@@ -44,6 +44,9 @@ from ddgclib.dem._visualization import (
     plot_particles,
     plot_bridges,
     plot_bonds,
+    plot_bridges_polyscope,
+    plot_bonds_polyscope,
+    update_particles_polyscope,
 )
 
 __all__ = [
@@ -76,4 +79,7 @@ __all__ = [
     "plot_particles",
     "plot_bridges",
     "plot_bonds",
+    "plot_bridges_polyscope",
+    "plot_bonds_polyscope",
+    "update_particles_polyscope",
 ]

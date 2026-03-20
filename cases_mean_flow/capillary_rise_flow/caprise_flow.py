@@ -71,7 +71,7 @@ def mean_flow(HC, bV, params, tau, print_out=False):
 
     for v in HC.V:
         if v in bV:
-            # ---- boundary vertex update ----
+            # boundary vertex update
             # Compute a simple capillary force based on geodesic curvature
             R_approx = 1 / np.sqrt(K_H_i_cache[v.x])
             theta_p_approx = np.arccos(np.min([r / R_approx, 1]))
@@ -96,7 +96,7 @@ def mean_flow(HC, bV, params, tau, print_out=False):
             bV_new.add(HC.V[new_vx])
 
         else:
-            # ---- interior vertex update ----
+            # interior vertex update
             H = HN_i_cache[v.x]
 
             # Hydrostatic pressure term
@@ -182,7 +182,6 @@ F, nn, HC, bV, K_f, H_f = cap_rise_init_N(r, theta_p, gamma, N=N,
 
 params = (gamma, rho, g, r, theta_p, K_f, h)
 HC.V.merge_all(cdist=cdist)
-
 
 
 # Main actions (controlled by flags)

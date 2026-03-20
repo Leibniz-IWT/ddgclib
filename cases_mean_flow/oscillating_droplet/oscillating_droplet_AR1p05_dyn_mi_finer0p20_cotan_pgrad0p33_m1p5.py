@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# ===================== _AR1.1_fix_mi_fine_curved.py =====================
+# _AR1.1_fix_mi_fine_curved.py
 
-# -------- easy knobs --------
+# easy knobs
 N_STEPS    = 2000  # how many steps to run
 SAVE_EVERY = 10    # save outputs every N steps (1 = every step)
 
@@ -13,47 +13,47 @@ MU     = 1.34e-3          # Pa·s (dynamic viscosity of AlCu10)
 RHO_MIN, RHO_MAX = 6000.0, 8000.0   # plotting range (not used to clamp)
 DT_CAP   = 1e-5  # time step cap
 
-# ---- Rayleigh ellipsoid parameters (global, used for both mesh + reference) ----
+# Rayleigh ellipsoid parameters (global, used for both mesh + reference)
 AR_INIT = 1.05     # a_z / b_x
 R_EQ    = 1.0e-3   # equivalent sphere radius (2 mm droplet, r = 1 mm)
 
-# -------- curved-surface toggle (global) --------
+# curved-surface toggle (global)
 USE_CURVED_VOLUME = False  # set to False for pure PL run
 
-# -------- hard-guard toggle (post-step edge projection) --------
+# hard-guard toggle (post-step edge projection)
 USE_HARD_GUARD = False   # set to False to disable the short-edge tangential projection
 
-# -------- mass update toggle (dynamic vs fixed m_i) --------
+# mass update toggle (dynamic vs fixed m_i)
 UPDATE_MASS_EACH_STEP = True  # True => MASS_I_VEC recomputed from Vi_true each step
 
-# -------- NEW: toggles to freeze Vi and Ai at t=0 --------
+# NEW: toggles to freeze Vi and Ai at t=0
 FIX_VI_AT_T0 = False   # True => use Vi_true0 for all steps (V_i fixed at t=0)
 FIX_AI_AT_T0 = False   # True => use Astar_safe0 for all steps (A_i fixed at t=0)
 
-# -------- surface-tension force method --------
+# surface-tension force method
 FS_METHOD = "cotan"   # "heron" or "cotan"
 
-# -------- mesh source toggle --------
+# mesh source toggle
 # "gmsh" -> Gmsh ellipsoid mesh (current behavior)
 # "hc"   -> ddgclib cube-surface mesh, then snapped to ellipsoid
 MESH_SOURCE = "gmsh"   # or "hc"
 
-# -------- stabilizers --------
+# stabilizers
 # REMOVE_MEAN_DP now used to pin droplet: remove COM velocity + recenter positions
 REMOVE_MEAN_DP = True       # True => pin droplet (no bulk COM drift)
 C_DAMP      = 1.0e-4        # linear drag coeff in Fdamp = -C_DAMP * Astar * U
 CFL_EDGE_FRAC = 100         # fraction of min edge per step
 N_SUBSTEPS_PRESSURE = 1     # pressure substeps (keep 1 for more motion)
 
-# -------- curved-volume behavior --------
+# curved-volume behavior
 STRICT_CV      = True          # fail hard if _curved_volume.py can’t run/parse
 TIMEOUT_CV_S   = 60            # wall-clock timeout per CV attempt (seconds)
 PLANE_REL_TOL  = 5e-3          # <- locked to 0.005 as requested
 
-# -------- NEW: mass matrix type toggle --------
+# NEW: mass matrix type toggle
 USE_CONSISTENT_MASS = False  # True => surface consistent mass matrix, False => lumped m_i
 
-# -------- NEW: pressure gradient toggle --------
+# NEW: pressure gradient toggle
 USE_PRESSURE_GRADIENT = True   # False => old uniform pressure only
 P_GRAD_SCALE          = 1.0    # scale of curvature-based pressure variations
 
@@ -70,8 +70,8 @@ import warnings
 from scipy.sparse import lil_matrix, csr_matrix
 from scipy.sparse.linalg import cg
 
-# ----- Heron curvature import -----
-from _curvatures_heron import HNdC_ijk
+# Heron curvature import
+from ddgclib._curvatures_heron import HNdC_ijk
 
 # try gmsh (for auto mesh generation)
 try:
@@ -80,7 +80,7 @@ try:
 except ImportError:
     HAVE_GMSH = False
 
-# --------------------- noise / logging controls ---------------------
+# noise / logging controls
 def pflush(*a, **kw):
     print(*a, **kw); sys.stdout.flush()
 
@@ -95,7 +95,7 @@ class silence_all:
 
 warnings.filterwarnings("ignore")
 
-# --------------------- basic setup ---------------------
+# basic setup
 INTERACTIVE = True
 if not INTERACTIVE:
     matplotlib.use("Agg")
@@ -106,7 +106,7 @@ if STYLE.exists():
 
 print(sys.executable); print(platform.python_version())
 
-# --------------------- helpers (geometry, areas, normals) ---------------------
+# helpers (geometry, areas, normals)
 # NOTE: _vertex_array now just returns the current global xyz, we no longer use ddgclib.Complex
 def _vertex_array(HC_unused=None):
     """
@@ -200,7 +200,7 @@ def _min_edge_length(xyz, faces):
             m = min(m, np.linalg.norm(xyz[a]-xyz[b]))
     return m if np.isfinite(m) else 0.0
 
-# --------------------- cotangent stuff (LB weights & curvature) ---------------------
+# cotangent stuff (LB weights & curvature)
 def _per_triangle_cots(a, b, c):
     ba, ca = b - a, c - a
     cb, ab = c - b, a - b
@@ -233,7 +233,7 @@ def mean_curvature_scalar(xyz, faces):
     Hn = np.sum(HN * N, axis=1)
     return Hn, N, Astar, W, Lx   # also return Lx
 
-# --------------------- Heron-based curvature vectors (HNdA_i) ---------------------
+# Heron-based curvature vectors (HNdA_i)
 def heron_mean_curvature_vectors(points, faces, neighbors, vertex_faces):
     """
     Heron-based discrete mean curvature:
@@ -277,7 +277,7 @@ def heron_mean_curvature_vectors(points, faces, neighbors, vertex_faces):
 
     return H_vecs, A_dual
 
-# --------------------- control volumes via O + surface triangles ---------------------
+# control volumes via O + surface triangles
 def _barycentric_dual_volumes_from_surface_with_O(xyz, faces):
     nV = xyz.shape[0]
     Vi = np.zeros(nV, dtype=float)
@@ -289,7 +289,7 @@ def _barycentric_dual_volumes_from_surface_with_O(xyz, faces):
         Vi[i] += share; Vi[j] += share; Vi[k] += share
     return Vi
 
-# --------------------- NEW: surface consistent mass matrix --------------------------
+# NEW: surface consistent mass matrix
 MASS_MATRIX = None  # global sparse mass matrix
 
 def _build_surface_consistent_mass_matrix(xyz_init, faces_init, rho0, ref_volume):
@@ -320,7 +320,7 @@ def _build_surface_consistent_mass_matrix(xyz_init, faces_init, rho0, ref_volume
 
     return M.tocsr()
 
-# --------------------- forces (no EOS pressure; only viscous here) ------------------
+# forces (no EOS pressure; only viscous here)
 def F_viscous(mu, W_cotan, U, Astar):
     Lu = np.zeros_like(U)
     for (i, j), w in W_cotan.items():
@@ -366,7 +366,7 @@ def accel_from_forces(F_total, m_i_fixed):
         m_safe = np.where(m > 1e-30, m, 1e-30)
         return (F_total.T / m_safe).T
 
-# --------------------- curved-volume integration loader ---------------------
+# curved-volume integration loader
 class _suppress_output:
     # intentionally left in original (broken) form to avoid any extra overhead
     def __init__(self, enabled=True):
@@ -554,7 +554,7 @@ def _read_Acurved_map(csv_path: Path, good_tids: set[int] | None = None) -> dict
     except Exception:
         return None
 
-# --- NEW: point-wise DualVolume + DualArea (from v44, adapted to tmpdir workdir) ---
+# NEW: point-wise DualVolume + DualArea (from v44, adapted to tmpdir workdir)
 def _find_dualvolume_csv(workdir: Path) -> Path | None:
     cand = workdir / "_COEFFS_Transformed_DualVolume.csv"
     if cand.exists():
@@ -665,7 +665,7 @@ def _curved_volume_and_sumAcurved_with_flat_fallback(
         pflush(f"[warn] CSV missing/invalid (last_err={last_err}). Using A_flat-only fallback.")
         return 0.0, sum_A_flat, sum_A_flat, None
 
-# --------------------- ALWAYS-WRITTEN mesh/topology CSVs ---------------------
+# ALWAYS-WRITTEN mesh/topology CSVs
 def _vertex_adjacency_list(faces, nV):
     nbr = [set() for _ in range(nV)]
     for (i, j, k) in faces:
@@ -686,7 +686,7 @@ def write_mesh_topology_csvs(xyz, faces, out_dir: Path, iter_k: int):
         w = csv.writer(f); w.writerow(["triangle_id","type"])
         for tid, _ in enumerate(faces): w.writerow([tid, 1])
 
-# --------------------- initial conditions & OUTPUT DIR ---------------------
+# initial conditions & OUTPUT DIR
 try:
     script_path = Path(__file__).resolve()
     SCRIPT_STEM = script_path.stem          # e.g. "_AR1.1_fix_mi_fine_curved"
@@ -699,7 +699,7 @@ except NameError:
 OUTPUT_DIR = script_dir / SCRIPT_STEM
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# -------- Gmsh mesh generator (ellipsoid AR_INIT, R_EQ) --------
+# Gmsh mesh generator (ellipsoid AR_INIT, R_EQ)
 def _generate_gmsh_ellipsoid_mesh(path: Path, AR: float, R_eq: float):
     if not HAVE_GMSH:
         raise RuntimeError(
@@ -738,13 +738,13 @@ def _generate_gmsh_ellipsoid_mesh(path: Path, AR: float, R_eq: float):
 
     pflush(f"[GMSH] Done generating mesh: {path}")
 
-# --------------------- ddg mesh ---------------------
+# ddg mesh
 # and mesh source selection
 xyz0 = None
 faces0 = None
 
 if MESH_SOURCE.lower() == "gmsh":
-    # ---- Gmsh-based ellipsoid mesh ----
+    # Gmsh-based ellipsoid mesh
     MESH_IN_PATH = script_dir / "surface_init.msh"
     _generate_gmsh_ellipsoid_mesh(MESH_IN_PATH, AR_INIT, R_EQ)
 
@@ -765,7 +765,7 @@ if MESH_SOURCE.lower() == "gmsh":
     faces0 = np.asarray(tri_cells, dtype=int)
 
 elif MESH_SOURCE.lower() == "hc":
-    # ---- ddgclib-based cube-surface mesh (then snapped to ellipsoid) ----
+    # ddgclib-based cube-surface mesh (then snapped to ellipsoid)
     try:
         from ddgclib import *
         from hyperct import Complex
@@ -811,7 +811,7 @@ else:
 c0 = np.mean(xyz0, axis=0)
 xyz0 = xyz0 - c0
 
-# ---- SNAP xyz0 onto ideal ellipsoid (AR_INIT, R_EQ) ----
+# SNAP xyz0 onto ideal ellipsoid (AR_INIT, R_EQ)
 # Ellipsoid: (x^2 + y^2)/b^2 + z^2/a^2 = 1,
 # with a_z = AR_INIT * b, and volume equal to sphere of radius R_EQ.
 b_snap = R_EQ / (AR_INIT ** (1.0 / 3.0))
@@ -840,7 +840,7 @@ with silence_all():
     plt.close('all')
     meshio.write(mesh0_path, mesh0, file_format="gmsh22", binary=False)
 
-# ---- NEW: build Vi_true0 = Vi_PL0 + DualVolume_vec0 at t=0 for volumes ----
+# NEW: build Vi_true0 = Vi_PL0 + DualVolume_vec0 at t=0 for volumes
 Vi_PL0 = _barycentric_dual_volumes_from_surface_with_O(xyz0, faces0)
 
 if USE_CURVED_VOLUME:
@@ -864,7 +864,7 @@ else:
 
 Vi_true0 = Vi_PL0 + DualVolume_vec0
 
-# -------------- reference volume & area (constants) --------------
+# reference volume & area (constants)
 # Same ellipsoid as used for mesh: a_z = AR_INIT * b, b_x = b_y = b
 b_ref = R_EQ / (AR_INIT ** (1.0 / 3.0))
 a_ref = AR_INIT * b_ref
@@ -873,19 +873,19 @@ REF_VOLUME = (4.0 / 3.0) * np.pi * a_ref * (b_ref ** 2)
 # Reference area: sphere of radius R_EQ (Case II) – full surface area
 REF_AREA   = 4.0 * np.pi * R_EQ**2
 
-# ---- target area for a sphere with the same REF_VOLUME ----
+# target area for a sphere with the same REF_VOLUME
 def _sphere_area_from_volume(V):
     # r = (3V / 4π)^(1/3),  A = 4π r^2 = 4π * (3V / 4π)^(2/3)
     return 4.0 * np.pi * ((3.0 * V / (4.0 * np.pi)) ** (2.0 / 3.0))
 A_TARGET = float(_sphere_area_from_volume(REF_VOLUME))
 
-# ---- Rayleigh frequency and reference cross-sectional area (for dimensionless plots) ----
+# Rayleigh frequency and reference cross-sectional area (for dimensionless plots)
 # Rayleigh angular frequency: ω_R^2 = 8 σ / (ρ R^3),  f_R = ω_R / (2π)
 F_RAYL = (1.0 / (2.0 * np.pi)) * np.sqrt(8.0 * SIGMA / (RHO0 * R_EQ**3))  # Hz
 # Cross-sectional reference area: unperturbed sphere, A_ref = π R^2
 A_REF_CROSS = np.pi * R_EQ**2
 
-# ---- FIXED per-vertex masses / mass matrix ----
+# FIXED per-vertex masses / mass matrix
 MASS_I_VEC = None
 MASS_TOTAL = None
 
@@ -901,10 +901,10 @@ else:
     MASS_I_VEC   = RHO0 * VI_REF  # initial masses (may be updated if UPDATE_MASS_EACH_STEP=True)
     MASS_TOTAL   = float(np.sum(MASS_I_VEC))
 
-# ---- storage for Ai(t=0) if we freeze Ai later ----
+# storage for Ai(t=0) if we freeze Ai later
 Astar_safe0 = None
 
-# --------------------- HARD GUARD: post-step min-edge projection (tangential) ----
+# HARD GUARD: post-step min-edge projection (tangential)
 def _enforce_min_edge_length_tangent(xyz_local, faces, alpha=0.4, *,
                                      pole_only=False, pole_frac=0.85, axis=2):
     """
@@ -972,9 +972,8 @@ def _enforce_min_edge_length_tangent(xyz_local, faces, alpha=0.4, *,
         X[j] = X[j] + Pj @ d
 
     return X
-# ------------------------------------------------------------------------------
 
-# --------------------- ONE STEP (pressure projection + curved Ai/Vi) ---------
+# ONE STEP (pressure projection + curved Ai/Vi)
 _prev_U = np.zeros_like(xyz0)  # previous-step velocity field
 
 def step_forces_dualvolume(HC_unused, faces, step_idx: int):
@@ -996,7 +995,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
     # per-triangle flat areas (same ordering as 'faces')
     A_flat_list_local = _per_triangle_area(xyz_loc, faces)
 
-    # --- curved-volume run + access to A_curved & DualVolume via tmpdir (optional) ---
+    # curved-volume run + access to A_curved & DualVolume via tmpdir (optional)
     if USE_CURVED_VOLUME:
         V_corr, sum_A_curved, sum_A_flat, tmpdir = _curved_volume_and_sumAcurved_with_flat_fallback(
             xyz_loc, faces, plane_rel_tol=PLANE_REL_TOL, step_idx=step_idx, mesh_path=mesh_iter_path
@@ -1007,7 +1006,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
         sum_A_curved = sum_A_flat
         tmpdir = None
     
-    # --- Ai from v44: per-vertex Aflat_pt and Acurved_pt -------------------
+    # Ai from v44: per-vertex Aflat_pt and Acurved_pt
     nV = xyz_loc.shape[0]
     Aflat_pt  = np.zeros(nV, dtype=float)
     Ac_pt_raw = np.zeros(nV, dtype=float)
@@ -1052,7 +1051,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
 
     Astar_safe_total = float(np.sum(Astar_safe))
 
-    # --- Vi from v44: barycentric + DualVolume_vec from CSV (if present) ---
+    # Vi from v44: barycentric + DualVolume_vec from CSV (if present)
     Vi_true_base = _barycentric_dual_volumes_from_surface_with_O(xyz_loc, faces)
     DualVolume_vec = np.zeros_like(Vi_true_base)
 
@@ -1076,7 +1075,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
     V_center_O = V_tet - Vi_true_plus_total
     V_total    = Vi_true_plus_total + V_center_O
 
-    # --- optional dynamic masses: m_i = rho0 * Vi_true_plus(k) each step ---
+    # optional dynamic masses: m_i = rho0 * Vi_true_plus(k) each step
     if UPDATE_MASS_EACH_STEP and (not USE_CONSISTENT_MASS):
         if FIX_VI_AT_T0:
             MASS_I_VEC = RHO0 * Vi_true0
@@ -1084,7 +1083,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
             MASS_I_VEC = RHO0 * Vi_true_plus
         MASS_TOTAL = float(np.sum(MASS_I_VEC))
 
-    # --------- GLOBAL VOLUME-PROJECTION PRESSURE (no EOS) ---------
+    # GLOBAL VOLUME-PROJECTION PRESSURE (no EOS)
 
     # choose surface-tension force method
     method = FS_METHOD.lower()
@@ -1166,7 +1165,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
     # Pressure to enforce dV/dt_new = 0 (global mean)
     p_proj = 0.0 if C == 0.0 else (-dVdt_pred / (sub_dt * C))
 
-    # --- NEW: build a non-uniform pressure pattern on the surface ---
+    # NEW: build a non-uniform pressure pattern on the surface
     if USE_PRESSURE_GRADIENT:
         # area-weighted mean curvature
         H_mean = float(np.sum(Hn * Astar_safe) / (A_sum + 1e-30))
@@ -1192,7 +1191,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
 
     pflush(f"*⟨P_abs⟩ (Pa): {float(np.mean(P_abs_i)):.5f}  *⟨rho⟩ {float(np.mean(rho_i)):.3f}")
 
-    # ---- area-weighted means for summary (after pressure) ----
+    # area-weighted means for summary (after pressure)
     P_inside_mean = float(np.sum(P_abs_i * Astar_safe) / A_sum)
     dP_mean       = float(np.sum(dP_i * Astar_safe) / A_sum)
     surface_tension_mean = tau_bar  # ⟨-σ Hn⟩
@@ -1208,13 +1207,12 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
     for _ in range(nsub):
         U = U + sub_dt * a_vec
 
-    # --- NEW: remove center-of-mass (COM) velocity to pin droplet ---
+    # NEW: remove center-of-mass (COM) velocity to pin droplet
     if REMOVE_MEAN_DP:
         m = np.asarray(MASS_I_VEC, float)
         M_tot = float(np.sum(m) + 1e-30)
         v_com = np.sum(m[:, None] * U, axis=0) / M_tot
         U = U - v_com
-    # ---------------------------------------------------------------
 
     # AB2 displacement (Euler on first step)
     if step_idx == 0:
@@ -1227,28 +1225,26 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
     xyz = xyz2
     _prev_U = U.copy()
 
-    # ---------- HARD GUARD (post-move): project short edges to L_thr tangentially ----------
+    # HARD GUARD (post-move): project short edges to L_thr tangentially
     if USE_HARD_GUARD:
         xyz_tmp, _ = _vertex_array(None)
         xyz_proj = _enforce_min_edge_length_tangent(xyz_tmp, faces, alpha=0.4)
         if xyz_proj is not None and xyz_proj.shape == xyz_tmp.shape:
             xyz = xyz_proj
-    # --------------------------------------------------------------------------------------
 
-    # --- NEW: recenter positions so COM stays at origin (pinning) ---
+    # NEW: recenter positions so COM stays at origin (pinning)
     if REMOVE_MEAN_DP:
         m = np.asarray(MASS_I_VEC, float)
         M_tot = float(np.sum(m) + 1e-30)
         x_com = np.sum(m[:, None] * xyz, axis=0) / M_tot
         xyz = xyz - x_com
-    # ---------------------------------------------------------------
 
     # report (post-move, after hard guard and recentering)
     xyz2, _ = _vertex_array(None)
     A_PL = _surface_area_PL(xyz2, faces)
     V_PL = _enclosed_volume_PL(xyz2, faces)
 
-    # === average distance between neighboring points (unique edges) ===
+    # average distance between neighboring points (unique edges)
     edge_set = set()
     for (i, j, k) in faces:
         if i < j: edge_set.add((i, j))
@@ -1263,11 +1259,11 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
         total_edge_len += float(np.linalg.norm(pb - pa))
     ave_dist_nnpt = total_edge_len / max(len(edge_set), 1)
 
-    # === average distance to origin (for this iteration) ===
+    # average distance to origin (for this iteration)
     dist_O   = np.linalg.norm(xyz2, axis=1)
     ave_dist_O = float(np.mean(dist_O))
 
-    # --- cross-sectional area via area-weighted RMS semi-axes (RMS definition) ---
+    # cross-sectional area via area-weighted RMS semi-axes (RMS definition)
     z = xyz2[:, 2]
     r = np.sqrt(xyz2[:, 0]**2 + xyz2[:, 1]**2)
 
@@ -1279,7 +1275,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
 
     A_cross = float(np.pi * a_z * b_r)
 
-    # --- NEW: ellipsoid-fit cross-sectional area (volume-consistent) ---
+    # NEW: ellipsoid-fit cross-sectional area (volume-consistent)
     A_cross_ellip = A_cross  # fallback
     s = r**2
     t_sq = z**2
@@ -1350,7 +1346,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
         with silence_all():
             meshio.write(OUTPUT_DIR / f"surface_iter_{step_idx:04d}.msh", mesh, file_format="gmsh22", binary=False)
 
-        # --- save 3D mesh view as PNG ---
+        # save 3D mesh view as PNG
         tris_plot = [xyz2[list(t)] for t in faces]
         fig = plt.figure(figsize=(6, 6))
         ax = fig.add_subplot(111, projection="3d")
@@ -1368,7 +1364,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
             plt.savefig(OUTPUT_DIR / f"org_surface_iter_{step_idx:04d}.png", dpi=150)
         plt.close(fig)
 
-        # ---- per-vertex dump (Ai = Astar_safe, Vi = Vi_true, plus H_scalar, p_i) ----
+        # per-vertex dump (Ai = Astar_safe, Vi = Vi_true, plus H_scalar, p_i)
         pv_csv = OUTPUT_DIR / f"iter_{step_idx:04d}_per_vertex.csv"
         with open(pv_csv, "w", newline="") as f:
             w = csv.writer(f)
@@ -1428,7 +1424,7 @@ def step_forces_dualvolume(HC_unused, faces, step_idx: int):
         ave_dist_O,
     )
 
-# --------------------- run loop (collect per-step stats) ---------------------
+# run loop (collect per-step stats)
 iters, Apl_list, Vtotal_list, rhobar_list = [], [], [], []
 Pbar_list, dPbar_list, taubar_list = [], [], []
 dt_list = []
@@ -1489,7 +1485,7 @@ Across_ellip_dimless_list = [A / A_REF_CROSS for A in Across_ellip_list]      # 
 scale_rms_to_one = 3.0 / np.sqrt(2.0)
 Across_dimless_rescaled_list = [A_dim * scale_rms_to_one for A_dim in Across_dimless_list]
 
-# --------------------- save per-step summary ---------------------
+# save per-step summary
 summary_csv = OUTPUT_DIR / f"{SCRIPT_STEM}_summary.csv"
 with open(summary_csv, "w", newline="") as f:
     w = csv.writer(f)
@@ -1593,7 +1589,7 @@ with open(summary_csv, "w", newline="") as f:
             f"{t_dimless:.16e}"
         ])
 
-# --------------------- plots → PNG (ONE ROW + A/Aref vs t*) ---------------------
+# plots → PNG (ONE ROW + A/Aref vs t*)
 plt.close('all')
 
 import pandas as pd
@@ -1630,7 +1626,7 @@ with silence_all():
     plt.savefig(OUTPUT_DIR / "_manifold_cotan_progress_org.png", dpi=150)
 plt.close(fig)
 
-# ---- Dimensionless cross-sectional area over dimensionless time (original RMS) ----
+# Dimensionless cross-sectional area over dimensionless time (original RMS)
 t_dimless = df["t_dimless"].to_numpy()
 A_dimless = df["A_cross_over_A_ref"].to_numpy()
 
@@ -1647,7 +1643,7 @@ with silence_all():
     plt.savefig(OUTPUT_DIR / "A_over_Aref_vs_tstar_org.png", dpi=150)
 plt.close(fig2)
 
-# ---- RMS (rescaled) -> A_over_Aref_vs_tstar_rescaled.png ----
+# RMS (rescaled) -> A_over_Aref_vs_tstar_rescaled.png
 A_dimless_rescaled = df["A_cross_over_A_ref_rescaled"].to_numpy()
 
 fig3, ax3 = plt.subplots(1, 1, figsize=(6, 4))
@@ -1663,7 +1659,7 @@ with silence_all():
     plt.savefig(OUTPUT_DIR / "A_over_Aref_vs_tstar_rescaled.png", dpi=150)
 plt.close(fig3)
 
-# ---- Ellipsoid-fit -> A_over_Aref_vs_tstar_ellip.png ----
+# Ellipsoid-fit -> A_over_Aref_vs_tstar_ellip.png
 A_dimless_ellip = df["A_cross_ellip_over_A_ref"].to_numpy()
 
 fig4, ax4 = plt.subplots(1, 1, figsize=(6, 4))
@@ -1679,7 +1675,7 @@ with silence_all():
     plt.savefig(OUTPUT_DIR / "A_over_Aref_vs_tstar_ellip.png", dpi=150)
 plt.close(fig4)
 
-# --------------------- final view ---------------------
+# final view
 if INTERACTIVE:
     xyz_final, _ = _vertex_array(None)
     tris = [xyz_final[list(t)] for t in faces0]
@@ -1695,4 +1691,3 @@ if INTERACTIVE:
 
     ax.grid(False); plt.tight_layout(); plt.show()
 
-# =====================================================================

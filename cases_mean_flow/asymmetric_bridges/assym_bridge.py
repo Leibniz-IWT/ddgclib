@@ -253,7 +253,6 @@ for sref in srefinements:
                     )
 
                     new_HNdA_ij_dot_hnda_i = HNdA_ij_dot_hnda_i
-                    #########################################
                     HNda_v_cache[v.x] = c_outd['HNdA_ij']
                     HNdA_i.append(c_outd['HNdA_i'])
                     HNdA_ij.append(c_outd['HNdA_ij'])
