@@ -526,6 +526,7 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
     fig, ax = plt.subplots(1)
     figV, axV = plt.subplots(1)
     fig2, ax2 = plt.subplots(1)
+    ax2.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22,labelpad=10)
     x=[]
     y=[]
@@ -540,23 +541,37 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       with open(folName+fname, encoding = 'utf-8') as f:
         df = np.loadtxt(f)
       if df.ndim<2: continue
+      df[:,0] /= df[:,4]
+      df[:,1] /= df[:,4]
+      df[:,5] /= df[:,4]
+      df[:,6] /= df[:,4]**3
+      df[:,7] /= df[:,4]**2
+      df[:,8] /= df[:,4]
+      df[:,4] /= df[:,4]
       indVol = np.argmax(df[:,6])
       angl = 1 - df[indVol,2]/np.pi
       if 'ang' in cont: 
         if angl>185/180: x.append(np.nan)
         else: x.append(angl)
-        z.append(df[indVol,0])
+        #z.append(df[indVol,0])
+        z.append(np.max(df[:indVol+1,0]))
       if 'rad' in cont: 
         x.append(df[indVol,0])
-        z.append( 1 - df[indVol,2]/np.pi )
+        #z.append( 1 - df[indVol,2]/np.pi )
+        z.append(np.min( 1 - df[:indVol+1,2]/np.pi ))
       if 'bub' in cont: 
         x.append(df[indVol,5])
-        z.append(df[indVol,0])
+        #z.append(df[indVol,0])
+        z.append(np.max(df[:indVol+1,0]))
       r = df[:,6]
       y.append(r[indVol])
-      height = -df[:,1]
-      rTopDet.append(df[indVol,5])
-      heigDet.append(-df[indVol,1])
+      #height = -df[:,1]
+      #height = df[:,0]
+      height = 1 - df[:,2]/np.pi
+      #rTopDet.append(df[indVol,5])
+      rTopDet.append(np.max(df[:indVol+1,5]))
+      #heigDet.append(-df[indVol,1])
+      heigDet.append(np.max(-df[:indVol+1,1]))
       for i in range(0):#1, len(r)):
         if abs(r[i]-r[i-1]) > 3: r[i-1]=np.nan
       zord=3
@@ -597,13 +612,17 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       axV.set_yscale('log')
       ax2.plot(x,z, c='k',clip_on=False)
     if 'ang' in cont:
+      figV.subplots_adjust(left=0.1, right=0.97, bottom=0.04,top=0.82)
+      fig2.subplots_adjust(left=0.1, right=0.97, bottom=0.2, top=0.98)
       xx=np.linspace(0,1)
       axV.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dotted', c='k')
       ax2.set_xlabel('$\\phi_0/\\pi$')
-      ax2.set_ylabel('$\\frac{r}{\\lambda}$',rotation=0,size=22,labelpad=10)
+      ax2.text(-.08,.7,'$\\frac{h}{\\lambda}$',c='k',transform=ax2.transAxes,size=22,ha='center')
+      ax2.text(-.08,.5,'$\\frac{R_t}{\\lambda}$',c='b',transform=ax2.transAxes,size=22,ha='center')
+      ax2.text(-.08,.3,'$\\frac{r_0}{\\lambda}$',c='r',transform=ax2.transAxes,size=22,ha='center')
       ax2.set_xlim([0,1])
-      ax2.set_ylim([0,3.219])
-      ax2.plot(x,z, c='k',clip_on=False)
+      #ax2.set_ylim([0,3.219])
+      ax2.plot(x,z, c='r',clip_on=False)
       axV.set_xlim([0,1])
       fname = 'demirkir24life.txt'
       print('open',fname)
@@ -650,17 +669,24 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       fig.subplots_adjust(left=0.03, right=0.86, bottom=0.2, top=0.98)
       print('angWid',.86-.03)
     if 'rad' in cont:
+      figV.subplots_adjust(left=0.1, right=0.88, bottom=0.04,top=0.82)
+      fig2.subplots_adjust(left=0.1, right=0.88, bottom=0.2, top=0.98)
       xx=np.linspace(0,10)
       axV.plot( xx, 2*np.pi*xx, linestyle='dashed', c='k')
-      ax2.set_xlabel('$r/\\lambda$')
-      ax2.set_ylabel('$\\frac{\\phi}{\\pi}$',rotation=0,size=22,labelpad=10)
-      ax2.set_ylim([.5,1])
-      #ax2.set_ylim([.5,1])
-      ax2.set_ylim([0,3.219])
+      ax2.set_xlabel('$r_0/\\lambda$')
+      axP = ax2.twinx()
+      axP.tick_params(direction='in')
+      ax2.tick_params(right=False)
+      ax2.text(-.08,.4,'$\\frac{R_t}{\\lambda}$',c='b',transform=ax2.transAxes,size=22,ha='center')
+      ax2.text(-.08,.6,'$\\frac{h}{\\lambda}$',c='k',transform=ax2.transAxes,size=22,ha='center')
+      ax2.text(1.12,.5,'$\\frac{\\phi_0}{\\pi}$',c='r',transform=ax2.transAxes,size=22,ha='center')
+      axP.set_ylim([.5,1])
+      #ax2.set_ylim([0,3.219])
       ax2.set_xlim([0,4])
       idx = np.argmax(x<.5)
       mdx = np.argmax(x>5)+1
-      ax2.plot( (*x[mdx:idx],0), (*z[mdx:idx],.5), c='k',clip_on=False)#,'.',ms=5
+      #ax2.plot( (*x[mdx:idx],0), (*z[mdx:idx],.5), c='k',clip_on=False)#,'.',ms=5
+      axP.plot( x, z, c='r',clip_on=False, zorder=3)#,'.',ms=5
       fname = 'LesageVolVsContRadSq.txt'
       print('open',fname)
       with open(fname) as f:
@@ -684,19 +710,21 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         df = np.loadtxt(f, skiprows=2)
       capLen=(df[:,2]*1e-3/df[:,1]/9.81)**.5
       axV.plot(df[:,0]*1e-3/capLen, df[:,4]*1e-6*1e-3/capLen**3, '^', mec=(0,0,1), mfc='None', clip_on=False)
-      axV.set_ylabel('$\\frac{V_r}{\\lambda^3}$',rotation=0,size=22,labelpad=10)
       axV.set_xlim([0,4])
       fig.subplots_adjust( left=0.14, right=0.97, bottom=0.2, top=0.98)
-    ax2.plot(x,rTopDet)
-    ax2.plot(x,heigDet)
+    #print(cont,'rTopDet',rTopDet)
+    ax2.plot(x,rTopDet,c='b')
+      #axV.set_ylabel('$\\frac{V_r}{\\lambda^3}$',rotation=0,size=22,labelpad=10)
+    ax2.plot(x,heigDet,c='k')
     idx = np.argsort(x)
     if 'rad' in cont: axV.plot((*x[idx],3.832),(*y[idx],0),c='k')#,clip_on=False)
     else: axV.plot(x[idx],y[idx],c='k')#,clip_on=False)
     ax.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_xlabel('$V/\\lambda^3$')
-    axV.set_ylabel('$\\frac{V_\phi}{\\lambda^3}$',rotation=0,size=22,labelpad=10)
+    axV.set_ylabel('$\\frac{V}{\\lambda^3}$',rotation=0,size=22,labelpad=10)
     axV.set_xticklabels([])
-    ax.set_ylim([0,3])
+    #ax.set_ylim([0,3])
+    ax.set_ylim([0,1])
     ax.set_xlim([0,20])
     axV.set_ylim([0,20])
     axV.tick_params(which='both', direction='in', top=True, right=True)
@@ -706,10 +734,9 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
     fig.set_figheight(3)
     figV.set_figheight(3)
     fig2.set_figheight(3)
-    figV.subplots_adjust(left=0.14, right=0.97, bottom=0.04, top=0.82)
-    fig2.subplots_adjust(left=0.14, right=0.97, bottom=0.2, top=0.98)
-    ax2.tick_params(which='both', direction='in', top=True, right=True)
-    fname = folName+'heightVsVol_'+cont+'.pdf'
+    #fname = folName+'heightVsVol_'+cont+'.pdf'
+    #fname = folName+'radFootVsVol_'+cont+'.pdf'
+    fname = folName+'contAngVsVol_'+cont+'.pdf'
     print('savin ',fname)
     fig.savefig(fname, transparent=True, format='pdf')
     fname = folName+'MaxVolVs_'+cont+'.pdf'

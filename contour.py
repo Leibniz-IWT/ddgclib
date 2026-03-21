@@ -31,14 +31,15 @@ RadTops = np.concatenate([
     ])
 #RadTops = np.logspace(np.log10(.5),np.log10(1.5), 500)
 #RadTops = np.logspace(np.log10(.5),np.log10(1.5), 200)
-for b in range(len(RadTops)):#100):
-#for b in range(0):
+RadTops = np.linspace(0,4,1000)[1:]
+#for b in range(len(RadTops)):#100):
+for b in range(0):
   #RadTop = (1+1e-4)**( (b-200) * abs(b-200) )
-  RadTop = RadTops[b]
+  RadTop = 1/RadTops[b]
   print(b,RadTop)
-  AdamsBashforthProfile(RadTop, 1, angleSave=.01, radSave=0.1, fname=f'data/bub{b:05}.txt')
-reorder_drop_height_vs_vol(nam='ang')
-reorder_drop_height_vs_vol(nam='rad')
+  AdamsBashforthProfile(RadTop, 1, angleSave=.01, radSave=0.1*RadTop, fname=f'data/bub{b:05}.txt')
+#reorder_drop_height_vs_vol(nam='ang')
+#reorder_drop_height_vs_vol(nam='rad')
 plot_drop_height_vs_rad(nam='bub loop_rad loop_ang')
 for b in range(0):#500
   #RadTop = (1+b)/100

@@ -511,6 +511,7 @@ def reorder_drop_height_vs_vol(nam=''):
       df = np.loadtxt(f)
     if df.ndim<2: continue
     dfLoop=np.zeros_like(df)
+    dfLoop[:,4]=1
     for j in range(len(dfLoop[:,0])):
     #prev=np.zeros_like(df[0,:])
     #fname=folName+'loop_'+fname
@@ -528,8 +529,9 @@ def reorder_drop_height_vs_vol(nam=''):
         #dis = (df[i,1]-prev[1])**2 + (prev[6]**.333-df[i,6]**.333)**2
         #if 'ang' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
         #if 'rad' in fname: dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]-df[i,6])**2
-        dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
+        #dis = (df[i,1]-dfLoop[j-1,1])**2 + (dfLoop[j-1,6]**.333-df[i,6]**.333)**2
         dis = ( df[i,1]/df[i,4] - dfLoop[j-1,1]/dfLoop[j-1,4] )**2 + ( dfLoop[j-1,6]**.333/dfLoop[j-1,4] - df[i,6]**.333/df[i,4] )**2
+        #print(fname,'dis',dis,dfLoop[j-1,4],df[i,4])
         if df[i,6]/df[i,4]**3 < dfLoop[j-1,6]/dfLoop[j-1,4]**3:
           dis+=1
         #if ang<angMin:
