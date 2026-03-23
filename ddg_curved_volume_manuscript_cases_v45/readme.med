@@ -1,0 +1,64 @@
+# ddg_curved_volume_manuscript_cases_v45
+
+This archive contains the code and supporting files used for the manuscript cases in version `v45` of the curved-volume study.
+
+## Contents
+
+This archive is organized into three case folders:
+
+- `StaticValidationGeometries/`  
+  Static validation cases on canonical geometries.
+
+- `Cube2Sphere/`  
+  Cube-to-sphere relaxation case.
+
+- `OscillatingDroplet/`  
+  Oscillating droplet benchmark case.
+
+## Purpose of this archive
+
+This archive preserves the code snapshot used for the manuscript results associated with manuscript version `v45`.
+
+The folders correspond to the main computational case groups reported in the manuscript:
+1. Static validation geometries
+2. Cube-to-sphere relaxation
+3. Oscillating droplet benchmark
+
+## Folder overview
+
+### `StaticValidationGeometries/`
+Contains the notebook, helper module, mesh files, and plotting/support files used for the static validation cases.
+
+Main file:
+- `manuscript_curved_volume_final.ipynb`
+
+### `Cube2Sphere/`
+Contains the main script, helper modules, and support files used for the cube-to-sphere relaxation case.
+
+Main file:
+- `droplet_to_sphere_v47_Forces_Murnaghan_curved_AiVi_r_ExactR.py`
+
+### `OscillatingDroplet/`
+Contains the main script, helper modules, and support files used for the oscillating droplet case.
+
+Main file:
+- `_AR1.05_dyn_mi_finer0.15_NoGuard_NoCap_GMSHsnap_cotan_v11_Pgrad 0.33_1.5mass_0Ai.py`
+
+## Notes on file organization
+
+Each case folder may also contain:
+- local helper modules
+- plotting utilities
+- mesh or geometry files
+- earlier or alternative development variants kept for traceability
+
+Please see the `README.md` inside each case folder for case-specific details.
+
+## Reproducibility note
+
+This archive is intended to preserve the exact manuscript code snapshot for the reported cases.  
+For publication citation, please cite the archived Zenodo record corresponding to this archive.
+
+## Suggested citation placeholder
+
+Deng, S., Endres, S. *DDG curved-volume manuscript cases* (version corresponding to manuscript v45) [Computer software]. Zenodo. DOI: to be added after publication.
