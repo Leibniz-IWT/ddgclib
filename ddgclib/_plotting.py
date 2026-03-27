@@ -525,18 +525,20 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
   folName = 'data/'
   for cont in nam.split():
     fig, ax = plt.subplots(1)
-    figV, axV = plt.subplots(1)
+    figV, axVV = plt.subplots(2, sharex=True)
+    plt.subplots_adjust(hspace=0.07)
     fig2, ax2 = plt.subplots(1)
     figProf, axProf = plt.subplots(1)
     x=[]
     y=[]
     z=[]
+    zM=[]
     rTopDet=[]
     heigDet=[]
     volDet=[]
     radInd=0 
     #rads=np.array((.5,1,1.5,2,2.5,3,3.5))
-    rads=np.array((.1,.2,.3))
+    rads=np.array((0.5,1.5,2.5,3.5))
     for fname in reversed(sorted(os.listdir(folName))):
       if 'Lo' in fname: continue
       if 'Hi' in fname: continue
@@ -557,16 +559,16 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       if 'ang' in cont: 
         if angl>185/180: x.append(np.nan)
         else: x.append(angl)
-        #z.append(df[indVol,0])
-        z.append(np.max(df[:indVol+1,0]))
+        z.append(df[indVol,0])
+        zM.append(np.max(df[:indVol+1,0]))
       if 'rad' in cont: 
         x.append(df[indVol,0])
-        #z.append( 1 - df[indVol,2]/np.pi )
-        z.append(np.min( 1 - df[:indVol+1,2]/np.pi ))
+        z.append( 1 - df[indVol,2]/np.pi )
+        zM.append(np.min( 1 - df[:indVol+1,2]/np.pi ))
       if 'bub' in cont: 
         x.append(df[indVol,5])
-        #z.append(df[indVol,0])
-        z.append(np.max(df[:indVol+1,0]))
+        z.append(df[indVol,0])
+        zM.append(np.max(df[:indVol+1,0]))
       r = df[:,6]
       y.append(r[indVol])
       height = -df[:,1]
@@ -581,6 +583,7 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       for i in range(0):#1, len(r)):
         if abs(r[i]-r[i-1]) > 3: r[i-1]=np.nan
       zord=3
+      if '0.txt' not in fname: continue
       if 'ang' in cont: 
         if angl>181/180: continue
         if round(angl*100)%10==0:
@@ -592,10 +595,10 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
           col='silver'
           zord=1
       if 'rad' in cont: 
-        if round(df[0,0]*10)%5==0 and df[0,0]<3.7 and df[0,0]>0:
+        if round(df[0,0]*10)%5==0 and df[0,0]<3.7 and df[0,0]>.05:
           col='k'
           ax.text(r[indVol], height[indVol], rf"${df[0,0]:.1f}$", va='bottom', ha='center', c=col)
-          print(r[indVol], height[indVol], rf"${df[0,0]:.1f}$", fname)
+          print(r[indVol], height[indVol], rf"${df[0,0]}$", fname)
           zord=3
         else: 
           col='silver'
@@ -608,63 +611,68 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         else: 
           col='silver'
           zord=1
-      #ax.plot(r[:indVol+1], height[:indVol+1], c=col, zorder=zord)#, alpha=.5)#
-      ax.plot(r[:indVol+1], height[:indVol+1], '.', c=col, zorder=zord)#, alpha=.5)#
+      ax.plot(r[:indVol+1], height[:indVol+1], c=col, zorder=zord)
     x = np.asarray(x)
     y = np.asarray(y)
     z = np.asarray(z)
-    #print(cont,'rTopDet',rTopDet)
     ax2.plot(x,rTopDet,c='b')
-      #axV.set_ylabel('$\\frac{V_r}{\\lambda^3}$',rotation=0,size=22,labelpad=10)
     ax2.plot(x,heigDet,c='k')
     ax2.set_ylim([0,3.219])
     #idx = np.argsort(x)
-    axV.plot(x,y,'.',c='k')#,clip_on=False)
-    axM = axV.twinx()
-    axM.plot( x, z, '.', c='r', clip_on=False)#zorder=-10)#,'.',ms=5,
+    axV = axVV[0]
+    axM = axVV[1]
+    #axV.plot(x,y,c='k',clip_on=False)
+    maxVind=np.argmax(y)
+    print('x',x[0],x[maxVind],x[-1])
+    print('y',y[0],y[maxVind],y[-1])
+    print('rTopDet',rTopDet[0],rTopDet[maxVind],rTopDet[-1])
+    #axM = axV[1]#.twinx()
+    #axM.set_zorder(axV.get_zorder() - 1)
     axM.tick_params(direction='in')
     ax.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_xlabel('$V/\\lambda^3$')
-    figV.subplots_adjust(left=.1, right=.88, bottom=.18,top=.96)
-    axV.text(-.1,.5,'$\\frac{V}{\\lambda^3}$',transform=axV.transAxes,size=22,ha='center')
+    axV.text(5e-3,.99,'$\\mathrm{(a)}$',transform=axV.transAxes,va='top',ha='left')
+    axM.text(5e-3,.99,'$\\mathrm{(b)}$',transform=axM.transAxes,va='top',ha='left')
+    #figV.subplots_adjust(left=.1, right=.88, bottom=.18,top=.96)
+    #axV.text(-.1,.5,'$\\frac{V}{\\lambda^3}$',transform=axV.transAxes,size=22,ha='center')
+    axV.set_ylabel('$\\frac{V}{\\lambda^3}$',size=22,rotation=0,labelpad=15)
     ax2.tick_params(which='both', direction='in', top=True, right=True)
     ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22,labelpad=10)
     axProf.tick_params(which='both', direction='in', top=True, right=True)
-    axProf.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22,labelpad=10)
+    axProf.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22,labelpad=15)
     axProf.set_ylim([0,2.5])
-    axProf.set_xlim([0,14])
+    #axProf.set_xlim([0,14])
+    axProf.set_xlim([0,18.5])
     axProf.set_aspect('equal', adjustable='box')
     ax.set_ylim([0,3])
-    #ax.set_xlim([0,20])
-    ax.set_xlim([0,5])
-    #ax.set_xlim([1e-4,10])
-    #ax.set_ylim([1e-2,10])
-    #ax.set_xscale('log')
-    #ax.set_yscale('log')
-    axV.set_ylim([0,20])
-    axV.tick_params(which='both', direction='in', top=True, right=False)
+    ax.set_xlim([0,20])
+    axV.set_ylim([0,30])
+    axV.tick_params(which='both', direction='in', top=True, right=True)
+    axM.tick_params(which='both', direction='in', top=True, right=True)
     fig.set_figwidth(5)
     figV.set_figwidth(5)
     fig2.set_figwidth(5)
     figProf.set_figwidth(10)
     fig.set_figheight(3)
-    figV.set_figheight(3)
+    figV.set_figheight(6)
     fig2.set_figheight(3)
     figProf.set_figheight(2.3)
     if 'bub' in cont:
-      #axV.plot(x[idx],y[idx],c='k')#,clip_on=False)
+      axV.plot(x,y,c='k',clip_on=False)
       axV.set_xlabel('$R_t$')
       axV.set_xscale('log')
       axV.set_yscale('log')
       ax2.plot(x,z, c='k',clip_on=False)
     if 'ang' in cont:
-      ###axV.plot(x[idx],y[idx],c='k')#,clip_on=False)
+      axV.plot(x,y,c='b',clip_on=False)
+      axM.plot( x, z, c='b', clip_on=False, zorder=3)
+      axM.plot( x, zM, '--', c='b', clip_on=False, zorder=3)
       fig2.subplots_adjust(left=0.1, right=0.97, bottom=0.2, top=0.98)
       figProf.subplots_adjust(left=0.05, right=0.97, bottom=0.2, top=0.98)
       xx=np.linspace(0,1)
-      axV.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dotted', c='k')
+      axV.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dotted', c='b')
       print(4*np.pi*(.0104*180)**3/3, 'dotted')
-      axV.set_xlabel('$\\phi_0/\\pi$')
+      axM.set_xlabel('$\\phi_0/\\pi$')
       ax2.set_xlabel('$\\phi_0/\\pi$')
       ax2.text(-.08,.7,'$\\frac{h}{\\lambda}$',c='k',transform=ax2.transAxes,size=22,ha='center')
       ax2.text(-.08,.5,'$\\frac{R_t}{\\lambda}$',c='b',transform=ax2.transAxes,size=22,ha='center')
@@ -674,7 +682,8 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       ax2.set_xlim([0,1])
       ax2.plot(x,z, c='r',clip_on=False)
       axV.set_xlim([0,1])
-      axV.text(1.08,.5,'$\\frac{r_0}{\\lambda}$',c='r',transform=axV.transAxes,size=22,ha='center')
+      #axV.text(1.08,.5,'$\\frac{r_0}{\\lambda}$',c='r',transform=axV.transAxes,size=22,ha='center')
+      axM.set_ylabel('$\\frac{r_0}{\\lambda}$',size=22,rotation=0,labelpad=10)
       axM.set_ylim([0,4])
       fname = 'demirkir24life.txt'
       print('open',fname)
@@ -720,19 +729,21 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       ax.set_ylabel('')
       fig.subplots_adjust(left=0.03, right=0.86, bottom=0.2, top=0.98)
       radInd=2
-      rads = np.pi*np.arange(0.8, 0, -0.2)
+      rads = np.pi*np.arange(0.8, -0.1, -0.2)
       print('rads',rads/np.pi)
       outName = folName+f'spr.pdf'
       #spc = (30, 20, 25, 10, 6, 4, 2, .7, 0)
-      spc=(1,3,6,11)
+      spc=(1,3,6,11,15)
       axProf.set_xlabel('$x/\\lambda$')
     if 'rad' in cont:
-      ###axV.plot((*x[idx],3.832),(*y[idx],0),c='k')#,clip_on=False)
+      axV.plot((3.832,*x),(0,*y),c='r',clip_on=False)
+      axM.plot( x, z, c='r', clip_on=False, zorder=3)
+      axM.plot( x, zM, '--', c='r', clip_on=False, zorder=3)
       fig2.subplots_adjust(left=0.1, right=0.88, bottom=0.2, top=0.98)
       figProf.subplots_adjust(left=0.05, right=0.97, bottom=0.02, top=0.98)
-      xx=np.linspace(0,10)
-      axV.plot( xx, 2*np.pi*xx, linestyle='dotted', c='k')
-      axV.set_xlabel('$r_0/\\lambda$')
+      xx=np.linspace(0,4)
+      axV.plot( xx, 2*np.pi*xx, linestyle='dotted', c='r', lw=2)
+      axM.set_xlabel('$r_0/\\lambda$')
       ax2.set_xlabel('$r_0/\\lambda$')
       axP = ax2.twinx()
       axP.tick_params(direction='in')
@@ -741,8 +752,12 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       ax2.text(-.08,.6,'$\\frac{h}{\\lambda}$',c='k',transform=ax2.transAxes,size=22,ha='center')
       ax2.text(1.12,.5,'$\\frac{\\phi_0}{\\pi}$',c='r',transform=ax2.transAxes,size=22,ha='center')
       axP.set_ylim([.5,1])
-      #axM.set_ylim([.5,1])
-      axV.text(1.12,.5,'$\\frac{\\phi_0}{\\pi}$',c='r',transform=axV.transAxes,size=22,ha='center')
+      axM.set_ylim([0,1.05])
+      axM.set_yticks([0,.25,.5,.75,1])
+      axV.axvspan(3.219, 4, color='lightgrey')
+      axM.axvspan(3.219, 4, color='lightgrey')
+      #axV.text(1.12,.5,'$\\frac{\\phi_0}{\\pi}$',c='r',transform=axV.transAxes,size=22,ha='center')
+      axM.set_ylabel('$\\frac{\\phi_0}{\\pi}$',size=22,rotation=0,labelpad=10)
       axProf.text(5e-3,.99,'$\\mathrm{(a)}$',transform=axProf.transAxes,va='top',ha='left')
       ax.text(5e-3,.99,'$\\mathrm{(a)}$',transform=ax.transAxes,va='top',ha='left')
       ax2.set_xlim([0,4])
@@ -756,28 +771,29 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         df = np.loadtxt(f)
       for i in range(len(df[:,0])):
         if df[i,2]>1:continue
-        axV.plot(df[i,0]**.5, df[i,1]*df[i,0]**1.5, 's', mec='b', mfc='None', clip_on=False, zorder=3)
+        axV.plot(df[i,0]**.5, df[i,1]*df[i,0]**1.5, 's', mec='r', mfc='None', clip_on=False, zorder=3)
       fname = 'MoriVolByContCubeVsContSqByCapSq.txt'
       print('open',fname)
       with open(fname) as f:
         df = np.loadtxt(f)
-      axV.plot(.5/df[:,0]**.5, df[:,1]/df[:,0]**1.5, 'd', mec=(0,0,1), mfc='None', clip_on=False, zorder=3)
+      axV.plot(.5/df[:,0]**.5, df[:,1]/df[:,0]**1.5, 'd', mec='r', mfc='None', clip_on=False, zorder=3)
       fname = 'sasetty23stability.txt'
       print('open',fname)
       with open(fname) as f:
         df = np.loadtxt(f)
-      axV.plot(df[:,2]/df[:,3]/2, df[:,1]/(df[:,3]*1e-3)**3, 'v', mec=(0,0,1), mfc='None', clip_on=False)
+      axV.plot(df[:,2]/df[:,3]/2, df[:,1]/(df[:,3]*1e-3)**3, 'v', mec='r', mfc='None', clip_on=False)
       fname = 'gunde01measurement.txt'
       print('open',fname)
       with open(fname) as f:
         df = np.loadtxt(f, skiprows=2)
       capLen=(df[:,2]*1e-3/df[:,1]/9.81)**.5
-      axV.plot(df[:,0]*1e-3/capLen, df[:,4]*1e-6*1e-3/capLen**3, '^', mec=(0,0,1), mfc='None', clip_on=False)
+      axV.plot(df[:,0]*1e-3/capLen, df[:,4]*1e-6*1e-3/capLen**3, '^', mec='r', mfc='None', clip_on=False)
       axV.set_xlim([0,4])
       fig.subplots_adjust( left=0.14, right=0.97, bottom=0.2, top=0.98)
       outName = folName+f'pin.pdf'
       #spc=(1,3,6,10,15,21,28,40,50,60)
-      spc=(1.5,5,10.5)
+      #spc=(1.5,5,10.5)
+      spc=(1,3.5,8,14.5)
       axProf.set_xticklabels([])
     for rad in range(len(rads)):
       for fname in reversed(sorted(os.listdir(folName))):
@@ -788,8 +804,8 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         if df.ndim<2: continue
         if df[0,5]<1: col = ( 1-df[0,5], 0, 0)
         else: col = ( 0, 0, df[0,5]-1)
-        if not rad: 
-          axProf.plot((0,.2),(df[0,5],df[0,5]),c=col)
+        #if not rad: 
+        #  axProf.plot((0,.2),(df[0,5],df[0,5]),c=col)
         for p in range(1, len(df[:,0])):
           if (df[p,radInd] - rads[rad]) * (df[p-1,radInd] - rads[rad]) >= 0: continue
           volInd = np.argmin( abs( volDet - df[p,6] ))
@@ -837,7 +853,7 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
     fig.savefig(fname, transparent=True, format='pdf')
     fname = folName+'MaxVolVs_'+cont+'.pdf'
     print('savin ',fname)
-    figV.savefig(fname, transparent=True, format='pdf')
+    figV.savefig(fname, transparent=True, format='pdf', bbox_inches='tight')
     fname = folName+'ax2_'+cont+'.pdf'
     print('savin ',fname)
     fig2.savefig(fname, transparent=True, format='pdf')

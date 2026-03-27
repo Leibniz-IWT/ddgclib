@@ -385,26 +385,16 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
 #Input the Bond number Bo, and the radius of curvature at bubble top; RadTop
 #Return the volume of the bubble, radius of the contact patch, height of bubble 
 #and height of the centre of mass.
-  #capLen = RadTop / capLen**.5
   ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
   psi=0
   r=0
   z=0
   Volume=0
-  #VolPrev=0
   centroid=0
   area=0
   dPsiPrev=0
   if fname: adams_txt = open(fname, "w") 
   for i in range(int(1e6)):
-    #ds = 1e-0 * min( 1/abs(capLen), 1e-2*abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
-    #ds = min( 1e-3*abs(capLen), 1e-1*abs(np.pi-psi)/capLen, 1e-2 )
-    #if capLen>16: ds = min( 1e-3*abs(capLen), 1e-5*abs(np.pi-psi), 1e-2 )
-    #ds = min( abs(capLen)**2, 1e-3*abs(np.pi-psi), 1e-1 )
-    #ds = 1e-4 #* min( abs(capLen), 1e-3*abs(np.pi-psi), 1e-2 )
-    #ds = 1e-0 * min( abs(capLen)**2, 1e-2*abs(psi), 1e-2*abs(np.pi-psi), 1e-1 )
-    #if r>0: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4*r, 1e-4 )
-    #else: ds = min( 1e-4*abs(RadTop), 1e-4*abs(capLen), 1e-4 )
     dr = ds * np.cos(psi)
     dz = ds * np.sin(psi)
     if i==0:
@@ -415,19 +405,6 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     drPrev = dr
     dzPrev = dz
     dPsi = ds * (2/RadTop - z/capLen**2 - np.sin(psi)/r)
-    #ds2=0
-    #if abs(dPsi)*1800/np.pi>1:
-    #  ds2=ds*np.pi/1800/abs(dPsi)
-    #if r<1 and abs(np.cos(psi))<.1:
-    #  ds2=ds*1e-1#abs(np.cos(psi))
-    #if ds2:
-    #  r -= dr
-    #  z -= dz
-    #  dr = ds2 * np.cos(psi)
-    #  dz = ds2 * np.sin(psi)
-    #  r += dr
-    #  z += dz
-    #  dPsi = ds2 * (2/RadTop - z/capLen**2 - np.sin(psi)/r)
     psi += 1.5*dPsi-.5*dPsiPrev
     Volume += np.pi*r**2*dz
     centroid += z*np.pi*r**2*dz
@@ -435,71 +412,25 @@ def AdamsBashforthProfile(capLen, RadTop, contactAng=-1, fname=None, angleSave=0
     if fname: 
       if not i%100 or dPsi>1e-2: 
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
-    if angleSave:
+    if angleSave and i:
       angBin = int(np.floor(psi/np.pi / angleSave))
       angBinPrev = int(np.floor((psi-dPsi)/np.pi / angleSave))
       if angBin != angBinPrev:
-        #if dPsi<0: nam='angleM'
-        #else: 
         angFname=f'data/ang{max(angBin,angBinPrev):05}.txt'
         ang_txt = open(angFname, "a") 
         print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
-    if radSave:
+    if radSave and i:
       nam='rad'
       radBin = int(np.floor(r / radSave))
-      radBinLimit = radBin*radSave
       radBinPrev = int(np.floor( (r-dr) / radSave))
-      if False:#radBin==radBinPrev and r<.2:
-        nam='radLo'
-        radBin = int(np.floor(np.log(r) / radSave))
-        radBinLimit = np.exp(radSave*radBin)
-        try:
-          radBinPrev = int(np.floor(np.log(r - dr) / radSave))
-        except (ValueError, FloatingPointError, OverflowError):
-          radBinPrev = radBin
-      if False:#radBin==radBinPrev and np.pi<r:
-        nam='radHi'
-        #radBin = int(np.log(3.83148-r) // radSave)
-        #radBinPrev = int(np.log(3.83148-r+dr) // radSave)
-        radBin = int(np.floor(np.log(3.832-r) / radSave))
-        radBinPrev = int(np.floor(np.log(3.832-r+dr) / radSave))
       if radBin != radBinPrev:
-        #print(nam,r,dr,radBin,radBinPrev)
         angFname=f'data/'+nam+f'{max(radBin,radBinPrev):05}.txt'
         ang_txt = open(angFname, "a") 
-        print(radBinLimit, -z, psi-dPsi*(r-radBinLimit)/dr, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
-      #radBin = int(r // sv)
-      #radBinPrev = int((r-dr) // sv)
-      #if radBin != radBinPrev:
-      #  angFname=f'data/'+nam+f'rad{max(radBin,radBinPrev):05}.txt'
-      #  ang_txt = open(angFname, "a") 
-      #  print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
-    #if contactAng>0 and Volume*r**-3<VolPrev: break
-    #if contactAng<0 and dPsi<0: break
-    if Volume<0: 
-      print('Volume',Volume)
-      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid)
-      break
-    if r<0: 
-      print('r',r)
-      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid)
-      break
-    if False:#psi<0: 
-      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
-      break
-    if False:# psi>np.pi: 
-      print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=adams_txt)
-      break
+        print(r, -z, psi, dPsi, capLen, RadTop, Volume, area, centroid, file=ang_txt)
     if psi<0: break
-    #if psi<0-.1*angleSave*np.pi: break
-    #if psi>np.pi+.1*angleSave*np.pi: break
     if psi>np.pi: break
     if dPsi>0 and dPsiPrev<0: break
     dPsiPrev=dPsi
-    #if contactAng>0 and dPsi<0 and psi<contactAng: break
-    #VolPrev = Volume*r**-3
-  #if i>int(1e7-2): print('loop not broken i',i, 'contactAng', contactAng)
-  #if fname: print('saved',fname,'capLen',capLen,f'RadTop{RadTop:20g}','i',i)
   print('saved',fname,'capLen',capLen,f'RadTop{RadTop:10g}','i',i)
   centroid /= Volume
   return Volume, r, z, centroid, psi
