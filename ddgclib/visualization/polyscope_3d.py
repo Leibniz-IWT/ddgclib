@@ -317,3 +317,132 @@ def interactive_viewer(
     update_fn(0)
     ps.set_user_callback(_callback)
     ps.show()
+
+
+def interactive_history_viewer(
+    history,
+    HC,
+    scalar_fields: list[str] = None,
+    vector_fields: list[str] = None,
+    name: str = 'fluid',
+    screenshot_dir: Path | str | None = None,
+    init: bool = True,
+):
+    """Launch an interactive polyscope viewer with a timeline slider for StateHistory.
+
+    Loads each snapshot from *history* into *HC* on demand.  For Lagrangian
+    meshes (vertex count / positions change between snapshots), the point
+    cloud is re-registered each frame.
+
+    Parameters
+    ----------
+    history : StateHistory
+        Recorded simulation history containing snapshots.
+    HC : Complex
+        Simplicial complex (used to obtain dim; vertices are overwritten).
+    scalar_fields : list of str or None
+        Scalar fields to display (default ``['p']``).
+    vector_fields : list of str or None
+        Vector fields to display (default ``['u']``).
+    name : str
+        Polyscope structure name prefix.
+    screenshot_dir : Path or str or None
+        If set, saves a PNG screenshot for every visited frame.
+    init : bool
+        Whether to call ``polyscope.init()``.
+
+    Example
+    -------
+    ::
+
+        from ddgclib.visualization.polyscope_3d import interactive_history_viewer
+        interactive_history_viewer(history, HC, scalar_fields=['p'],
+                                   vector_fields=['u'])
+    """
+    ps = _check_polyscope()
+    if init:
+        ps.init()
+        ps.set_ground_plane_mode("shadow_only")
+        ps.set_up_dir("z_up")
+
+    if scalar_fields is None:
+        scalar_fields = ['p']
+    if vector_fields is None:
+        vector_fields = ['u']
+
+    dim = HC.dim
+    n_frames = history.n_snapshots
+    if n_frames == 0:
+        print("No snapshots in history — nothing to display.")
+        return
+
+    # Extract times for display
+    times = [snap[0] for snap in history._snapshots]
+
+    # State dict for imgui callback
+    cloud_ref = {"cloud": None}
+
+    def _load_frame(idx):
+        """Restore snapshot idx onto HC and update polyscope."""
+        t, snapshot, _ = history._snapshots[idx]
+
+        # Build arrays directly from snapshot data (works for Lagrangian
+        # meshes where HC vertex set may differ between frames).
+        keys = list(snapshot.keys())
+        n_pts = len(keys)
+        if n_pts == 0:
+            return
+
+        positions = np.array(keys, dtype=np.float64)
+        # Pad to 3D for polyscope
+        if positions.shape[1] < 3:
+            pad = np.zeros((n_pts, 3 - positions.shape[1]))
+            positions = np.hstack([positions, pad])
+
+        # Re-register point cloud each frame (vertex count may change)
+        cloud = ps.register_point_cloud(name, positions)
+        cloud_ref["cloud"] = cloud
+
+        # Add scalar quantities
+        for field in scalar_fields:
+            vals = np.zeros(n_pts)
+            for i, key in enumerate(keys):
+                vdata = snapshot.get(key, {})
+                val = vdata.get(field, 0.0)
+                vals[i] = float(val) if np.ndim(val) == 0 else float(val[0])
+            cloud.add_scalar_quantity(field, vals, enabled=(field == scalar_fields[0]))
+
+        # Add vector quantities + velocity magnitude scalar
+        for field in vector_fields:
+            vecs = np.zeros((n_pts, 3))
+            for i, key in enumerate(keys):
+                vdata = snapshot.get(key, {})
+                val = vdata.get(field, np.zeros(dim))
+                arr = np.asarray(val, dtype=np.float64)
+                vecs[i, :len(arr)] = arr[:min(len(arr), 3)]
+            # Vector arrows (enabled, dark blue for visibility)
+            cloud.add_vector_quantity(field, vecs, enabled=True,
+                                      color=(0.1, 0.2, 0.6),
+                                      radius=0.003)
+            # Velocity magnitude as scalar colormap (enabled)
+            magnitudes = np.linalg.norm(vecs, axis=1)
+            cloud.add_scalar_quantity(
+                f"|{field}|", magnitudes, enabled=True, cmap='coolwarm',
+            )
+
+    def _info(idx):
+        import polyscope.imgui as imgui
+        t = times[idx]
+        imgui.Text(f"t = {t:.4f} s")
+        imgui.Text(f"Frame {idx + 1} / {n_frames}")
+        # Vertex count from snapshot
+        n_pts = len(history._snapshots[idx][1])
+        imgui.Text(f"Vertices: {n_pts}")
+
+    interactive_viewer(
+        n_frames=n_frames,
+        update_fn=_load_frame,
+        info_fn=_info,
+        screenshot_dir=screenshot_dir,
+        init=False,  # we already init'd above
+    )

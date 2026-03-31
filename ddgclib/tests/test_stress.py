@@ -1910,3 +1910,95 @@ class TestIntegratedCauchyStress:
         sigma = integrated_cauchy_stress(p=0.0, Du=Du, mu=0.5, Vol_i=10.0, dim=2)
         expected = 2.0 * 0.5 * strain_rate(Du)
         npt.assert_allclose(sigma, expected)
+
+
+# ---------------------------------------------------------------------------
+# Edge Area Cache Tests (batch_e_star orient=True)
+# ---------------------------------------------------------------------------
+
+class TestEdgeAreaCache3D:
+    """Test that batch_e_star(orient=True) matches dual_area_vector."""
+
+    def test_cache_matches_sequential(self, mesh_3d):
+        """Oriented batch areas match per-edge dual_area_vector."""
+        from ddgclib.operators.stress import dual_area_vector
+        from hyperct.ddg import batch_e_star
+
+        HC, bV = mesh_3d
+        interior = [v for v in HC.V if v not in bV]
+        edge_areas, failed, _ = batch_e_star(
+            interior, HC, dim=3, orient=True, compute_volumes=True,
+        )
+        assert len(failed) == 0
+
+        tested = 0
+        for v in interior:
+            vid = id(v)
+            for v_j in v.nn:
+                A_seq = dual_area_vector(v, v_j, HC, dim=3)
+                if vid in edge_areas and id(v_j) in edge_areas[vid]:
+                    A_batch = edge_areas[vid][id(v_j)]
+                    npt.assert_allclose(
+                        A_batch, A_seq, atol=1e-12,
+                        err_msg=f"Cache mismatch at {v.x}-{v_j.x}",
+                    )
+                    tested += 1
+        assert tested > 0, "No edges tested"
+
+    def test_stress_force_with_cache(self, mesh_3d):
+        """stress_force gives same result with and without cache."""
+        from ddgclib.operators.stress import stress_force
+        from hyperct.ddg import batch_e_star
+
+        HC, bV = mesh_3d
+        mu = 0.1
+
+        # Set up velocity and pressure fields
+        for v in HC.V:
+            v.u = np.array([v.x_a[1], 0.0, 0.0])
+            v.p = 0.0
+            v.m = 1.0
+
+        interior = [v for v in HC.V if v not in bV]
+
+        # Compute without cache
+        HC._edge_area_cache = None
+        forces_no_cache = {}
+        for v in interior:
+            forces_no_cache[id(v)] = stress_force(
+                v, dim=3, mu=mu, HC=HC,
+            ).copy()
+
+        # Compute with cache
+        edge_areas, _, _ = batch_e_star(
+            interior, HC, dim=3, orient=True, compute_volumes=True,
+        )
+        HC._edge_area_cache = edge_areas
+        for v in interior:
+            F_cached = stress_force(v, dim=3, mu=mu, HC=HC)
+            npt.assert_allclose(
+                F_cached, forces_no_cache[id(v)], atol=1e-12,
+                err_msg=f"Force mismatch at {v.x}",
+            )
+
+        # Clean up
+        HC._edge_area_cache = None
+
+    def test_fallback_no_cache(self, mesh_3d):
+        """stress_force works when HC has no _edge_area_cache."""
+        from ddgclib.operators.stress import stress_force
+
+        HC, bV = mesh_3d
+        for v in HC.V:
+            v.u = np.zeros(3)
+            v.p = 0.0
+            v.m = 1.0
+
+        # Ensure no cache attribute
+        if hasattr(HC, '_edge_area_cache'):
+            del HC._edge_area_cache
+
+        interior = [v for v in HC.V if v not in bV]
+        for v in interior:
+            F = stress_force(v, dim=3, mu=0.1, HC=HC)
+            assert F.shape == (3,)

@@ -266,3 +266,118 @@ class UniformMass(InitialCondition):
         mass_per_vert = self.rho * self.total_volume / n_verts
         for v in HC.V:
             v.m = mass_per_vert
+
+
+class DualVolumeMass(InitialCondition):
+    """Set mass proportional to dual cell volume: m_i = rho * dual_vol_i.
+
+    Unlike :class:`UniformMass`, this ensures that the local density
+    ``rho_i = m_i / dual_vol_i`` equals *rho* exactly for every vertex,
+    including boundary vertices with half-cells.  This is essential for
+    EOS-coupled simulations where pressure is derived from density.
+
+    Requires ``compute_vd`` and ``cache_dual_volumes`` to have been
+    called before applying this IC.
+
+    Parameters
+    ----------
+    rho : float
+        Target fluid density [kg/m^3].
+    """
+
+    def __init__(self, rho: float = 1000.0):
+        self.rho = rho
+
+    def apply(self, HC, bV: set) -> None:
+        for v in HC.V:
+            dual_vol = getattr(v, 'dual_vol', None)
+            if dual_vol is None or dual_vol < 1e-30:
+                v.m = self.rho * 1e-30
+            else:
+                v.m = self.rho * dual_vol
+
+
+class HydrostaticEOSMass(InitialCondition):
+    """Set mass so that EOS pressure matches the **compressible** hydrostatic profile.
+
+    Solves the compressible hydrostatic ODE ``dP/dz = -rho(P) * g``
+    downward from the free surface at ``h_ref`` where ``P = P_ref``.
+    The density at each depth is ``rho(P) = eos.density(P)``, so the
+    pressure and density are thermodynamically consistent.
+
+    For a linear EOS (n=1, ``P = P0 + K*(rho/rho0 - 1)``), the
+    closed-form solution is:
+
+        P(z) = P_ref + K * (exp(rho0 * g * (h_ref - z) / K) - 1)
+
+    For general EOS, the ODE is integrated numerically via
+    ``scipy.integrate.solve_ivp``.
+
+    Requires ``compute_vd`` and ``cache_dual_volumes`` to have been
+    called before applying this IC.
+
+    Parameters
+    ----------
+    eos : EquationOfState
+        Equation of state with ``pressure(rho)`` and ``density(P)`` methods.
+    rho0 : float
+        Reference density [kg/m^3].
+    g : float
+        Gravitational acceleration [m/s^2].
+    gravity_axis : int
+        Coordinate axis aligned with gravity.
+    h_ref : float
+        Height where P = P_ref (free surface).
+    P_ref : float
+        Reference pressure at h_ref.
+    """
+
+    def __init__(self, eos, rho0: float = 1000.0, g: float = 9.81,
+                 gravity_axis: int = 1, h_ref: float = 1.0,
+                 P_ref: float = 0.0):
+        self.eos = eos
+        self.rho0 = rho0
+        self.g = g
+        self.gravity_axis = gravity_axis
+        self.h_ref = h_ref
+        self.P_ref = P_ref
+
+    def _compressible_pressure(self, z: float) -> float:
+        """Compressible hydrostatic pressure at height z.
+
+        Uses closed-form for linear EOS (n=1), ODE for general EOS.
+        """
+        depth = self.h_ref - z  # depth below free surface
+        if depth <= 0:
+            return self.P_ref
+
+        # Check for linear EOS (n=1): closed-form exponential solution
+        n = getattr(self.eos, 'n', None)
+        K = getattr(self.eos, 'K', None)
+        if n is not None and K is not None and abs(n - 1.0) < 1e-12:
+            alpha = self.rho0 * self.g / K
+            return self.P_ref + K * (np.exp(alpha * depth) - 1.0)
+
+        # General EOS: integrate dP/dz = -rho(P)*g from h_ref downward
+        from scipy.integrate import solve_ivp
+
+        def dP_dz(z_coord, P_arr):
+            rho_local = float(self.eos.density(P_arr[0]))
+            return [-rho_local * self.g]  # dP/dz = -rho*g (z decreasing)
+
+        sol = solve_ivp(dP_dz, [self.h_ref, z], [self.P_ref],
+                        rtol=1e-12, atol=1e-12)
+        return float(sol.y[0, -1])
+
+    def apply(self, HC, bV: set) -> None:
+        for v in HC.V:
+            y = v.x_a[self.gravity_axis]
+            P_target = self._compressible_pressure(y)
+            rho_eq = float(self.eos.density(P_target))
+            dual_vol = getattr(v, 'dual_vol', None)
+            if dual_vol is None or dual_vol < 1e-30:
+                v.m = rho_eq * 1e-30
+            else:
+                v.m = rho_eq * dual_vol
+            v.rho = rho_eq
+            v.p = P_target

@@ -34,7 +34,10 @@ from ddgclib.visualization.unified import (
     dynamic_plot_fluid_polyscope,
 )
 
-from ddgclib.visualization.polyscope_3d import interactive_viewer
+from ddgclib.visualization.polyscope_3d import (
+    interactive_viewer,
+    interactive_history_viewer,
+)
 
 __all__ = [
     'plot_scalar_field_1d',
@@ -53,4 +56,5 @@ __all__ = [
     'dynamic_plot_fluid',
     'dynamic_plot_fluid_polyscope',
     'interactive_viewer',
+    'interactive_history_viewer',
 ]
