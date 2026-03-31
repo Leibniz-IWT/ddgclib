@@ -118,16 +118,26 @@ def analyse_equilibrium(HC, bV):
 
     Returns dict with arrays/scalars.
     """
+    from ddgclib.analytical._integrated_comparison import (
+        integrated_pressure_error,
+        integrated_l2_norm,
+    )
+    from hyperct.ddg import dual_cell_polygon_2d
+    from ddgclib.analytical._divergence_theorem import (
+        integrated_gradient_2d_vector,
+    )
+
     accel_norms = []        # ||stress_acceleration||
     F_full_norms = []       # ||F_stress||
     F_pressure_x = []       # pressure-only F_x
     F_viscous_x = []        # viscous-only F_x
     du_norms = []           # ||velocity_difference_tensor||
+    du_errors = []          # ||Du_DDG - Du_analytical|| (integrated)
     positions_y = []
 
-    for v in HC.V:
-        if v in bV:
-            continue
+    interior = [v for v in HC.V if v not in bV]
+
+    for v in interior:
         a = stress_acceleration(v, dim=dim, mu=mu, HC=HC)
         F_full = stress_force(v, dim=dim, mu=mu, HC=HC)
         F_pres = stress_force(v, dim=dim, mu=0.0, HC=HC)
@@ -141,15 +151,39 @@ def analyse_equilibrium(HC, bV):
         du_norms.append(np.linalg.norm(du))
         positions_y.append(v.x_a[1])
 
+        # Integrated comparison: DDG Du vs analytical ∫ ∇u dV
+        try:
+            polygon = dual_cell_polygon_2d(v)
+            u_callable = lambda x: np.array([
+                G / (2.0 * mu) * x[1] * (h - x[1]), 0.0
+            ])
+            du_ana = integrated_gradient_2d_vector(u_callable, polygon)
+            du_errors.append(np.linalg.norm(du - du_ana))
+        except Exception:
+            du_errors.append(float('nan'))
+
     accel_norms = np.array(accel_norms)
     F_full_norms = np.array(F_full_norms)
+
+    # Integrated pressure comparison
+    P_analytical = lambda x: -G * x[0]
+    int_p_errs = integrated_pressure_error(
+        HC, interior, P_analytical, dim=dim,
+    )
+    int_p_l2 = integrated_l2_norm(
+        HC, interior, P_analytical, dim=dim,
+    )
+
     return {
         "accel_norms": accel_norms,
         "F_full_norms": F_full_norms,
         "F_pressure_x": np.array(F_pressure_x),
         "F_viscous_x": np.array(F_viscous_x),
         "du_norms": np.array(du_norms),
+        "du_errors": np.array(du_errors),
         "positions_y": np.array(positions_y),
+        "int_pressure_errs": int_p_errs,
+        "int_pressure_l2": int_p_l2,
     }
 
 
@@ -175,7 +209,7 @@ def main():
         f"{'refine':>6}  {'n_vert':>7}  {'n_int':>6}  "
         f"{'||F|| max':>12}  {'||F|| med':>12}  "
         f"{'||a|| max':>12}  {'||a|| med':>12}  "
-        f"{'oppos%':>7}"
+        f"{'Du_err max':>12}  {'P_L2':>12}"
     )
     print(header)
     print("-" * len(header))
@@ -187,26 +221,22 @@ def main():
         diag = analyse_equilibrium(HC, bV)
         an = diag["accel_norms"]
         fn = diag["F_full_norms"]
+        du_err = diag["du_errors"]
         n_int = len(an)
-
-        # Fraction of interior verts where pressure and viscous x-forces oppose
-        fp = diag["F_pressure_x"]
-        fv = diag["F_viscous_x"]
-        opposing = np.sum((fp * fv) < 0)
-        oppos_pct = 100.0 * opposing / n_int if n_int > 0 else 0.0
 
         print(
             f"{nr:>6d}  {n_vert:>7d}  {n_int:>6d}  "
             f"{np.max(fn):>12.4e}  {np.median(fn):>12.4e}  "
             f"{np.max(an):>12.4e}  {np.median(an):>12.4e}  "
-            f"{oppos_pct:>6.1f}%"
+            f"{np.nanmax(du_err):>12.4e}  {diag['int_pressure_l2']:>12.4e}"
         )
         results.append({
             "n_refine": nr, "n_vert": n_vert, "n_int": n_int,
             "accel_max": np.max(an), "accel_med": np.median(an),
             "accel_mean": np.mean(an),
             "F_max": np.max(fn), "F_med": np.median(fn),
-            "opposing_pct": oppos_pct,
+            "du_err_max": float(np.nanmax(du_err)),
+            "int_pressure_l2": diag["int_pressure_l2"],
         })
 
     # -- Convergence rates --------------------------------------------------
@@ -389,6 +419,52 @@ def _plot_equilibrium_fields(HC, bV, n_refine):
     fig2.tight_layout()
     fig2.savefig(os.path.join(_FIG, 'residual_vs_y.png'), dpi=150)
     plt.close(fig2)
+
+    # -- Integrated comparison: Du_DDG vs Du_analytical -----------------------
+    from hyperct.ddg import dual_cell_polygon_2d
+    from ddgclib.analytical._divergence_theorem import integrated_gradient_2d_vector
+
+    interior_list = [v for v in HC.V if v not in bV]
+    du_err_list = []
+    y_du = []
+    u_callable = lambda x: np.array([
+        G / (2.0 * mu) * x[1] * (h - x[1]), 0.0
+    ])
+    for v in interior_list:
+        try:
+            Du_num = velocity_difference_tensor(v, HC, dim=dim)
+            polygon = dual_cell_polygon_2d(v)
+            Du_ana = integrated_gradient_2d_vector(u_callable, polygon)
+            du_err_list.append(np.linalg.norm(Du_num - Du_ana))
+            y_du.append(v.x_a[1])
+        except Exception:
+            pass
+
+    fig3, (ax3a, ax3b) = plt.subplots(1, 2, figsize=(14, 5))
+    if du_err_list:
+        ax3a.scatter(y_du, du_err_list, s=10, alpha=0.5, color='tab:green')
+        ax3a.set_xlabel('y')
+        ax3a.set_ylabel('$\\|Du_{DDG} - Du_{analytical}\\|$')
+        ax3a.set_title(f'Velocity gradient error (n_refine={n_refine})')
+        ax3a.ticklabel_format(style='scientific', axis='y', scilimits=(0, 0))
+        ax3a.grid(True, alpha=0.3)
+
+    # Pressure + viscous force balance
+    fp = np.array([v.F_pres_x for v in HC.V if v not in bV])
+    fv = np.array([v.F_visc_x for v in HC.V if v not in bV])
+    f_net = fp + fv
+    ax3b.scatter(y_int, f_net, s=10, alpha=0.5, color='tab:purple')
+    ax3b.axhline(0, color='gray', lw=0.5, ls='--')
+    ax3b.set_xlabel('y')
+    ax3b.set_ylabel('$F^{pres}_x + F^{visc}_x$ (net)')
+    ax3b.set_title(f'Net x-force (should be ~0)')
+    ax3b.ticklabel_format(style='scientific', axis='y', scilimits=(0, 0))
+    ax3b.grid(True, alpha=0.3)
+
+    fig3.suptitle('Integrated Analytical Comparison')
+    fig3.tight_layout(rect=[0, 0, 1, 0.95])
+    fig3.savefig(os.path.join(_FIG, 'integrated_comparison.png'), dpi=150)
+    plt.close(fig3)
 
 
 if __name__ == "__main__":

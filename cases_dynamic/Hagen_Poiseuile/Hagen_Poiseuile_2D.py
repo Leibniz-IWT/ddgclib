@@ -313,15 +313,64 @@ mid_verts = sorted(
     key=lambda v: v.x_a[1]
 )
 
-errors = []
-for v in mid_verts:
-    u_anal = poiseuille_ic.analytical_velocity(v.x_a)
-    errors.append(abs(v.u[0] - u_anal))
-
-max_err = max(errors) if errors else float('nan')
-l2_err = np.sqrt(np.mean(np.array(errors)**2)) if errors else float('nan')
+# Velocity comparison at midplane cross-section
 ux_num = np.array([v.u[0] for v in mid_verts])
-print(f"\nError at x=L/2 vs analytical: max={max_err:.6e}, L2={l2_err:.6e}")
-print(f"U_max analytical = {U_max:.6f}, U_max numerical = "
+print(f"\nVelocity at x=L/2:")
+print(f"  U_max analytical = {U_max:.6f}, U_max numerical = "
       f"{max(ux_num) if len(ux_num) > 0 else float('nan'):.6f}")
+
+# 5d: Integrated comparison (velocity difference tensor on final mesh)
+print(f"\nIntegrated velocity comparison (Du_DDG vs ∫ ∇u dV):")
+try:
+    from hyperct.ddg import dual_cell_polygon_2d
+    from ddgclib.analytical._divergence_theorem import integrated_gradient_2d_vector
+    from ddgclib.operators.stress import velocity_difference_tensor, cache_dual_volumes
+
+    cache_dual_volumes(HC, dim=d)
+    interior_final = [v for v in HC.V if v not in bV]
+    du_errors = []
+    for v in interior_final:
+        try:
+            Du_num = velocity_difference_tensor(v, HC, dim=d)
+            polygon = dual_cell_polygon_2d(v)
+            u_callable = lambda x, _ic=poiseuille_ic: np.array([
+                _ic.analytical_velocity(x), 0.0
+            ])
+            Du_ana = integrated_gradient_2d_vector(u_callable, polygon)
+            du_errors.append(np.linalg.norm(Du_num - Du_ana))
+        except Exception:
+            pass
+
+    if du_errors:
+        print(f"  max|Du_DDG - Du_ana| = {max(du_errors):.6e}")
+        print(f"  mean|Du_DDG - Du_ana| = {np.mean(du_errors):.6e}")
+    else:
+        print("  No interior vertices for integrated comparison")
+
+    # 5e: Integrated pressure comparison
+    from ddgclib.analytical._integrated_comparison import (
+        integrated_pressure_error,
+        integrated_l2_norm,
+        compare_stress_force,
+    )
+    P_analytical = lambda x: -G * x[0]  # P(x) = -G*x (Poiseuille)
+    int_p_errs = integrated_pressure_error(
+        HC, interior_final, P_analytical=P_analytical, dim=d,
+    )
+    int_p_l2 = integrated_l2_norm(
+        HC, interior_final, P_analytical=P_analytical, dim=d,
+    )
+    print(f"\nIntegrated pressure comparison:")
+    if int_p_errs:
+        print(f"  max|p*V - ∫P dV| = {max(int_p_errs):.6e}")
+        print(f"  Integrated L2 norm = {int_p_l2:.6e}")
+
+    # 5f: Force balance diagnostic
+    force_diag = compare_stress_force(HC, interior_final, dim=d, mu=mu)
+    print(f"  Force balance: max|F| = {force_diag['max_F']:.4e}, "
+          f"median|F| = {force_diag['median_F']:.4e}")
+
+except ImportError as e:
+    print(f"  Skipping integrated comparison: {e}")
+
 print(f"\nRun 'python visualize_hp2d.py' to generate all plots and animations.")

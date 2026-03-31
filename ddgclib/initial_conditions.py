@@ -61,7 +61,14 @@ class UniformPressure(InitialCondition):
 
 
 class HydrostaticPressure(InitialCondition):
-    """Set P = P_ref + rho * g * (h_ref - x[axis]).
+    """Set P to the volume-averaged hydrostatic pressure over each dual cell.
+
+    The analytical field is ``P(x) = P_ref + rho * g * (h_ref - x[axis])``.
+
+    When dual cells have been computed (``v.vd`` exists), the pressure is
+    set to the volume-averaged value ``v.p = (1/Vol_i) ∫_{V_i} P dV``,
+    ensuring ``v.p * Vol_i = ∫ P dV`` (machine precision for linear P).
+    Falls back to point-wise ``P(x_vertex)`` when duals are unavailable.
 
     Parameters
     ----------
@@ -86,16 +93,28 @@ class HydrostaticPressure(InitialCondition):
         self.h_ref = h_ref
         self.P_ref = P_ref
 
+    def _p_field(self, x: np.ndarray) -> float:
+        return self.P_ref + self.rho * self.g * (self.h_ref - x[self.axis])
+
     def apply(self, HC, bV: set) -> None:
+        dim = getattr(HC, 'dim', len(next(iter(HC.V)).x))
         for v in HC.V:
-            v.p = self.P_ref + self.rho * self.g * (self.h_ref - v.x_a[self.axis])
+            if hasattr(v, 'vd') and v.vd and hasattr(v, 'dual_vol'):
+                from ddgclib.analytical._integrated_comparison import (
+                    volume_averaged_scalar,
+                )
+                v.p = volume_averaged_scalar(self._p_field, v, dim=dim)
+            else:
+                v.p = self._p_field(v.x_a[:dim])
 
 
 class LinearPressureGradient(InitialCondition):
-    """Set P = P_ref - G * x[axis].
+    """Set P to the volume-averaged linear pressure over each dual cell.
 
-    Models a constant pressure gradient along the flow axis,
-    as in fully-developed Poiseuille flow.
+    The analytical field is ``P(x) = P_ref - G * x[axis]``.
+
+    Uses volume-averaged assignment when duals are available (see
+    :class:`HydrostaticPressure` for details).
 
     Parameters
     ----------
@@ -112,9 +131,19 @@ class LinearPressureGradient(InitialCondition):
         self.axis = axis
         self.P_ref = P_ref
 
+    def _p_field(self, x: np.ndarray) -> float:
+        return self.P_ref - self.G * x[self.axis]
+
     def apply(self, HC, bV: set) -> None:
+        dim = getattr(HC, 'dim', len(next(iter(HC.V)).x))
         for v in HC.V:
-            v.p = self.P_ref - self.G * v.x_a[self.axis]
+            if hasattr(v, 'vd') and v.vd and hasattr(v, 'dual_vol'):
+                from ddgclib.analytical._integrated_comparison import (
+                    volume_averaged_scalar,
+                )
+                v.p = volume_averaged_scalar(self._p_field, v, dim=dim)
+            else:
+                v.p = self._p_field(v.x_a[:dim])
 
 
 # Vector field ICs (velocity)
@@ -381,3 +410,88 @@ class HydrostaticEOSMass(InitialCondition):
                 v.m = rho_eq * dual_vol
             v.rho = rho_eq
             v.p = P_target
+
+
+# Multiphase ICs
+
+class PhaseAssignment(InitialCondition):
+    """Assign phase IDs to vertices based on spatial position.
+
+    Sets ``v.phase`` to the integer returned by the criterion function.
+
+    Parameters
+    ----------
+    criterion_fn : callable
+        Maps ``v.x_a`` (numpy position array) to integer phase ID.
+    """
+
+    def __init__(self, criterion_fn: Callable[[np.ndarray], int]):
+        self.criterion_fn = criterion_fn
+
+    def apply(self, HC, bV: set) -> None:
+        for v in HC.V:
+            v.phase = int(self.criterion_fn(v.x_a))
+
+
+class MultiphaseMass(InitialCondition):
+    """Set mass from per-phase density: m_i = rho_phase * dual_vol_i.
+
+    Requires ``compute_vd`` and ``cache_dual_volumes`` to have been
+    called, and ``v.phase`` to be set on all vertices.
+
+    Parameters
+    ----------
+    multiphase_system : MultiphaseSystem
+        Provides per-phase density via ``phases[v.phase].rho0``.
+    """
+
+    def __init__(self, multiphase_system):
+        self.mps = multiphase_system
+
+    def apply(self, HC, bV: set) -> None:
+        for v in HC.V:
+            rho = self.mps.phases[v.phase].rho0
+            dual_vol = getattr(v, 'dual_vol', None)
+            if dual_vol is None or dual_vol < 1e-30:
+                v.m = rho * 1e-30
+            else:
+                v.m = rho * dual_vol
+
+
+class MultiphasePressure(InitialCondition):
+    """Set equilibrium pressure using per-phase EOS.
+
+    Bulk vertices get ``P = eos.pressure(rho0)``.  Interface vertices
+    optionally include a Young-Laplace pressure jump for the inner phase.
+
+    Parameters
+    ----------
+    multiphase_system : MultiphaseSystem
+        Provides per-phase EOS and surface tension.
+    inner_phase : int
+        Phase ID of the droplet / inner phase (gets the pressure jump).
+    curvature : float or None
+        Mean curvature of the interface.  If provided, adds
+        ``gamma * curvature`` to inner-phase pressure (Young-Laplace).
+    """
+
+    def __init__(self, multiphase_system, inner_phase: int = 1,
+                 curvature: float | None = None):
+        self.mps = multiphase_system
+        self.inner_phase = inner_phase
+        self.curvature = curvature
+
+    def apply(self, HC, bV: set) -> None:
+        for v in HC.V:
+            eos = self.mps.phases[v.phase].eos
+            rho0 = self.mps.phases[v.phase].rho0
+            v.p = float(eos.pressure(rho0))
+
+        # Apply Young-Laplace jump to inner phase if curvature is known
+        if self.curvature is not None:
+            key = (min(0, self.inner_phase), max(0, self.inner_phase))
+            gamma = self.mps._gamma.get(key, 0.0)
+            delta_p = gamma * self.curvature
+            for v in HC.V:
+                if v.phase == self.inner_phase:
+                    v.p += delta_p

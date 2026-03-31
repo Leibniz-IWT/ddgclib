@@ -239,8 +239,8 @@ def dual_volume(v, HC, dim: int = 3) -> float:
         return max(positions) - min(positions)
 
     elif dim == 2:
-        from hyperct.ddg import d_area
-        return d_area(v)
+        from hyperct.ddg import dual_cell_area_2d
+        return dual_cell_area_2d(v, include_edge_midpoints=True)
 
     elif dim == 3:
         from hyperct.ddg import v_star as _v_star
@@ -282,7 +282,11 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
         Spatial dimension.
     """
     for v in HC.V:
-        v.dual_vol = dual_volume(v, HC, dim)
+        try:
+            v.dual_vol = dual_volume(v, HC, dim)
+        except (ValueError, IndexError):
+            # Degenerate vertex (e.g. domain corner with too few neighbors)
+            v.dual_vol = 0.0
 
 
 def _get_dual_vol(v, HC, dim: int = 3) -> float:
@@ -367,6 +371,54 @@ def velocity_difference_tensor_pointwise(v, HC, dim: int = 3) -> np.ndarray:
     if Vol_i < 1e-30:
         return np.zeros((dim, dim))
     return velocity_difference_tensor(v, HC, dim) / Vol_i
+
+
+def scalar_gradient_integrated(
+    v,
+    HC,
+    dim: int = 3,
+    field_attr: str = 'f',
+) -> np.ndarray:
+    """Integrated gradient of a scalar field over the dual cell of v.
+
+    Computes the DDG volume-integrated quantity::
+
+        Df_i = 0.5 * sum_j (f_j - f_i) * A_ij
+
+    This is the scalar analog of :func:`velocity_difference_tensor`.
+    It approximates ``∫_{V_i} ∇f dV``.
+
+    Parameters
+    ----------
+    v : vertex object
+        Must have the scalar field attribute (default ``v.f``) and
+        ``v.nn``, ``v.vd`` populated.
+    HC : Complex
+        Simplicial complex with duals computed.
+    dim : int
+        Spatial dimension.
+    field_attr : str
+        Name of the scalar field attribute on vertices (default ``'f'``).
+
+    Returns
+    -------
+    np.ndarray
+        Integrated gradient vector, shape ``(dim,)``.
+    """
+    _cache = getattr(HC, '_edge_area_cache', None)
+    _vid = id(v) if _cache is not None else None
+
+    f_i = getattr(v, field_attr)
+    Df_i = np.zeros(dim)
+    for v_j in v.nn:
+        if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
+            A_ij = _cache[_vid][id(v_j)]
+        else:
+            A_ij = dual_area_vector(v, v_j, HC, dim)
+        delta_f = getattr(v_j, field_attr) - f_i
+        Df_i += delta_f * A_ij
+    Df_i *= 0.5
+    return Df_i
 
 
 def strain_rate(du: np.ndarray) -> np.ndarray:

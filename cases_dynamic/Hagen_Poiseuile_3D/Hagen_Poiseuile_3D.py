@@ -499,20 +499,42 @@ def analyse_profile(HC, bV):
         print("\nNo interior vertices near midpoint for profile comparison.")
         return
 
-    errors = []
-    for v in mid_verts:
-        u_anal = hp_ic.analytical_velocity(v.x_a)
-        u_num = v.u[flow_axis]
-        errors.append(abs(u_num - u_anal))
-
-    max_err = max(errors)
-    l2_err = np.sqrt(np.mean(np.array(errors)**2))
     ux_num = np.array([v.u[flow_axis] for v in mid_verts])
 
     print(f"\nProfile comparison at z=L/2 ({len(mid_verts)} vertices):")
-    print(f"  Error vs analytical: max={max_err:.6e}, L2={l2_err:.6e}")
     print(f"  U_max analytical = {U_max:.6f}")
     print(f"  U_max numerical  = {max(ux_num):.6f}")
+
+    # Integrated comparison diagnostics on final mesh
+    try:
+        from ddgclib.analytical._integrated_comparison import (
+            compare_stress_force,
+            integrated_pressure_error,
+            integrated_l2_norm,
+        )
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        cache_dual_volumes(HC, dim=3)
+        interior_all = [v for v in HC.V if v not in bV]
+
+        # Force balance
+        force_diag = compare_stress_force(HC, interior_all, dim=3, mu=mu)
+        print(f"  Force balance: max|F| = {force_diag['max_F']:.4e}, "
+              f"median|F| = {force_diag['median_F']:.4e}")
+
+        # Integrated pressure comparison: P(x) = -G * x[flow_axis]
+        P_analytical = lambda x: -G * x[flow_axis]
+        int_p_errs = integrated_pressure_error(
+            HC, interior_all, P_analytical=P_analytical, dim=3,
+        )
+        int_p_l2 = integrated_l2_norm(
+            HC, interior_all, P_analytical=P_analytical, dim=3,
+        )
+        if int_p_errs:
+            print(f"  Integrated pressure: max|p*V - ∫P dV| = {max(int_p_errs):.4e}")
+            print(f"  Integrated pressure L2 norm = {int_p_l2:.4e}")
+    except Exception as e:
+        print(f"  Integrated diagnostics skipped: {e}")
 
     # Radial profile plot (matplotlib, non-interactive)
     _plot_radial_profile(mid_verts, hp_ic)

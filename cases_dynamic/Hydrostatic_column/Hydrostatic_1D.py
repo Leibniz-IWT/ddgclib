@@ -176,8 +176,12 @@ print(f"  CFL={CFL}, c0={c0:.1f}, {n_traversals} traversals → t_end={t_end:.2f
 
 # Diagnostics storage
 KE_hist, time_hist, maxu_hist = [], [], []
-P_err_incomp_hist, P_err_comp_hist = [], []
+int_P_err_comp_hist, int_P_err_incomp_hist = [], []
 a_max_hist = []
+
+from ddgclib.analytical._integrated_comparison import (
+    integrated_pressure_error, integrated_l2_norm,
+)
 frames = []  # (t, x_arr, P_arr) for movie
 
 t, step = 0.0, 0
@@ -211,11 +215,17 @@ while t < t_end:
         maxu_hist.append(max((abs(v.u[0]) for v in HC.V if v not in bV), default=0.0))
         time_hist.append(t)
 
-        # Pressure error vs both analyticals
-        P_err_i = [abs(v.p - P_incompressible(v.x_a[0])) for v in interior_ordered]
-        P_err_c = [abs(v.p - P_compressible(v.x_a[0])) for v in interior_ordered]
-        P_err_incomp_hist.append(max(P_err_i) / (rho * g * H) * 100)
-        P_err_comp_hist.append(max(P_err_c) / (rho * g * H) * 100)
+        # Integrated pressure error vs both analyticals
+        ie_c = integrated_pressure_error(
+            HC, interior_ordered,
+            P_analytical=lambda x: P_compressible(x[0]), dim=1,
+        )
+        ie_i = integrated_pressure_error(
+            HC, interior_ordered,
+            P_analytical=lambda x: P_incompressible(x[0]), dim=1,
+        )
+        int_P_err_comp_hist.append(max(ie_c) if ie_c else 0.0)
+        int_P_err_incomp_hist.append(max(ie_i) if ie_i else 0.0)
 
         # Force residual
         a_norms = [abs(accel[v][0]) if v in accel else 0.0 for v in interior_ordered]
@@ -235,13 +245,22 @@ print(f"  Completed {step} steps in {t:.2f} s (~{t/t_acoustic:.0f} traversals)")
 KE_arr = np.array(KE_hist)
 time_arr = np.array(time_hist)
 maxu_arr = np.array(maxu_hist)
-P_err_incomp = np.array(P_err_incomp_hist)
-P_err_comp = np.array(P_err_comp_hist)
+int_P_err_comp = np.array(int_P_err_comp_hist)
+int_P_err_incomp = np.array(int_P_err_incomp_hist)
 a_max_arr = np.array(a_max_hist)
 
+int_l2_comp = integrated_l2_norm(
+    HC, interior_ordered,
+    P_analytical=lambda x: P_compressible(x[0]), dim=1,
+)
+int_l2_incomp = integrated_l2_norm(
+    HC, interior_ordered,
+    P_analytical=lambda x: P_incompressible(x[0]), dim=1,
+)
+
 print(f"  Final KE = {KE_arr[-1]:.6e}, Max |u| = {maxu_arr[-1]:.6e}")
-print(f"  Pressure error (incompressible): {P_err_incomp[-1]:.3f}%")
-print(f"  Pressure error (compressible):   {P_err_comp[-1]:.3f}%")
+print(f"  Integrated P error (vs compressible):   max|p*V - ∫P dV| = {int_P_err_comp[-1]:.4e}, L2 = {int_l2_comp:.4e}")
+print(f"  Integrated P error (vs incompressible): max|p*V - ∫P dV| = {int_P_err_incomp[-1]:.4e}, L2 = {int_l2_incomp:.4e}")
 print(f"  Max |a_total| = {a_max_arr[-1]:.6e} m/s^2")
 
 # ===== PLOTS =====
@@ -260,12 +279,12 @@ fig_ke.suptitle(f'1D Settling (c0={c0:.0f}, $\\mu_{{art}}$={mu_art:.0f})')
 fig_ke.tight_layout()
 _savefig(fig_ke, 'hydrostatic_1d_dynamic_settling')
 
-# 2. Pressure error + force residual over time
+# 2. Integrated pressure error + force residual over time
 fig_diag, (ax_pe, ax_fr) = plt.subplots(1, 2, figsize=(12, 4))
-ax_pe.plot(time_arr / t_acoustic, P_err_incomp, 'b-', lw=1, label='vs incompressible')
-ax_pe.plot(time_arr / t_acoustic, P_err_comp, 'r-', lw=1, label='vs compressible')
-ax_pe.set_xlabel('$t / t_{ac}$'); ax_pe.set_ylabel('Max |$\\Delta P$| [% of $\\rho g H$]')
-ax_pe.set_title('Pressure Error Over Time'); ax_pe.legend()
+ax_pe.semilogy(time_arr / t_acoustic, int_P_err_comp, 'r-', lw=1, label='vs compressible')
+ax_pe.semilogy(time_arr / t_acoustic, int_P_err_incomp, 'b-', lw=1, label='vs incompressible')
+ax_pe.set_xlabel('$t / t_{ac}$'); ax_pe.set_ylabel('Max |$p V - \\int P dV$|')
+ax_pe.set_title('Integrated Pressure Error Over Time'); ax_pe.legend()
 ax_pe.grid(True, alpha=0.3)
 
 ax_fr.semilogy(time_arr / t_acoustic, a_max_arr, 'k-', lw=1)
@@ -292,17 +311,20 @@ ax_prof.legend(); ax_prof.grid(True, alpha=0.3)
 fig_prof.tight_layout()
 _savefig(fig_prof, 'hydrostatic_1d_final_profile')
 
-# 4. Pressure deviation from compressible analytical
+# 4. Integrated pressure error (spatial distribution)
 fig_dev, ax_dev = plt.subplots(figsize=(8, 4))
-P_dev = np.array([v.p - P_compressible(v.x_a[0]) for v in interior_ordered])
 x_dev = np.array([v.x_a[0] for v in interior_ordered])
-ax_dev.plot(x_dev, P_dev, 'o-', ms=3)
+int_errs_final = integrated_pressure_error(
+    HC, interior_ordered,
+    P_analytical=lambda x: P_compressible(x[0]), dim=1,
+)
+ax_dev.plot(x_dev, int_errs_final, 'ro-', ms=3)
 ax_dev.axhline(0, color='k', ls='--', lw=0.5)
-ax_dev.set_xlabel('x [m]'); ax_dev.set_ylabel('$P_{DDG} - P_{compressible}$ [Pa]')
-ax_dev.set_title('Pressure Deviation from Compressible Analytical')
+ax_dev.set_xlabel('x [m]'); ax_dev.set_ylabel('$|p_i V_i - \\int P \\, dV|$')
+ax_dev.set_title('Integrated Pressure Error (vs compressible)')
 ax_dev.grid(True, alpha=0.3)
 fig_dev.tight_layout()
-_savefig(fig_dev, 'hydrostatic_1d_pressure_deviation')
+_savefig(fig_dev, 'hydrostatic_1d_integrated_error')
 
 # 5. MP4 animation
 print(f"\n  Generating mp4 animation ({len(frames)} frames)...")

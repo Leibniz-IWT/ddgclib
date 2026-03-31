@@ -114,8 +114,15 @@ while t < t_end:
         KE_h.append(sum(0.5*v.m*np.dot(v.u[:2],v.u[:2]) for v in HC.V if v not in bV))
         u_h.append(max((np.linalg.norm(v.u[:2]) for v in HC.V if v not in bV), default=0.0))
         t_h.append(t)
-        Pe_i_h.append(max(abs(v.p-P_incomp(v.x_a[1])) for v in acc.keys())/(rho*g*H)*100)
-        Pe_c_h.append(max(abs(v.p-P_comp(v.x_a[1])) for v in acc.keys())/(rho*g*H)*100)
+        from ddgclib.analytical._integrated_comparison import (
+            integrated_pressure_error as _ipe,
+        )
+        _ie_c = _ipe(HC, list(acc.keys()),
+                      P_analytical=lambda x: P_comp(x[1]), dim=2)
+        _ie_i = _ipe(HC, list(acc.keys()),
+                      P_analytical=lambda x: P_incomp(x[1]), dim=2)
+        Pe_i_h.append(max(_ie_i) if _ie_i else 0.0)
+        Pe_c_h.append(max(_ie_c) if _ie_c else 0.0)
         a_h.append(max(np.linalg.norm(a) for a in acc.values()))
 
     if step % 500 == 0:
@@ -127,7 +134,7 @@ Pe_i, Pe_c, a_a = np.array(Pe_i_h), np.array(Pe_c_h), np.array(a_h)
 
 print(f"  Done: {step} steps, t={t:.4f} s (~{t/t_ac:.0f} t_ac)")
 print(f"  KE={KE_a[-1]:.6e}, |u|={u_a[-1]:.6e}")
-print(f"  P err (incomp)={Pe_i[-1]:.2f}%, (comp)={Pe_c[-1]:.2f}%")
+print(f"  Integrated P err: max|p*V-∫P dV| (incomp)={Pe_i[-1]:.4e}, (comp)={Pe_c[-1]:.4e}")
 print(f"  Max |a|={a_a[-1]:.6e}")
 
 # Check final force balance
@@ -146,10 +153,10 @@ fig2.suptitle(f'2D Settling ($\\mu_{{art}}$={mu_art:.0f})'); fig2.tight_layout()
 _savefig(fig2, 'hydrostatic_2d_dynamic_settling')
 
 fig3, (a3,a4) = plt.subplots(1,2,figsize=(12,4))
-a3.plot(t_a/t_ac, Pe_i, 'b-', lw=1, label='vs incompressible')
-a3.plot(t_a/t_ac, Pe_c, 'r-', lw=1, label='vs compressible')
-a3.set_xlabel('$t/t_{ac}$'); a3.set_ylabel('Max $|\\Delta P|$ [%]')
-a3.set_title('Pressure Error'); a3.legend(); a3.grid(True, alpha=0.3)
+a3.semilogy(t_a/t_ac, Pe_c, 'r-', lw=1, label='vs compressible')
+a3.semilogy(t_a/t_ac, Pe_i, 'b-', lw=1, label='vs incompressible')
+a3.set_xlabel('$t/t_{ac}$'); a3.set_ylabel('Max $|pV - \\int P dV|$')
+a3.set_title('Integrated Pressure Error'); a3.legend(); a3.grid(True, alpha=0.3)
 a4.semilogy(t_a/t_ac, a_a, 'k-', lw=1)
 a4.set_xlabel('$t/t_{ac}$'); a4.set_ylabel('Max |a| [m/s²]')
 a4.set_title('Force Residual'); a4.grid(True, alpha=0.3)
@@ -167,14 +174,38 @@ ax4.set_xlabel('P [Pa]'); ax4.set_ylabel('y [m]')
 ax4.set_title(f'2D Final Profile (t={t:.2f} s)'); ax4.legend(); ax4.grid(True, alpha=0.3)
 fig4.tight_layout(); _savefig(fig4, 'hydrostatic_2d_final_profile')
 
-fig5, ax5 = plt.subplots(figsize=(8,4))
-P_dev = [v.p - P_comp(v.x_a[1]) for v in interior]
-y_dev = [v.x_a[1] for v in interior]
-ax5.scatter(y_dev, P_dev, s=10, alpha=0.5)
-ax5.axhline(0, color='k', ls='--', lw=0.5)
-ax5.set_xlabel('y [m]'); ax5.set_ylabel('$P_{DDG} - P_{comp}$ [Pa]')
-ax5.set_title('2D Pressure Deviation from Compressible Analytical')
-ax5.grid(True, alpha=0.3); fig5.tight_layout()
-_savefig(fig5, 'hydrostatic_2d_pressure_deviation')
+from ddgclib.analytical._integrated_comparison import (
+    integrated_pressure_error, integrated_l2_norm, compare_stress_force,
+)
+cache_dual_volumes(HC, dim=2)
+
+int_errs = integrated_pressure_error(
+    HC, interior, P_analytical=lambda x: P_comp(x[1]), dim=2,
+)
+int_l2 = integrated_l2_norm(
+    HC, interior, P_analytical=lambda x: P_comp(x[1]), dim=2,
+)
+force_diag = compare_stress_force(HC, interior, dim=2, mu=mu_art)
+
+print(f"\n  Final integrated error:  max|p*V - ∫P dV| = {max(int_errs):.4e}")
+print(f"  Integrated L2 norm = {int_l2:.4e} Pa")
+print(f"  Force balance: max|F| = {force_diag['max_F']:.4e}, "
+      f"median|F| = {force_diag['median_F']:.4e}")
+
+fig5, (ax5a, ax5b) = plt.subplots(1, 2, figsize=(14, 5))
+y_int = [v.x_a[1] for v in interior]
+ax5a.scatter(y_int, int_errs, s=10, alpha=0.5)
+ax5a.set_xlabel('y [m]'); ax5a.set_ylabel('$|p_i V_i - \\int P \\, dV|$')
+ax5a.set_title('Integrated Pressure Error (vs compressible)')
+ax5a.grid(True, alpha=0.3)
+
+ax5b.scatter(y_int, force_diag['F_norms'], s=10, alpha=0.5)
+ax5b.axhline(0, color='k', ls='--', lw=0.5)
+ax5b.set_xlabel('y [m]'); ax5b.set_ylabel('$||F_{stress}||$')
+ax5b.set_title('Force Balance on Final Mesh')
+ax5b.grid(True, alpha=0.3)
+ax5b.ticklabel_format(style='scientific', axis='y', scilimits=(0,0))
+fig5.suptitle('2D Integrated Analytical Comparison')
+fig5.tight_layout(); _savefig(fig5, 'hydrostatic_2d_integrated')
 
 print("\nDone.")
