@@ -338,10 +338,15 @@ def plot_frame(step, t, HC, ghost_mesh, fig_dir):
     primal + dual picture (v.nn is already populated from triangulation).
     A coloured scatter is added on top for consistency.
     """
+
+    global _ghost_vd_ok 
+
     fig, (ax_main, ax_ghost) = plt.subplots(
         1, 2, figsize=(14, 4),
         gridspec_kw={'width_ratios': [3, 1.5]},
     )
+
+    
 
     # ------------------------------------------------------------------ #
     # LEFT: main domain                                                    #
@@ -399,36 +404,44 @@ def plot_frame(step, t, HC, ghost_mesh, fig_dir):
     ax_main.grid(True, alpha=0.15)
 
     # ------------------------------------------------------------------ #
-    # RIGHT: ghost mesh                                                    #
-    # Use plot_dual_mesh_2D (hyperct.ddg.plot_dual) for primal+dual,     #
-    # then overlay coloured scatter.                                       #
+    # RIGHT: ghost mesh                                                  #
     # ------------------------------------------------------------------ #
-    if _ghost_vd_ok:
-        # plot_dual_mesh_2D draws primal edges (blue), dual edges (orange),
-        # primal vertices (blue circles), dual vertices (orange circles),
-        # and primal-to-dual connections (green dashed).
-        plot_dual_mesh_2D(ghost_mesh, ax=ax_ghost, show=False)
-    else:
-        # Fallback: render with simplex_verts helpers
-        _render_faces_from_simplex_verts(_topo['sv_ghost'], ax_ghost, face_alpha=0.18)
-
-        # Use the RGB equivalent of 'tab:blue' (or any 3-float tuple)
-        _render_edges_from_simplex_verts(_topo['sv_ghost'], ax_ghost,
-                                         edge_color=(0.12, 0.47, 0.71), linewidth=0.5)
-
     ghost_verts = list(ghost_mesh.V)
-    if ghost_verts:
+    n_ghost = len(ghost_verts)
+
+    # Only attempt dual plotting if the mesh has enough vertices (3+ for 2D)
+    if _ghost_vd_ok and n_ghost > 2:
+        try:
+            # plot_dual_mesh_2D draws primal edges (blue), dual edges (orange),
+            # primal vertices (blue circles), dual vertices (orange circles),
+            # and primal-to-dual connections (green dashed).
+            plot_dual_mesh_2D(ghost_mesh, ax=ax_ghost, show=False)
+        except (IndexError, ValueError):
+            # Fallback if the underlying data is too sparse or degenerate
+            _ghost_vd_ok = False
+
+    # If the dual plot failed or is unavailable, use the fallback renderers
+    if not _ghost_vd_ok or n_ghost <= 2:
+        if n_ghost > 2 and _topo.get('sv_ghost'):
+            # Render faces and edges from the cached simplex vertices
+            _render_faces_from_simplex_verts(_topo['sv_ghost'], ax_ghost, face_alpha=0.18)
+            _render_edges_from_simplex_verts(_topo['sv_ghost'], ax_ghost,
+                                             edge_color=(0.12, 0.47, 0.71), linewidth=0.5)
+        
+    # Always attempt a simple scatter if any vertices exist at all
+    if n_ghost > 0:
         gc = np.array([v.x_a[:2] for v in ghost_verts])
         ax_ghost.scatter(gc[:, 0], gc[:, 1],
                          c='tab:orange', s=16, zorder=6,
                          label='Ghost vertices')
 
+    # Formatting and boilerplate
     ax_ghost.axvline(x=0.0, color='blue', lw=2, ls='--', label='Inlet (x=0)')
     ax_ghost.set_xlim(-L_period - 0.3, 0.5)
     ax_ghost.set_ylim(-0.15, H + 0.15)
     ax_ghost.set_xlabel('x')
     ax_ghost.set_ylabel('y')
-    ax_ghost.set_title(f'Ghost Mesh — {len(ghost_verts)} vertices\n'
+    ax_ghost.set_title(f'Ghost Mesh — {n_ghost} vertices\n'
                        f'blue=primal  orange=barycentric dual')
     ax_ghost.set_aspect('equal')
     ax_ghost.legend(loc='upper right', fontsize=7)
