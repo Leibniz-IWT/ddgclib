@@ -197,7 +197,7 @@ $$
 \mathbf{F}_{v,i} = \sum_{j \in N(i)} \mathbf{F}_{v,ij}
 $$
 
-<img width="2866" height="1608" alt="lagrangian_fvm_distorted" src="https://github.com/user-attachments/assets/2f4271de-3a73-4620-a3c5-7cccd2d4b78d" />
+<img width="2215" height="1665" alt="lagrangian_fvm_distorted" src="https://github.com/user-attachments/assets/f05bb847-4102-45c2-aade-ae959733fdb1" />
 
 
 ---
