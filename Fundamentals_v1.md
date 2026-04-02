@@ -51,7 +51,7 @@
 | $\hat{\mathbf{d}}\_{ij}$ | unit vector | $\mathbf{d}\_{ij} / \lvert\mathbf{d}\_{ij}\rvert$ |
 | $\mathbf{F}\_{\star,i}$ | vector | Discrete force of type $\star$ acting on parcel $i$ |
 
-**Orientation convention.** The area vector $\mathbf{A}\_{ij}$ always points outward from parcel $i$, so $\mathbf{A}\_{ji} = -\mathbf{A}\_{ij}$. This guarantees exact pairwise cancellation (Newton's third law) in the discrete setting.
+> **Orientation convention.** The area vector $\mathbf{A}\_{ij}$ always points outward from parcel $i$, so $\mathbf{A}\_{ji} = -\mathbf{A}\_{ij}$. This guarantees exact pairwise cancellation (Newton's third law) in the discrete setting.
 
 ---
 
