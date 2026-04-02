@@ -39,7 +39,7 @@
 | $v\_i$ | vertex | $i$-th primary vertex of the simplicial complex |
 | $V\_i$ | 3-D cell | Barycentric dual cell associated with $v\_i$ |
 | $S\_i = \partial V\_i$ | closed surface | Boundary of the dual cell $V\_i$ |
-| $m\_i$ | scalar | Fixed mass of parcel $i$ |
+| $m\_i$ | scalar | Fixed mass of parcel $i$  (stored as `v.m`) |
 | $\rho\_i$ | scalar | Density of parcel $i$ |
 | $\mathrm{Vol}\_i^{\mathrm{dual}}$ | scalar | Volume of the barycentric dual cell $V\_i$ |
 | $\mathbf{x}\_i$ | vector | Position of vertex $i$ |
