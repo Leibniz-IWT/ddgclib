@@ -81,7 +81,7 @@ $$
 \boldsymbol{\varepsilon} = \tfrac{1}{2}\bigl(\nabla\mathbf{v} + (\nabla\mathbf{v})^{\top}\bigr)
 $$
 
-where $\nabla\mathbf{v}$ is the velocity Laplacian tensor and the superscript $\top$ denotes transposition. The factor of $\tfrac{1}{2}$ ensures $\boldsymbol{\varepsilon}$ is the physical strain rate (not twice it). More advanced constitutive models (viscoelastic, non-Newtonian) can replace $\boldsymbol{\tau}$ without altering the rest of the framework.
+where $\nabla\mathbf{v}$ is the velocity gradient tensor tensor and the superscript $\top$ denotes transposition. The factor of $\tfrac{1}{2}$ ensures $\boldsymbol{\varepsilon}$ is the physical strain rate (not twice it). More advanced constitutive models (viscoelastic, non-Newtonian) can replace $\boldsymbol{\tau}$ without altering the rest of the framework.
 
 ---
 
@@ -171,7 +171,7 @@ $$
 | Symbol | Meaning |
 |---|---|
 | $\mu$ | Dynamic viscosity of the fluid |
-| $(\nabla\mathbf{u})\_f$ | Face-centred approximation of the velocity Laplacian |
+| $(\nabla\mathbf{u})\_f$ | Face-centred approximation of the velocity gradient tensor |
 | $\mathbf{d}\_{ij} = \mathbf{x}\_j - \mathbf{x}\_i$ | Edge vector pointing from parcel $i$ to parcel $j$ |
 | $\lvert\mathbf{d}\_{ij}\rvert$ | Euclidean length of the edge |
 | $\hat{\mathbf{d}}\_{ij} = \mathbf{d}\_{ij}/\lvert\mathbf{d}\_{ij}\rvert$ | Unit vector along the edge |
