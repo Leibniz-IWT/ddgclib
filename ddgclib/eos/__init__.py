@@ -17,10 +17,14 @@ Usage
 
 from ddgclib.eos._base import EquationOfState
 from ddgclib.eos._tait_murnaghan import TaitMurnaghan
+from ddgclib.eos._ideal_gas import IdealGas
+from ddgclib.eos._multiphase_eos import MultiphaseEOS
 from ddgclib.eos._update import eos_pressure_update
 
 __all__ = [
     'EquationOfState',
     'TaitMurnaghan',
+    'IdealGas',
+    'MultiphaseEOS',
     'eos_pressure_update',
 ]

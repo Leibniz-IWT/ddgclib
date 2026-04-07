@@ -197,6 +197,93 @@ def hndA_i(v, n_i=None):
     return HNdA_i, C_i
 
 
+def hndA_i_interface(v, interface_set, n_i=None):
+    """Mean curvature normal restricted to interface sub-mesh.
+
+    Same algorithm as ``hndA_i`` but only considers neighbors that are
+    in ``interface_set``.  This computes the curvature of the phase
+    boundary surface rather than the full volumetric mesh.
+
+    Works in both 2D and 3D by detecting the coordinate dimension from
+    the vertex data.  For 2D meshes, edge vectors and curvature vectors
+    are padded to 3D so that ``HNdC_ijk`` (which uses ``np.cross``)
+    operates correctly, then the result is returned in the native
+    dimension.
+
+    Parameters
+    ----------
+    v : vertex object
+        Must have ``v.x_a``, ``v.nn``.
+    interface_set : set
+        Set of vertex objects forming the interface sub-mesh.
+    n_i : ignored
+        Kept for API compatibility.
+
+    Returns
+    -------
+    HNdA_i : ndarray, shape (ndim,)
+        Integrated mean curvature normal vector.
+    C_i : float
+        Dual area of the vertex on the interface.
+    """
+    ndim = len(v.x_a)
+    # HNdC_ijk uses np.cross which requires 3D vectors
+    HNdA_i = np.zeros(3)
+    C_i = 0.0
+    vi = v
+    for vj in v.nn:
+        if vj not in interface_set:
+            continue
+        # Compute the intersection set restricted to interface
+        e_i_int_e_j = vi.nn.intersection(vj.nn).intersection(interface_set)
+        if len(e_i_int_e_j) == 0:
+            continue
+        e_ij = _pad3(vj.x_a) - _pad3(vi.x_a)
+        e_ij = -e_ij  # Sign convention (matches hndA_i)
+
+        if len(e_i_int_e_j) == 1:  # boundary edge on interface
+            vk = list(e_i_int_e_j)[0]
+            e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
+            e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
+            l_ij = np.linalg.norm(e_ij)
+            l_ik = np.linalg.norm(e_ik)
+            l_jk = np.linalg.norm(e_jk)
+            hnda_ijk, c_ijk = HNdC_ijk(e_ij, l_ij, l_jk, l_ik)
+            HNdA_i += hnda_ijk
+            C_i += c_ijk
+        else:  # 2 shared neighbors on interface
+            vk = list(e_i_int_e_j)[0]
+            vl = list(e_i_int_e_j)[1]
+            e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
+            e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
+            l_ij = np.linalg.norm(e_ij)
+            l_ik = np.linalg.norm(e_ik)
+            l_jk = np.linalg.norm(e_jk)
+            hnda_ijk, c_ijk = HNdC_ijk(e_ij, l_ij, l_jk, l_ik)
+
+            e_il = _pad3(vl.x_a) - _pad3(vi.x_a)
+            e_jl = _pad3(vl.x_a) - _pad3(vj.x_a)
+            l_il = np.linalg.norm(e_il)
+            l_jl = np.linalg.norm(e_jl)
+            hnda_ijl, c_ijl = HNdC_ijk(e_ij, l_ij, l_jl, l_il)
+
+            HNdA_i += hnda_ijk
+            HNdA_i += hnda_ijl
+            C_i += c_ijk
+            C_i += c_ijl
+
+    return HNdA_i, C_i
+
+
+def _pad3(x_a):
+    """Pad a coordinate array to 3D (for np.cross compatibility)."""
+    if len(x_a) >= 3:
+        return x_a[:3]
+    out = np.zeros(3)
+    out[:len(x_a)] = x_a
+    return out
+
+
 def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     """
     Computes the dual edge and dual area using Heron's formula.

@@ -40,6 +40,22 @@ from ddgclib.operators.surface_tension import (
     surface_tension_acceleration,
     dual_area_heron,
 )
+from ddgclib.operators.curvature_2d import (
+    integrated_curvature_normal_2d,
+    surface_tension_force_2d,
+    reconstruct_arc_length_and_bulge_area,
+)
+from ddgclib.operators.multiphase_stress import (
+    multiphase_stress_force,
+    multiphase_stress_acceleration,
+    multiphase_dudt_i,
+)
+from ddgclib.operators.mass_redistribution import (
+    snapshot_pressure,
+    snapshot_pressure_multiphase,
+    redistribute_mass_single_phase,
+    redistribute_mass_multiphase,
+)
 
 __all__ = [
     'MethodRegistry',
@@ -52,4 +68,9 @@ __all__ = [
     'stress_force', 'stress_acceleration', 'dudt_i',
     'pressure_gradient', 'velocity_laplacian', 'acceleration',
     'surface_tension_force', 'surface_tension_acceleration', 'dual_area_heron',
+    'integrated_curvature_normal_2d', 'surface_tension_force_2d',
+    'reconstruct_arc_length_and_bulge_area',
+    'multiphase_stress_force', 'multiphase_stress_acceleration', 'multiphase_dudt_i',
+    'snapshot_pressure', 'snapshot_pressure_multiphase',
+    'redistribute_mass_single_phase', 'redistribute_mass_multiphase',
 ]
