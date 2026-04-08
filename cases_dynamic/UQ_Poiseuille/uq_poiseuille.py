@@ -1,3 +1,11 @@
+"""
+
+UQ analysis for Poiseuille flow using Polynomial Chaos Expansion (PCE) with parallelized CFD simulations. This script runs multiple CFD instances 
+with varying parameters, fits a PCE model to the results, and creates an animation visualizing the uncertainty in velocity profiles, 
+sensitivity indices, and convergence of the PCE model over time.
+    
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -141,7 +149,7 @@ if __name__ == "__main__":
     results = np.array(raw_results)
     means, vars, sobols, samples_h, nominal_ana, errors = [], [], [], [], [], []
 
-    print("⏳ Processing PCE for each time step...")
+    print("Processing PCE for each time step...")
     for f in tqdm(range(results.shape[1]), desc="PCE Calculation"):
         t_f = f * SAVE_EVERY * DT
         # Order 4 PCE expansion
