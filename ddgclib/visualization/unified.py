@@ -808,6 +808,9 @@ def dynamic_plot_fluid(
     writer: str = None,
     xlim: tuple = None,
     ylim: tuple = None,
+    phase_field: str = None,
+    interface_field: str = None,
+    reference_R: float = None,
     **kwargs,
 ):
     """Create a video of the simulation from a ``StateHistory``.
@@ -835,7 +838,7 @@ def dynamic_plot_fluid(
         Transparency for filled triangle faces (default 0.6).
         Set to 0 to hide faces.
     save_path : str or None
-        Output video path (``.mp4``, ``.gif``).
+        Output video path (``.mp4``, ``.gif``).  Default ``.mp4``.
     frame_dir : str or None
         Save individual frame PNGs here.
     name : str
@@ -848,6 +851,16 @@ def dynamic_plot_fluid(
         Restrict x-axis range for zooming into a sub-region.
     ylim : tuple of (float, float) or None
         Restrict y-axis range for zooming into a sub-region.
+    phase_field : str or None
+        If set (e.g. ``'phase'``), highlights interface vertices in red
+        on every panel.  The field must be recorded in the ``StateHistory``.
+    interface_field : str or None
+        If set (e.g. ``'is_interface'``), vertices where this field is
+        truthy are drawn with red markers.  Requires ``phase_field`` to
+        also be recorded.
+    reference_R : float or None
+        If set, draws a dashed reference circle/sphere at this radius
+        (for multiphase droplet visualisation).
 
     Returns
     -------
@@ -902,6 +915,29 @@ def dynamic_plot_fluid(
     else:
         svmin, svmax = 0.0, 1.0
 
+    # Pre-compute global velocity magnitude bounds for vector colorbar
+    vec_mag_max = 0.0
+    if vector_field is not None:
+        for _, snapshot, _ in history._snapshots:
+            for key, vdata in snapshot.items():
+                if vector_field in vdata:
+                    vec = np.asarray(vdata[vector_field])[:dim]
+                    mag = float(np.linalg.norm(vec))
+                    if mag > vec_mag_max:
+                        vec_mag_max = mag
+    if vec_mag_max == 0.0:
+        vec_mag_max = 1.0
+
+    # Auto-scale 3D arrow length from domain extent
+    if dim >= 2:
+        domain_extent = max(
+            all_coords[:, i].max() - all_coords[:, i].min()
+            for i in range(min(dim, all_coords.shape[1]))
+        )
+    else:
+        domain_extent = all_coords[:, 0].max() - all_coords[:, 0].min()
+    _auto_arrow_length = domain_extent * 0.03  # 3% of domain
+
     # Create figure and panels
     panels = []
     if scalar_field is not None:
@@ -936,6 +972,18 @@ def dynamic_plot_fluid(
         )
         fig.colorbar(sm, ax=axes[scalar_ax_idx], label=scalar_label)
 
+    sm_vec = None
+    if vector_field is not None:
+        sm_vec = mcm.ScalarMappable(
+            cmap='coolwarm',
+            norm=mcolors.Normalize(vmin=0.0, vmax=vec_mag_max),
+        )
+        sm_vec.set_array([])
+        vec_ax_idx = next(
+            i for i, (k, _, _) in enumerate(panels) if k == 'vector'
+        )
+        fig.colorbar(sm_vec, ax=axes[vec_ax_idx], label=vector_label)
+
     fig.tight_layout()
 
     if frame_dir is not None:
@@ -954,6 +1002,21 @@ def dynamic_plot_fluid(
         suptitle.set_text(f't = {t:.4f} s')
 
         _ec = tuple(coldict['db'])
+
+        # Extract interface mask if requested
+        _iface_mask = None
+        if interface_field is not None:
+            _iface_mask = np.array([
+                bool(snapshot[k].get(interface_field, False))
+                for k in snapshot
+            ])
+        elif phase_field is not None:
+            # Auto-detect interface: vertices where any neighbour has
+            # a different phase (approximate from snapshot data)
+            _phases = np.array([
+                int(snapshot[k].get(phase_field, 0))
+                for k in snapshot
+            ])
 
         for ax_panel, (kind, field, label) in zip(axes, panels):
             # Render filled triangle faces (2D/3D only)
@@ -1016,13 +1079,12 @@ def dynamic_plot_fluid(
                 ])
                 magnitudes = np.linalg.norm(vecs, axis=1) if dim > 1 \
                     else np.abs(vecs[:, 0])
-                max_mag = magnitudes.max()
-                norm_mag = magnitudes / max_mag if max_mag > 0 else magnitudes
+                # Use global velocity bounds for stable colorbar
+                norm_mag = magnitudes / vec_mag_max
                 cmap_v = plt.colormaps.get_cmap('coolwarm')
                 colors = cmap_v(norm_mag)
 
                 if dim == 1:
-                    # Edges: line at y=0 through sorted vertices
                     order = np.argsort(coords[:, 0])
                     ax_panel.plot(
                         coords[order, 0], np.zeros(n_verts),
@@ -1054,11 +1116,12 @@ def dynamic_plot_fluid(
                     ax_panel.set_ylim(_ylim)
                 elif dim == 3:
                     _render_edges_from_coords(coords, ax_panel, dim)
+                    _arrow_len = kwargs.get('arrow_length', _auto_arrow_length)
                     ax_panel.quiver(
                         coords[:, 0], coords[:, 1], coords[:, 2],
                         vecs[:, 0], vecs[:, 1], vecs[:, 2],
                         colors=colors,
-                        length=kwargs.get('arrow_length', 0.05),
+                        length=_arrow_len,
                         normalize=True, alpha=0.7,
                     )
                     ax_panel.set_xlabel('x')
@@ -1068,6 +1131,32 @@ def dynamic_plot_fluid(
                     ax_panel.set_ylim(_ylim)
                     ax_panel.set_zlim(zlim)
                 ax_panel.set_title(label)
+
+        # Overlay interface markers and reference geometry on all panels
+        for ax_panel in axes:
+            if _iface_mask is not None and _iface_mask.any():
+                if dim <= 2:
+                    ax_panel.scatter(
+                        coords[_iface_mask, 0],
+                        coords[_iface_mask, 1] if dim >= 2 else
+                            np.zeros(_iface_mask.sum()),
+                        c='red', s=vertex_size * 1.5, zorder=10,
+                        edgecolors='none', label='Interface',
+                    )
+                elif dim == 3:
+                    ax_panel.scatter(
+                        coords[_iface_mask, 0],
+                        coords[_iface_mask, 1],
+                        coords[_iface_mask, 2],
+                        c='red', s=vertex_size * 1.5, zorder=10,
+                        alpha=0.9,
+                    )
+            if reference_R is not None and dim == 2:
+                import matplotlib.pyplot as _plt
+                ax_panel.add_patch(_plt.Circle(
+                    (0, 0), reference_R, fill=False,
+                    color='k', ls='--', lw=1, alpha=0.5,
+                ))
 
         if frame_dir is not None:
             frame_path = os.path.join(

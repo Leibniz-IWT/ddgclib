@@ -38,6 +38,10 @@ from ddgclib.visualization.polyscope_3d import (
     interactive_viewer,
     interactive_history_viewer,
 )
+from ddgclib.visualization.multiphase import (
+    record_multiphase_frame,
+    dynamic_plot_multiphase,
+)
 
 __all__ = [
     'plot_scalar_field_1d',
@@ -57,4 +61,6 @@ __all__ = [
     'dynamic_plot_fluid_polyscope',
     'interactive_viewer',
     'interactive_history_viewer',
+    'record_multiphase_frame',
+    'dynamic_plot_multiphase',
 ]
