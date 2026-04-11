@@ -646,3 +646,256 @@ class MeshAdvancer:
         self.inlet.apply(self.mesh, dt)
 
         return outflow_count
+
+
+# ---------------------------------------------------------------------------
+# Pressure-reservoir / absorbing boundary conditions
+# ---------------------------------------------------------------------------
+
+class PressureReservoirBC(BoundaryCondition):
+    """Relax gas-phase vertices toward a target density with a mass sink.
+
+    Replaces :class:`AtmosphericPressureBC`-style hard mass resets with
+    a **smooth relaxation** toward the target density.  This avoids
+    pressure wave reflections and shocks that a hard reset introduces
+    when the interior fluid is still compressible.
+
+    The per-step update is::
+
+        delta_m = -tau_inv * dt * (m - m_target)
+
+    where ``m_target = rho_target * dual_vol``.  The relaxation rate
+    ``tau_inv`` should be comparable to the local acoustic timescale
+    ``c_s / L_domain``.  With ``tau_inv = c_s / L``, pressure waves
+    are damped over about one domain transit time.
+
+    This is equivalent to a **first-order mass sink** (or source) that
+    leaks mass out of the domain when the gas is compressed above
+    ``rho_target`` and into the domain when it is expanded below.  The
+    total mass of the domain is *not* conserved — that is physically
+    correct for an open boundary venting to the atmosphere.
+
+    Parameters
+    ----------
+    rho_target : float
+        Target gas density [kg/m^3].
+    tau_inv : float
+        Relaxation rate [1/s].  Typical value: ``c_s / L_domain``.
+    gas_phase : int
+        Phase index of the gas (default 0).
+    update_m_phase : bool
+        If True (multiphase), also update ``v.m_phase[gas_phase]``.
+
+    Notes
+    -----
+    The BC must be applied *after* the integrator step (same slot as
+    ``AtmosphericPressureBC``) so that the EOS pressure is used to
+    determine whether the gas is locally compressed.  The mass change
+    takes effect on the next step's force evaluation.
+    """
+
+    def __init__(
+        self,
+        rho_target: float,
+        tau_inv: float,
+        gas_phase: int = 0,
+        update_m_phase: bool = True,
+    ):
+        super().__init__()
+        self.rho_target = float(rho_target)
+        self.tau_inv = float(tau_inv)
+        self.gas_phase = int(gas_phase)
+        self.update_m_phase = bool(update_m_phase)
+
+    def apply(self, mesh, dt, target_vertices=None):
+        verts = target_vertices if target_vertices is not None else mesh.V
+        alpha = min(1.0, self.tau_inv * dt)  # implicit relaxation
+        count = 0
+        for v in verts:
+            if getattr(v, 'phase', 0) != self.gas_phase:
+                continue
+            vol = getattr(v, 'dual_vol', 0.0)
+            if vol < 1e-30:
+                continue
+            m_target = self.rho_target * vol
+            # First-order relaxation: m <- m + alpha * (m_target - m)
+            dm = alpha * (m_target - v.m)
+            v.m = v.m + dm
+            if self.update_m_phase:
+                mp = getattr(v, 'm_phase', None)
+                if mp is not None and self.gas_phase < len(mp):
+                    mp[self.gas_phase] = v.m
+            count += 1
+        return count
+
+
+class AbsorbingPressureBC(BoundaryCondition):
+    """Characteristic absorbing BC for outgoing pressure waves.
+
+    Approximates a non-reflecting (Sommerfeld) boundary for acoustic
+    waves by damping the deviation of the local density from the
+    target on a timescale set by the acoustic transit time across the
+    buffer layer.
+
+    Unlike :class:`PressureReservoirBC` (which uses a fixed target
+    density), this BC treats the target as the **neighbour-averaged
+    density** — effectively a local sponge zone.  The result is that
+    pressure disturbances propagating outward are smoothly absorbed
+    rather than reflected off the closed wall.
+
+    The per-vertex update is::
+
+        rho_nb_avg = mean(nb.m / nb.dual_vol) for neighbours
+        m_new = v.m + alpha * (rho_nb_avg * vol - v.m)
+
+    with ``alpha = min(1, tau_inv * dt)``.
+
+    Parameters
+    ----------
+    tau_inv : float
+        Relaxation rate [1/s].  Typical value: ``c_s / buffer_width``.
+    phase : int or None
+        If not None, only apply to vertices of this phase.
+    update_m_phase : bool
+        If True (multiphase), also update ``v.m_phase[phase]``.
+    """
+
+    def __init__(
+        self,
+        tau_inv: float,
+        phase: int | None = None,
+        update_m_phase: bool = True,
+    ):
+        super().__init__()
+        self.tau_inv = float(tau_inv)
+        self.phase = phase
+        self.update_m_phase = bool(update_m_phase)
+
+    def apply(self, mesh, dt, target_vertices=None):
+        verts = target_vertices if target_vertices is not None else mesh.V
+        alpha = min(1.0, self.tau_inv * dt)
+        count = 0
+        for v in verts:
+            if self.phase is not None and getattr(v, 'phase', 0) != self.phase:
+                continue
+            vol = getattr(v, 'dual_vol', 0.0)
+            if vol < 1e-30:
+                continue
+
+            # Compute target density from same-phase interior neighbours
+            rho_sum, n = 0.0, 0
+            for nb in v.nn:
+                if self.phase is not None \
+                        and getattr(nb, 'phase', 0) != self.phase:
+                    continue
+                nb_vol = getattr(nb, 'dual_vol', 0.0)
+                if nb_vol < 1e-30:
+                    continue
+                rho_sum += nb.m / nb_vol
+                n += 1
+            if n == 0:
+                continue
+            rho_target = rho_sum / n
+
+            m_target = rho_target * vol
+            dm = alpha * (m_target - v.m)
+            v.m = v.m + dm
+            if self.update_m_phase:
+                mp = getattr(v, 'm_phase', None)
+                phase = self.phase if self.phase is not None else 0
+                if mp is not None and phase < len(mp):
+                    mp[phase] = v.m
+            count += 1
+        return count
+
+
+class ExpandingDomainBC(BoundaryCondition):
+    """Allow the outer-phase dual cells near walls to absorb compression
+    by adjusting the target density based on the mean interior density.
+
+    This is an alternative to a fixed atmospheric pressure: the "target"
+    outer density drifts slowly toward the domain-average outer-phase
+    density, so the wall zone acts as a **floating reservoir** rather
+    than a stiff reference.  In effect, if the droplet compresses the
+    domain, the target density rises to accommodate the new equilibrium
+    instead of generating a reflected shock.
+
+    The target density is updated each step with its own relaxation:
+
+        rho_target <- rho_target + alpha_t * (rho_interior_mean - rho_target)
+
+    Then a :class:`PressureReservoirBC`-style relaxation drives wall
+    vertices toward the (now slowly drifting) target.
+
+    Parameters
+    ----------
+    initial_rho_target : float
+        Starting reference density [kg/m^3].
+    tau_inv : float
+        Wall relaxation rate [1/s] (fast — acoustic timescale).
+    tau_inv_target : float
+        Target drift rate [1/s] (slow — bulk response timescale).
+        Typical: ``tau_inv_target << tau_inv``.
+    gas_phase : int
+        Phase index of the gas (default 0).
+    update_m_phase : bool
+        If True (multiphase), also update ``v.m_phase[gas_phase]``.
+    """
+
+    def __init__(
+        self,
+        initial_rho_target: float,
+        tau_inv: float,
+        tau_inv_target: float,
+        gas_phase: int = 0,
+        update_m_phase: bool = True,
+    ):
+        super().__init__()
+        self.rho_target = float(initial_rho_target)
+        self.tau_inv = float(tau_inv)
+        self.tau_inv_target = float(tau_inv_target)
+        self.gas_phase = int(gas_phase)
+        self.update_m_phase = bool(update_m_phase)
+        # Diagnostic state
+        self.last_rho_interior = self.rho_target
+
+    def apply(self, mesh, dt, target_vertices=None):
+        # 1. Estimate the current interior mean density for this phase
+        rho_sum, n = 0.0, 0
+        for v in mesh.V:
+            if getattr(v, 'phase', 0) != self.gas_phase:
+                continue
+            vol = getattr(v, 'dual_vol', 0.0)
+            if vol < 1e-30:
+                continue
+            if getattr(v, 'boundary', False):
+                continue  # skip wall-adjacent vertices from the estimate
+            rho_sum += v.m / vol
+            n += 1
+        if n > 0:
+            rho_interior = rho_sum / n
+            self.last_rho_interior = rho_interior
+            alpha_t = min(1.0, self.tau_inv_target * dt)
+            self.rho_target = (
+                self.rho_target + alpha_t * (rho_interior - self.rho_target)
+            )
+
+        # 2. Relax target vertices toward (drifting) rho_target
+        verts = target_vertices if target_vertices is not None else mesh.V
+        alpha = min(1.0, self.tau_inv * dt)
+        count = 0
+        for v in verts:
+            if getattr(v, 'phase', 0) != self.gas_phase:
+                continue
+            vol = getattr(v, 'dual_vol', 0.0)
+            if vol < 1e-30:
+                continue
+            m_target = self.rho_target * vol
+            dm = alpha * (m_target - v.m)
+            v.m = v.m + dm
+            if self.update_m_phase:
+                mp = getattr(v, 'm_phase', None)
+                if mp is not None and self.gas_phase < len(mp):
+                    mp[self.gas_phase] = v.m
+            count += 1
+        return count

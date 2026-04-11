@@ -47,7 +47,10 @@ from scipy.spatial import Delaunay
 # Helpers
 
 def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
-                  periodic_axes=None, domain_bounds=None, backend=None):
+                  periodic_axes=None, domain_bounds=None, backend=None,
+                  skip_triangulation=False,
+                  pressure_model=None, redistribute_mass=False,
+                  remesh_mode='delaunay', remesh_kwargs=None):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -80,11 +83,41 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         When set, delegates to :func:`retopologize_periodic`.
     domain_bounds : list[tuple[float, float]] or None
         Domain extent per axis.  Required when *periodic_axes* is set.
+    skip_triangulation : bool
+        If True, skip the disconnect/retriangulate steps (1-2) and keep
+        the existing connectivity.  Boundary tagging, dual mesh
+        recomputation (``compute_vd``), and dual volume caching are still
+        performed.  Useful when the topology has not changed (e.g.
+        Eulerian fixed-mesh or velocity-only integrators) but vertex
+        positions have moved and duals need refreshing.
+    pressure_model : EquationOfState or None
+        EOS instance for mass redistribution.  Required when
+        *redistribute_mass* is True.
+    redistribute_mass : bool
+        If True, redistribute vertex masses after retriangulation to
+        preserve the pre-retriangulation pressure field.  Requires
+        *pressure_model* with a ``.density(P)`` inverse method.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy.
+
+        - ``'delaunay'`` (default): disconnect all edges and run a
+          global scipy Delaunay retriangulation.  Fast and robust but
+          creates cross-phase edges at sharp interfaces.
+        - ``'adaptive'``: use ``hyperct.remesh.adaptive_remesh`` to apply
+          local mesh operations (edge split, edge collapse, edge flip)
+          that preserve a sharp ``v.phase`` interface.  Requires 2D.
+          Only applies when *skip_triangulation* is False.
+    remesh_kwargs : dict or None
+        Extra keyword arguments forwarded to
+        :func:`hyperct.remesh.adaptive_remesh` (e.g. ``L_min``,
+        ``L_max``, ``alpha_max``, ``quality_target_deg``).
 
     Steps:
         0. (Optional) Merge close vertices via ``HC.V.merge_all``
         1. Retriangulation — Delaunay for dim >= 2, sorted chain for dim == 1
+           (skipped when *skip_triangulation* is True)
         2. Boundary recomputation via ``HC.boundary()`` — update *bV* in-place
+           (skipped when *skip_triangulation* is True; uses existing *bV*)
         3. Tag ``v.boundary`` on all vertices
         4. Recompute barycentric dual mesh via ``compute_vd``
     """
@@ -104,37 +137,65 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     if len(verts) < dim + 1:
         return  # not enough vertices for a simplex
 
-    # 0. Merge close vertices before retriangulation
-    if merge_cdist is not None and merge_cdist > 0:
-        HC.V.merge_all(cdist=merge_cdist)
-        # Refresh vertex list and clean up stale bV references
-        bV.intersection_update(set(HC.V))
-        verts = list(HC.V)
-        if len(verts) < dim + 1:
-            return
+    # Snapshot pressure field before topology change (for mass redistribution)
+    _p_snap = None
+    if redistribute_mass and pressure_model is not None:
+        from ddgclib.operators.mass_redistribution import snapshot_pressure
+        _p_snap = snapshot_pressure(HC)
 
-    # 1. Disconnect ALL existing edges
-    for v in verts:
-        for nb in list(v.nn):
-            v.disconnect(nb)
+    if not skip_triangulation:
+        # 0. Merge close vertices before retriangulation
+        if merge_cdist is not None and merge_cdist > 0:
+            HC.V.merge_all(cdist=merge_cdist)
+            # Refresh vertex list and clean up stale bV references
+            bV.intersection_update(set(HC.V))
+            verts = list(HC.V)
+            if len(verts) < dim + 1:
+                return
 
-    # 2. Retriangulate
-    if dim == 1:
-        # 1D: sort by coordinate and connect as a chain
-        sorted_verts = sorted(verts, key=lambda v: v.x_a[0])
-        for i in range(len(sorted_verts) - 1):
-            sorted_verts[i].connect(sorted_verts[i + 1])
+        if remesh_mode == 'adaptive':
+            # Local mesh operations preserving v.phase interfaces.
+            # The existing connectivity is the starting point — no
+            # global disconnect — so interior structure and interface
+            # edges are retained.  For dim != 2 the adaptive driver
+            # raises NotImplementedError, which we intentionally let
+            # propagate so the user sees a clear error rather than a
+            # silent fallback to Delaunay.
+            from hyperct.remesh import adaptive_remesh
+            adaptive_remesh(HC, dim=dim, **(remesh_kwargs or {}))
+            # Recompute boundary from the updated connectivity.
+            dV = HC.boundary()
+        else:
+            # 1. Disconnect ALL existing edges
+            for v in verts:
+                for nb in list(v.nn):
+                    v.disconnect(nb)
+
+            # 2. Retriangulate
+            if dim == 1:
+                # 1D: sort by coordinate and connect as a chain
+                sorted_verts = sorted(verts, key=lambda v: v.x_a[0])
+                for i in range(len(sorted_verts) - 1):
+                    sorted_verts[i].connect(sorted_verts[i + 1])
+            else:
+                # 2D/3D: Delaunay triangulation
+                coords = np.array([v.x_a[:dim] for v in verts])
+                try:
+                    tri = Delaunay(coords)
+                except Exception:
+                    # Cocircular/cospherical input: add Qz flag
+                    tri = Delaunay(coords, qhull_options="Qbb Qt Qz")
+                for simplex in tri.simplices:
+                    for i in range(len(simplex)):
+                        for j in range(i + 1, len(simplex)):
+                            verts[simplex[i]].connect(verts[simplex[j]])
+
+            # 3. Recompute boundary via HC.boundary()
+            dV = HC.boundary()
     else:
-        # 2D/3D: Delaunay triangulation
-        coords = np.array([v.x_a[:dim] for v in verts])
-        tri = Delaunay(coords)
-        for simplex in tri.simplices:
-            for i in range(len(simplex)):
-                for j in range(i + 1, len(simplex)):
-                    verts[simplex[i]].connect(verts[simplex[j]])
-
-    # 3. Recompute boundary via HC.boundary()
-    dV = HC.boundary()
+        # skip_triangulation: keep existing connectivity,
+        # use current bV as the boundary set
+        dV = set(bV)
 
     # 4. Tag v.boundary on ALL topological boundary vertices.
     #    compute_vd needs the full boundary to build correct half-cells.
@@ -172,10 +233,22 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     bV.clear()
     bV.update(dV)
 
+    # 7. Mass redistribution (pressure-preserving)
+    if redistribute_mass and pressure_model is not None and _p_snap is not None:
+        from ddgclib.operators.mass_redistribution import (
+            redistribute_mass_single_phase,
+        )
+        redistribute_mass_single_phase(
+            HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
+        )
+
 
 def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                      merge_cdist=None, periodic_axes=None,
-                     domain_bounds=None, backend=None):
+                     domain_bounds=None, backend=None,
+                     skip_triangulation=False,
+                     pressure_model=None, redistribute_mass=False,
+                     remesh_mode='delaunay', remesh_kwargs=None):
     """Dispatch topology management to custom or default function.
 
     Parameters
@@ -183,25 +256,140 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
     retopologize_fn : callable, False, or None
         - ``None`` (default): use :func:`_retopologize` (Delaunay + compute_vd).
         - ``False``: skip topology management entirely.
-        - callable: call ``retopologize_fn(HC, bV, dim)`` instead of the default.
-          Useful for surface meshes where Delaunay/compute_vd don't apply.
+        - callable: call ``retopologize_fn(HC, bV, dim)`` instead of the
+          default.  ``remesh_mode`` and ``remesh_kwargs`` are forwarded
+          as keyword arguments when the callable accepts them (detected
+          via :mod:`inspect`), so existing 3-arg closures remain
+          backward-compatible.  Useful for surface meshes where
+          Delaunay/compute_vd don't apply, or for
+          :func:`_retopologize_multiphase` wrappers.
     merge_cdist : float or None
         Forwarded to :func:`_retopologize`.  See its docstring.
     periodic_axes : list[int] or None
         Forwarded to :func:`_retopologize`.
     domain_bounds : list[tuple[float, float]] or None
         Forwarded to :func:`_retopologize`.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals
+        and dual volumes.  Forwarded to :func:`_retopologize`.
+        Ignored when *retopologize_fn* is a callable or False.
+    pressure_model : EquationOfState or None
+        Forwarded to :func:`_retopologize` for mass redistribution.
+    redistribute_mass : bool
+        Forwarded to :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Forwarded to :func:`_retopologize` (and to custom
+        ``retopologize_fn`` when it accepts the parameter).
+    remesh_kwargs : dict or None
+        Forwarded alongside *remesh_mode*.
     """
     if retopologize_fn is False:
         return
     if retopologize_fn is not None:
-        retopologize_fn(HC, bV, dim)
+        # Forward remesh_mode/kwargs only if the callable declares them
+        # (either by name or via **kwargs).  This preserves the legacy
+        # 3-arg signature while allowing multiphase / adaptive wrappers
+        # to opt in.
+        extra = {}
+        try:
+            sig = inspect.signature(retopologize_fn)
+            params = sig.parameters
+            accepts_var_kw = any(
+                p.kind is inspect.Parameter.VAR_KEYWORD
+                for p in params.values()
+            )
+            if accepts_var_kw or 'remesh_mode' in params:
+                extra['remesh_mode'] = remesh_mode
+            if accepts_var_kw or 'remesh_kwargs' in params:
+                extra['remesh_kwargs'] = remesh_kwargs
+        except (ValueError, TypeError):
+            pass  # C-builtins, partials without __signature__, etc.
+        retopologize_fn(HC, bV, dim, **extra)
     else:
         _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
                       merge_cdist=merge_cdist,
                       periodic_axes=periodic_axes,
                       domain_bounds=domain_bounds,
-                      backend=backend)
+                      backend=backend,
+                      skip_triangulation=skip_triangulation,
+                      pressure_model=pressure_model,
+                      redistribute_mass=redistribute_mass,
+                      remesh_mode=remesh_mode,
+                      remesh_kwargs=remesh_kwargs)
+
+
+def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
+                             merge_cdist=None, backend=None,
+                             skip_triangulation=False,
+                             redistribute_mass=False,
+                             remesh_mode='delaunay', remesh_kwargs=None):
+    """Retriangulate with multiphase interface tracking.
+
+    Performs standard Delaunay retopologization (or adaptive local
+    mesh operations when ``remesh_mode='adaptive'``), then refreshes
+    multiphase state: interface identification and mass fractions.
+
+    Phase labels (``v.phase``) are vertex attributes and survive
+    reconnection.
+
+    Parameters
+    ----------
+    HC : Complex
+    bV : set
+    dim : int
+    mps : MultiphaseSystem
+        Multiphase system for interface identification.
+    boundary_filter : callable or None
+    merge_cdist : float or None
+        Merge tolerance.  ``None`` disables merging (default).
+        If merging is needed, use :func:`mass_conserving_merge`
+        beforehand to preserve total mass.
+    backend : str or None
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        Forwarded to :func:`_retopologize`.
+    redistribute_mass : bool
+        If True, redistribute per-phase masses after retriangulation to
+        preserve the pre-retriangulation pressure field per phase.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` uses ``hyperct.remesh.adaptive_remesh`` to apply
+        local mesh operations (edge split, collapse, flip) that
+        preserve the sharp ``v.phase`` interface — the primary reason
+        this wrapper exists.  Currently only 2D is supported by the
+        adaptive driver.
+    remesh_kwargs : dict or None
+        Extra keyword arguments forwarded to the adaptive driver.
+    """
+    # Snapshot per-phase pressure before topology change
+    _p_snap = None
+    if redistribute_mass and mps is not None:
+        from ddgclib.operators.mass_redistribution import (
+            snapshot_pressure_multiphase,
+        )
+        _p_snap = snapshot_pressure_multiphase(HC, mps.n_phases)
+
+    # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
+    _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
+                  merge_cdist=merge_cdist, backend=backend,
+                  skip_triangulation=skip_triangulation,
+                  remesh_mode=remesh_mode,
+                  remesh_kwargs=remesh_kwargs)
+
+    # Refresh multiphase state
+    if mps is not None:
+        # reset_mass=False preserves Lagrangian mass (v.m, v.m_phase)
+        # Only geometry (dual_vol_phase) and pressure are recomputed
+        mps.refresh(HC, dim, reset_mass=False)
+
+        # Per-phase mass redistribution (after dual_vol_phase is available)
+        if redistribute_mass and _p_snap is not None:
+            from ddgclib.operators.mass_redistribution import (
+                redistribute_mass_multiphase,
+            )
+            redistribute_mass_multiphase(
+                HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
+            )
 
 
 def _recompute_duals(HC):
@@ -382,6 +570,9 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           save_every=None, save_dir=None, workers=None,
           boundary_filter=None, retopologize_fn=None, merge_cdist=None,
           backend=None, periodic_axes=None, domain_bounds=None,
+          skip_triangulation=False,
+          pressure_model=None, redistribute_mass=False,
+          remesh_mode='delaunay', remesh_kwargs=None,
           **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -420,6 +611,20 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     retopologize_fn : callable, False, or None
         See :func:`_do_retopologize`.  Use a custom callable for surface
         meshes where Delaunay/compute_vd don't apply.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        See :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` (2D only) replaces the global Delaunay step
+        with local interface-preserving mesh operations from
+        :mod:`hyperct.remesh`, which is the only mode that keeps a
+        sharp ``v.phase`` interface intact across remeshes.
+    remesh_kwargs : dict or None
+        Extra kwargs forwarded to ``adaptive_remesh`` (e.g.
+        ``L_min``, ``L_max``, ``quality_target_deg``,
+        ``max_iterations``, ``smooth_iterations``).  Ignored when
+        ``remesh_mode='delaunay'``.
     **dudt_kwargs
         Forwarded to *dudt_fn* (e.g. ``dim=3, mu=8.9e-4``).
 
@@ -432,7 +637,12 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
                              merge_cdist, periodic_axes=periodic_axes,
-                             domain_bounds=domain_bounds, backend=backend)
+                             domain_bounds=domain_bounds, backend=backend,
+                             skip_triangulation=skip_triangulation,
+                             pressure_model=pressure_model,
+                             redistribute_mass=redistribute_mass,
+                             remesh_mode=remesh_mode,
+                             remesh_kwargs=remesh_kwargs)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -463,6 +673,9 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      workers=None, boundary_filter=None,
                      retopologize_fn=None, merge_cdist=None,
                      backend=None, periodic_axes=None, domain_bounds=None,
+                     skip_triangulation=False,
+                     pressure_model=None, redistribute_mass=False,
+                     remesh_mode='delaunay', remesh_kwargs=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
@@ -488,6 +701,20 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         See :func:`_retopologize`.
     retopologize_fn : callable, False, or None
         See :func:`_do_retopologize`.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        See :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` (2D only) replaces the global Delaunay step
+        with local interface-preserving mesh operations from
+        :mod:`hyperct.remesh`, which is the only mode that keeps a
+        sharp ``v.phase`` interface intact across remeshes.
+    remesh_kwargs : dict or None
+        Extra kwargs forwarded to ``adaptive_remesh`` (e.g.
+        ``L_min``, ``L_max``, ``quality_target_deg``,
+        ``max_iterations``, ``smooth_iterations``).  Ignored when
+        ``remesh_mode='delaunay'``.
 
     Returns
     -------
@@ -498,7 +725,12 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
                              merge_cdist, periodic_axes=periodic_axes,
-                             domain_bounds=domain_bounds, backend=backend)
+                             domain_bounds=domain_bounds, backend=backend,
+                             skip_triangulation=skip_triangulation,
+                             pressure_model=pressure_model,
+                             redistribute_mass=redistribute_mass,
+                             remesh_mode=remesh_mode,
+                             remesh_kwargs=remesh_kwargs)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -528,7 +760,10 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           rtol=1e-6, atol=1e-9, save_every=None, save_dir=None,
           workers=None, boundary_filter=None, retopologize_fn=None,
           merge_cdist=None, backend=None, periodic_axes=None,
-          domain_bounds=None, **dudt_kwargs):
+          domain_bounds=None, skip_triangulation=False,
+          pressure_model=None, redistribute_mass=False,
+          remesh_mode='delaunay', remesh_kwargs=None,
+          **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
     The full coupled ODE system is solved::
@@ -569,6 +804,20 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
         See :func:`_retopologize`.
     retopologize_fn : callable, False, or None
         See :func:`_do_retopologize`.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        See :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` (2D only) replaces the global Delaunay step
+        with local interface-preserving mesh operations from
+        :mod:`hyperct.remesh`, which is the only mode that keeps a
+        sharp ``v.phase`` interface intact across remeshes.
+    remesh_kwargs : dict or None
+        Extra kwargs forwarded to ``adaptive_remesh`` (e.g.
+        ``L_min``, ``L_max``, ``quality_target_deg``,
+        ``max_iterations``, ``smooth_iterations``).  Ignored when
+        ``remesh_mode='delaunay'``.
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -592,7 +841,12 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
                              merge_cdist, periodic_axes=periodic_axes,
-                             domain_bounds=domain_bounds, backend=backend)
+                             domain_bounds=domain_bounds, backend=backend,
+                             skip_triangulation=skip_triangulation,
+                             pressure_model=pressure_model,
+                             redistribute_mass=redistribute_mass,
+                             remesh_mode=remesh_mode,
+                             remesh_kwargs=remesh_kwargs)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -650,7 +904,10 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         workers=None, boundary_filter=None,
                         retopologize_fn=None, merge_cdist=None,
                         backend=None, periodic_axes=None,
-                        domain_bounds=None, **dudt_kwargs):
+                        domain_bounds=None, skip_triangulation=False,
+                        pressure_model=None, redistribute_mass=False,
+                        remesh_mode='delaunay', remesh_kwargs=None,
+                        **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
     Useful for Eulerian CFD (e.g. Poiseuille flow on a static mesh) where
@@ -671,6 +928,20 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         See :func:`_retopologize`.
     retopologize_fn : callable, False, or None
         See :func:`_do_retopologize`.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        See :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` (2D only) replaces the global Delaunay step
+        with local interface-preserving mesh operations from
+        :mod:`hyperct.remesh`, which is the only mode that keeps a
+        sharp ``v.phase`` interface intact across remeshes.
+    remesh_kwargs : dict or None
+        Extra kwargs forwarded to ``adaptive_remesh`` (e.g.
+        ``L_min``, ``L_max``, ``quality_target_deg``,
+        ``max_iterations``, ``smooth_iterations``).  Ignored when
+        ``remesh_mode='delaunay'``.
 
     Returns
     -------
@@ -681,7 +952,12 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
                              merge_cdist, periodic_axes=periodic_axes,
-                             domain_bounds=domain_bounds, backend=backend)
+                             domain_bounds=domain_bounds, backend=backend,
+                             skip_triangulation=skip_triangulation,
+                             pressure_model=pressure_model,
+                             redistribute_mass=redistribute_mass,
+                             remesh_mode=remesh_mode,
+                             remesh_kwargs=remesh_kwargs)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -704,7 +980,10 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    workers=None, boundary_filter=None,
                    retopologize_fn=None, merge_cdist=None,
                    backend=None, periodic_axes=None,
-                   domain_bounds=None, **dudt_kwargs):
+                   domain_bounds=None, skip_triangulation=False,
+                   pressure_model=None, redistribute_mass=False,
+                   remesh_mode='delaunay', remesh_kwargs=None,
+                   **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
     The time step is adjusted each step based on the CFL condition::
@@ -749,6 +1028,20 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
         See :func:`_retopologize`.
     retopologize_fn : callable, False, or None
         See :func:`_do_retopologize`.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        See :func:`_retopologize`.
+    remesh_mode : {'delaunay', 'adaptive'}
+        Connectivity update strategy forwarded to :func:`_retopologize`.
+        ``'adaptive'`` (2D only) replaces the global Delaunay step
+        with local interface-preserving mesh operations from
+        :mod:`hyperct.remesh`, which is the only mode that keeps a
+        sharp ``v.phase`` interface intact across remeshes.
+    remesh_kwargs : dict or None
+        Extra kwargs forwarded to ``adaptive_remesh`` (e.g.
+        ``L_min``, ``L_max``, ``quality_target_deg``,
+        ``max_iterations``, ``smooth_iterations``).  Ignored when
+        ``remesh_mode='delaunay'``.
     **dudt_kwargs
         Forwarded to *dudt_fn*.
 
@@ -770,7 +1063,12 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
 
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
                              merge_cdist, periodic_axes=periodic_axes,
-                             domain_bounds=domain_bounds, backend=backend)
+                             domain_bounds=domain_bounds, backend=backend,
+                             skip_triangulation=skip_triangulation,
+                             pressure_model=pressure_model,
+                             redistribute_mass=redistribute_mass,
+                             remesh_mode=remesh_mode,
+                             remesh_kwargs=remesh_kwargs)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

@@ -42,6 +42,9 @@ class SimulationParams:
         Dynamic viscosity.
     rho : float
         Density.
+    skip_triangulation : bool
+        If True, skip Delaunay retriangulation but still recompute duals.
+        Forwarded to the integrator.
     extra : dict
         Additional keyword arguments forwarded to the acceleration function.
     """
@@ -51,6 +54,7 @@ class SimulationParams:
     dim: int = 3
     mu: float = 8.9e-4
     rho: float = 1.0
+    skip_triangulation: bool = False
     extra: dict = field(default_factory=dict)
 
     @property
@@ -161,6 +165,7 @@ class DynamicSimulation:
             'dim': p.dim,
             'callback': callback,
             'bc_set': self._bc_set,
+            'skip_triangulation': p.skip_triangulation,
         }
         integrator_kwargs.update(p.dudt_kwargs)
 
