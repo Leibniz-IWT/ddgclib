@@ -24,3 +24,4 @@ dependencies:
   - pip:
     - hyperct
     - polyscope
+    - torch  # GPU acceleration (requires CUDA driver >= 13.0; run nvidia-smi to check)

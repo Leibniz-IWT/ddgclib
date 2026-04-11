@@ -117,7 +117,6 @@ cdist = 1e-10
 r = np.array(r, dtype=np.longdouble)
 theta_p = np.array(theta_p, dtype=np.longdouble)
 
-##################################################
 # PLot theta rise
 if 1:
     # First generate the smooth data
@@ -273,9 +272,4 @@ plt.tick_params(axis='x', which='major', reset=True)
     #plt.savefig('./fig/errors.png', bbox_inches='tight', dpi=600)
 plt.savefig('./figs6_thesis.pdf', bbox_inches='tight', dpi=600)
 plt.show()
-
-
-
-
-
 

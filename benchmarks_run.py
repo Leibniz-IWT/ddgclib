@@ -1,3 +1,4 @@
+
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'benchmarks'))
@@ -5,7 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'benchmarks'))
 from benchmarks._benchmark_cases import TorusBenchmark, EllipsoidMshBenchmark
 
 if __name__ == "__main__":
-    benchmark = TorusBenchmark()
+    #ybenchmark = TorusBenchmark()
     benchmark.run_benchmark()
     results = benchmark.summary()
 
@@ -13,7 +14,7 @@ if __name__ == "__main__":
         print(f"{metric}:\n  Computed = {computed:.6f}\n  Analytical = {analytical:.6f}\n")
 
 
-    # ---------------- Ellipsoid (new) ----------------
+    # Ellipsoid (new)
     ellip = EllipsoidMshBenchmark(
         msh_path="test_cases/Ellip_0_sub0_full.msh",
         ax=1.5, ay=1.0, az=0.8,

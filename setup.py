@@ -22,6 +22,7 @@ setup(name='ddgclib',
       extras_require={
           'vis': ['polyscope', 'matplotlib'],
           'data': ['pandas'],
+          'gpu': ['torch'],
           'dev': ['pytest', 'pytest-cov'],
       },
       long_description_content_type='text/markdown',

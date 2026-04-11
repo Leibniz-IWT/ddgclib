@@ -3,6 +3,18 @@ data/*
 fig/*
 surface_evolver
 shgo
+hyperct
+hyperct_examples
+
+# data and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.json
+*.pkl
+*.pdf
 
 # Hidden and dev folders
 ddgclib/__pycache__
