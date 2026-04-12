@@ -81,7 +81,7 @@ mkdir -p docs
 sphinx-quickstart docs \
   --sep \
   --project "ddgclib" \
-  --author "Stefan Endres, Lutz Mädler, Ianto Cannon, Sonyi Deng, Marcello Zani" \
+  --author "Stefan Endres, Lutz Mädler, Ianto Cannon, Songyi Deng, Marcello Zani" \
   --release "0.4.3" \
   --language en \
   --extensions sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.viewcode,sphinx.ext.mathjax,sphinx_autodoc_typehints
