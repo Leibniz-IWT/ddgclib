@@ -139,3 +139,7 @@ Thumbs.db
 #################################
 doc/frontpage/build
 doc/source/generated
+CLAUDE.md
+DEVELOPMENT.md
+ARCHITECTURE.md
+FEATURES.md
