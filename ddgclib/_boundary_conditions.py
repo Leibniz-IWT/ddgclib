@@ -180,6 +180,50 @@ class NoSlipWallBC(BoundaryCondition):
         return count
 
 
+class MovingWallBC(BoundaryCondition):
+    """No-slip wall moving with a prescribed tangential velocity.
+
+    Imposes ``v.u = wall_velocity`` on all target vertices each step.
+    Unlike :class:`NoSlipWallBC` (zero velocity), this sets a specified
+    constant velocity vector, suitable for shear cells / Couette flow
+    where the plate slides along its own surface at a fixed speed.
+
+    The wall vertices themselves do NOT translate through space — they
+    are frozen (members of ``bV``) and only impose a velocity boundary
+    condition for the fluid viscous stress.  This is the standard
+    Navier–Stokes setup: the plate *velocity* is a boundary condition,
+    not a mesh motion.
+
+    Parameters
+    ----------
+    wall_velocity : ndarray or callable
+        Constant velocity vector (length ``dim``), or ``fn(v) -> ndarray``.
+        Use a callable when top/bottom plates need different velocities
+        applied through a single BC.
+    dim : int
+        Spatial dimension (velocity vector length).
+    """
+
+    def __init__(self, wall_velocity, dim: int = 3):
+        super().__init__()
+        self.wall_velocity = wall_velocity
+        self.dim = dim
+
+    def apply(self, mesh, dt, target_vertices=None):
+        verts = target_vertices if target_vertices is not None else mesh.V
+        count = 0
+        if callable(self.wall_velocity):
+            for v in verts:
+                v.u = np.asarray(self.wall_velocity(v), dtype=float).copy()
+                count += 1
+        else:
+            u_const = np.asarray(self.wall_velocity, dtype=float)
+            for v in verts:
+                v.u = u_const.copy()
+                count += 1
+        return count
+
+
 class DirichletVelocityBC(BoundaryCondition):
     """Fixed velocity on boundary vertices.
 

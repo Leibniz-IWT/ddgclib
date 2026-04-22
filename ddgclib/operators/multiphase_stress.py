@@ -1,14 +1,48 @@
 """Multiphase stress operators for the integrated Cauchy momentum equation.
 
-Each dual cell belongs to a single phase and uses that phase's viscosity.
-Cross-phase edges (between an interface vertex and an outer-phase vertex)
-use the viscosity of the dual cell's own phase.  There is no harmonic mean.
+Per-phase summed formulation
+----------------------------
 
-Interface vertices additionally receive the surface tension force from
-curvature of the sharp interface.
+For every vertex ``v`` we compute a force that sums per-phase
+contributions over the phases present in the vertex's dual cell::
 
-This module provides ``multiphase_dudt_i`` as a drop-in replacement
-for ``dudt_i`` in dynamic integrators.
+    F_i = sum_{k in phases_present(v)} F_i^{(k)} + F_st_i
+
+Each phase-k sub-force ``F_i^{(k)}`` uses:
+
+- ``p_phase[k]`` on both sides of each sub-face (never mixing phases
+  across a face).  If the neighbour ``v_j`` is bulk in a different
+  phase (so it does not store ``p_phase[k]``), we use ``v_i.p_phase[k]``
+  on the ``v_j`` end as well — this is consistent with the sub-face
+  lying entirely in phase ``k`` (bulk phase of ``v_j``) with no
+  phase-k neighbour to provide a reference.  See notes below.
+- ``dual area vector`` ``A_ij^{(k)}`` from the phase-k sub-polygon of
+  the dual cell (see :mod:`ddgclib.geometry._dual_split_2d`).
+- viscosity ``μ_k`` on the phase-k sub-face, or the harmonic mean
+  ``2 μ_i μ_j / (μ_i + μ_j)`` at μ-jumps on edges that straddle the
+  interface (both endpoints interface, neighbour in the other phase).
+
+Bulk vertices have ``phases_present = {v.phase}``; the sum collapses
+to the current single-phase formula, so bulk physics is unchanged
+from the previous own-phase-only scheme.
+
+Surface tension remains a separate ``F_st`` force on sharp-interface
+vertices — do NOT add ``γκ`` to the pressure field.  It is already
+integrated over the dual edge via the Fundamental Theorem of Calculus
+for the tangent vector (2D) / cotangent-weight Heron curvature on the
+interface sub-mesh (3D).
+
+Pressure-flux sub-case for bulk neighbours
+------------------------------------------
+For an edge (i, j) where ``v_i`` is interface and ``v_j`` is bulk
+in phase ``k``, the dual face lies entirely in phase ``k`` (bulk
+side).  ``v_i`` stores ``v_i.p_phase[k]`` (the outer/own phase
+pressure) and ``v_j`` stores ``v_j.p = v_j.p_phase[k]`` (its own
+pressure).  Both are phase-k pressures at the two ends of the face
+— exactly what the face-average flux wants.  The previous
+own-phase-only code read ``v_j.p_phase[own_phase]`` with
+``own_phase = v_i.phase`` — wrong when ``v_j.phase != v_i.phase``
+because ``v_j`` does not store a phase-``v_i.phase`` pressure.
 
 Usage
 -----
@@ -23,8 +57,51 @@ from __future__ import annotations
 
 import numpy as np
 
-from ddgclib.operators.stress import dual_area_vector, _resolve_pressure
+from ddgclib.operators.stress import (
+    dual_area_vector,
+    pressure_flux,
+    viscous_flux,
+    _resolve_pressure,
+)
 from ddgclib.operators.curvature_2d import surface_tension_force_2d
+from ddgclib.geometry._dual_split_2d import edge_phase_area_fractions
+
+
+def _phases_present(v, n_phases: int) -> list[int]:
+    """Return the sorted list of phases with non-zero presence at v.
+
+    Uses ``v.interface_phases`` when available (populated by
+    ``MultiphaseSystem.identify_interface``); otherwise falls back to
+    ``{v.phase}``.  Guaranteed to return at least one entry.
+    """
+    phases = getattr(v, 'interface_phases', None)
+    if phases is None or len(phases) == 0:
+        return [int(v.phase)]
+    return sorted(int(k) for k in phases if 0 <= int(k) < n_phases)
+
+
+def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
+    """Return v.p_phase[k] if populated, else ``fallback``."""
+    p_phase = getattr(v, 'p_phase', None)
+    if p_phase is None or k >= len(p_phase):
+        return fallback
+    val = float(p_phase[k])
+    if val == 0.0:
+        return fallback
+    return val
+
+
+def _face_viscosity_for_phase(
+    mps, _v_i, _v_j, k: int,
+) -> float:
+    """Return the viscosity on the phase-k sub-face of edge (i,j).
+
+    Each per-phase sub-face of the dual face lies entirely within one
+    phase (determined by the interface geometry splitting the dual
+    cell).  The viscosity is therefore unambiguously ``μ_k`` — no
+    blending or harmonic-mean approximation is needed.
+    """
+    return float(mps.get_mu(k))
 
 
 def multiphase_stress_force(
@@ -34,20 +111,13 @@ def multiphase_stress_force(
     HC=None,
     pressure_model=None,
 ) -> np.ndarray:
-    """Integrated force on a dual cell with multiphase physics.
+    """Integrated force on a dual cell with per-phase summed stress.
 
-    The force on vertex *v* is:
+    ::
 
-        F_i = sum_j [ F_p_ij + F_v_ij ]  +  F_st_i
+        F_i = sum_k F_i^{(k)} + F_st_i
 
-    where:
-
-    - **Pressure flux**: ``F_p_ij = -0.5*(p_i + p_j)*A_ij``
-      with ``p_i = v.p_phase[v.phase]`` (own-phase pressure).
-    - **Viscous flux**: ``F_v_ij = (mu / |d_ij|) * du * (d_hat . A_ij)``
-      with ``mu = mps.phases[v.phase].mu`` — the viscosity of the dual
-      cell's own phase.  No harmonic mean.
-    - **Surface tension**: only on ``is_interface`` vertices.
+    See module docstring for the full sub-force formulation.
 
     Parameters
     ----------
@@ -56,42 +126,65 @@ def multiphase_stress_force(
     mps : MultiphaseSystem
     HC : Complex
     pressure_model : callable or None
-        Typically ``MultiphaseEOS`` — updates ``v.p_phase`` in-place.
+        Typically :class:`MultiphaseEOS` — updates ``v.p_phase`` in-place.
+        Not called inside the per-phase loop; ``mps.refresh()`` is
+        expected to have already populated ``v.p_phase``.
     """
-    # Resolve own-phase pressure (populates v.p_phase via MultiphaseEOS)
-    p_i = _resolve_pressure(v, pressure_model, HC, dim)
+    n_phases = mps.n_phases
+    has_p_phase = hasattr(v, 'p_phase')
+    is_interface_i = bool(getattr(v, 'is_interface', False))
+
+    phases_present = _phases_present(v, n_phases)
+
+    # Pressure references (used when a neighbour lacks phase-k pressure)
+    if has_p_phase:
+        p_i_by_phase = {k: float(v.p_phase[k]) for k in phases_present}
+    else:
+        p_fallback = _resolve_pressure(v, pressure_model, HC, dim)
+        p_i_by_phase = {k: p_fallback for k in phases_present}
+
     u_i = v.u[:dim]
     x_i = v.x_a[:dim]
 
-    # Own-phase viscosity (no harmonic mean)
-    mu = mps.get_mu(v.phase)
-
-    # Edge area cache
     _cache = getattr(HC, '_edge_area_cache', None)
     _vid = id(v) if _cache is not None else None
 
     F = np.zeros(dim)
+
     for v_j in v.nn:
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
         else:
             A_ij = dual_area_vector(v, v_j, HC, dim)
 
-        # --- Pressure flux (face-average, conservative) ---
-        p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
-        F -= 0.5 * (p_i + p_j) * A_ij
-
-        # --- Viscous flux (own-phase viscosity) ---
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
-        d_norm = np.linalg.norm(d_ij)
-        if d_norm < 1e-30:
-            continue
-        d_hat = d_ij / d_norm
-        F += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+
+        # Per-edge phase fractions (sums to 1.0).  ``dim`` selects the
+        # curve-adjacency rule: 2D uses two-curve-neighbour polyline,
+        # 3D treats every interface neighbour as surface-adjacent.
+        fractions = edge_phase_area_fractions(
+            v, v_j, dim=dim, interface=HC,
+        )
+
+        for k, frac in fractions.items():
+            if k not in phases_present:
+                # Sub-face lies in a phase not present at v.  Skip the
+                # contribution rather than add spurious flux — this
+                # happens only for bulk-bulk cross-phase edges (a mesh
+                # artefact) where v has no mass/pressure in phase k.
+                continue
+
+            A_k = frac * A_ij
+            p_i_k = p_i_by_phase[k]
+            p_j_k = _phase_pressure(v_j, k, fallback=p_i_k)
+            mu_k = _face_viscosity_for_phase(mps, v, v_j, k)
+
+            F += pressure_flux(p_i_k, p_j_k, A_k)
+            F += viscous_flux(mu_k, delta_u, d_ij, A_k)
 
     # --- Surface tension on sharp interface vertices only ---
-    if getattr(v, 'is_interface', False):
+    if is_interface_i:
         F += _interface_surface_tension(v, dim, mps)
 
     return F
@@ -101,7 +194,7 @@ def _interface_surface_tension(v, dim: int, mps) -> np.ndarray:
     """Compute surface tension force on a sharp interface vertex.
 
     In both 2D and 3D the surface tension force is already integrated
-    over the portion of the interface inside the vertex dual cell:
+    over the portion of the interface inside the vertex dual cell::
 
         F_st_i = integral_{Gamma_i} gamma * kappa * N dS
 

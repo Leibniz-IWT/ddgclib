@@ -41,7 +41,6 @@ import os
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.spatial import Delaunay
 
 
 # Helpers
@@ -178,17 +177,11 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                 for i in range(len(sorted_verts) - 1):
                     sorted_verts[i].connect(sorted_verts[i + 1])
             else:
-                # 2D/3D: Delaunay triangulation
+                # 2D/3D: Delaunay triangulation with simplex caching for
+                # the simplex-aware 3D dual path.
+                from ddgclib.geometry import connect_and_cache_simplices
                 coords = np.array([v.x_a[:dim] for v in verts])
-                try:
-                    tri = Delaunay(coords)
-                except Exception:
-                    # Cocircular/cospherical input: add Qz flag
-                    tri = Delaunay(coords, qhull_options="Qbb Qt Qz")
-                for simplex in tri.simplices:
-                    for i in range(len(simplex)):
-                        for j in range(i + 1, len(simplex)):
-                            verts[simplex[i]].connect(verts[simplex[j]])
+                connect_and_cache_simplices(HC, verts, dim, coords=coords)
 
             # 3. Recompute boundary via HC.boundary()
             dV = HC.boundary()
@@ -322,7 +315,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              merge_cdist=None, backend=None,
                              skip_triangulation=False,
                              redistribute_mass=False,
-                             remesh_mode='delaunay', remesh_kwargs=None):
+                             remesh_mode='delaunay', remesh_kwargs=None,
+                             split_method='neighbour_count'):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -379,8 +373,12 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
     # Refresh multiphase state
     if mps is not None:
         # reset_mass=False preserves Lagrangian mass (v.m, v.m_phase)
-        # Only geometry (dual_vol_phase) and pressure are recomputed
-        mps.refresh(HC, dim, reset_mass=False)
+        # Only geometry (dual_vol_phase) and pressure are recomputed.
+        # ``split_method='exact'`` uses the geometric 2D dual split
+        # aligned with the per-edge phase split used by the per-phase
+        # stress force; default 'neighbour_count' preserves the legacy
+        # behaviour for callers that have not opted in.
+        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
 
         # Per-phase mass redistribution (after dual_vol_phase is available)
         if redistribute_mass and _p_snap is not None:
@@ -390,6 +388,10 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
             redistribute_mass_multiphase(
                 HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
             )
+            # Recompute pressures from the redistributed masses so that
+            # v.p_phase (read by multiphase_stress_force) reflects the
+            # adjusted densities, not the stale pre-redistribution values.
+            mps.compute_phase_pressures(HC)
 
 
 def _recompute_duals(HC):

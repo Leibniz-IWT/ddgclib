@@ -24,6 +24,9 @@ def _ensure_benchmarks_registered():
             sys.path.append(_bench_path)
         from benchmarks._benchmark_toy_methods import compute_laplace_beltrami
         curvature_i_methods.register("laplace-beltrami", compute_laplace_beltrami)
+    if "heron-vectorized" not in curvature_i_methods:
+        from ddgclib._curvatures_heron import heron_mean_curvature_vectors
+        curvature_i_methods.register("heron-vectorized", heron_mean_curvature_vectors)
 
 
 class Curvature_i:

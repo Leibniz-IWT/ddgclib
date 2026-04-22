@@ -197,23 +197,29 @@ def hndA_i(v, n_i=None):
     return HNdA_i, C_i
 
 
+def _pad3(x_a):
+    """Pad a coordinate array to 3D (for np.cross compatibility)."""
+    if len(x_a) >= 3:
+        return x_a[:3]
+    out = np.zeros(3)
+    out[:len(x_a)] = x_a
+    return out
+
+
 def hndA_i_interface(v, interface_set, n_i=None):
     """Mean curvature normal restricted to interface sub-mesh.
 
-    Same algorithm as ``hndA_i`` but only considers neighbors that are
-    in ``interface_set``.  This computes the curvature of the phase
-    boundary surface rather than the full volumetric mesh.
+    Same algorithm as :func:`hndA_i` but only considers neighbours that are
+    in ``interface_set``.  Used by multiphase surface tension to compute
+    the curvature of the phase boundary rather than the full mesh.
 
-    Works in both 2D and 3D by detecting the coordinate dimension from
-    the vertex data.  For 2D meshes, edge vectors and curvature vectors
-    are padded to 3D so that ``HNdC_ijk`` (which uses ``np.cross``)
-    operates correctly, then the result is returned in the native
-    dimension.
+    Works in both 2D and 3D by padding 2D vectors to 3D so that
+    ``np.cross`` (used inside ``HNdC_ijk``) operates correctly.
 
     Parameters
     ----------
     v : vertex object
-        Must have ``v.x_a``, ``v.nn``.
+        Must have ``v.x_a`` and ``v.nn`` populated.
     interface_set : set
         Set of vertex objects forming the interface sub-mesh.
     n_i : ignored
@@ -221,27 +227,24 @@ def hndA_i_interface(v, interface_set, n_i=None):
 
     Returns
     -------
-    HNdA_i : ndarray, shape (ndim,)
+    HNdA_i : ndarray, shape (3,)
         Integrated mean curvature normal vector.
     C_i : float
         Dual area of the vertex on the interface.
     """
-    ndim = len(v.x_a)
-    # HNdC_ijk uses np.cross which requires 3D vectors
     HNdA_i = np.zeros(3)
     C_i = 0.0
     vi = v
     for vj in v.nn:
         if vj not in interface_set:
             continue
-        # Compute the intersection set restricted to interface
         e_i_int_e_j = vi.nn.intersection(vj.nn).intersection(interface_set)
         if len(e_i_int_e_j) == 0:
             continue
         e_ij = _pad3(vj.x_a) - _pad3(vi.x_a)
         e_ij = -e_ij  # Sign convention (matches hndA_i)
 
-        if len(e_i_int_e_j) == 1:  # boundary edge on interface
+        if len(e_i_int_e_j) == 1:
             vk = list(e_i_int_e_j)[0]
             e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
             e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
@@ -251,9 +254,8 @@ def hndA_i_interface(v, interface_set, n_i=None):
             hnda_ijk, c_ijk = HNdC_ijk(e_ij, l_ij, l_jk, l_ik)
             HNdA_i += hnda_ijk
             C_i += c_ijk
-        else:  # 2 shared neighbors on interface
-            vk = list(e_i_int_e_j)[0]
-            vl = list(e_i_int_e_j)[1]
+        else:
+            vk, vl = list(e_i_int_e_j)[:2]
             e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
             e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
             l_ij = np.linalg.norm(e_ij)
@@ -273,15 +275,6 @@ def hndA_i_interface(v, interface_set, n_i=None):
             C_i += c_ijl
 
     return HNdA_i, C_i
-
-
-def _pad3(x_a):
-    """Pad a coordinate array to 3D (for np.cross compatibility)."""
-    if len(x_a) >= 3:
-        return x_a[:3]
-    out = np.zeros(3)
-    out[:len(x_a)] = x_a
-    return out
 
 
 def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
@@ -384,6 +377,182 @@ def int_hndA_i(v, n_i=None):
             C_i += c_ijk
 
     return HNdA_i, C_i
+
+
+try:
+    import torch as _torch
+except ImportError:
+    _torch = None
+
+
+def HNdC_ijk_batch(e_ij, l_ij, l_jk, l_ik):
+    """
+    Vectorized NumPy version of :func:`HNdC_ijk`.
+
+    Parameters
+    ----------
+    e_ij : ndarray, shape (N, 3)
+        Edge vectors.
+    l_ij, l_jk, l_ik : ndarray, shape (N,)
+        Edge lengths.
+
+    Returns
+    -------
+    hnda_ijk : ndarray, shape (N, 3)
+        Curvature vectors.
+    c_ijk : ndarray, shape (N,)
+        Dual areas.
+    """
+    lengths = np.stack((l_ij, l_jk, l_ik), axis=-1)
+    lengths_sorted = np.sort(lengths, axis=-1)
+    c = lengths_sorted[..., 0]
+    b = lengths_sorted[..., 1]
+    a = lengths_sorted[..., 2]
+
+    heron_term = (a + (b + c)) * (c - (a - b)) * (c + (a - b)) * (a + (b - c))
+    A = 0.25 * np.sqrt(heron_term)
+
+    w_ij = 0.125 * (l_jk ** 2 + l_ik ** 2 - l_ij ** 2) / A
+    hnda_ijk = w_ij[:, np.newaxis] * e_ij
+
+    h_ij = 0.5 * l_ij
+    b_ij = np.abs(w_ij) * l_ij
+    c_ijk = 0.5 * b_ij * h_ij
+    return hnda_ijk, c_ijk
+
+
+def HNdC_ijk_batch_torch(e_ij, l_ij, l_jk, l_ik, device=None):
+    """
+    Vectorized PyTorch version of :func:`HNdC_ijk`.
+
+    Accepts numpy arrays or torch tensors.  Returns torch tensors on the
+    given *device* (defaults to the device selected by the hyperct
+    ``TorchBackend``, or CPU).
+
+    Parameters
+    ----------
+    e_ij : array_like, shape (N, 3)
+        Edge vectors.
+    l_ij, l_jk, l_ik : array_like, shape (N,)
+        Edge lengths.
+    device : str or torch.device, optional
+        PyTorch device.  Defaults to ``'cpu'``.
+
+    Returns
+    -------
+    hnda_ijk : Tensor, shape (N, 3)
+        Curvature vectors.
+    c_ijk : Tensor, shape (N,)
+        Dual areas.
+    """
+    if _torch is None:
+        raise ImportError("PyTorch is required for HNdC_ijk_batch_torch.")
+
+    if device is None:
+        device = _torch.device('cpu')
+    else:
+        device = _torch.device(device)
+
+    dtype = _torch.float64
+
+    e_ij_t = _torch.as_tensor(e_ij, dtype=dtype, device=device)
+    l_ij_t = _torch.as_tensor(l_ij, dtype=dtype, device=device)
+    l_jk_t = _torch.as_tensor(l_jk, dtype=dtype, device=device)
+    l_ik_t = _torch.as_tensor(l_ik, dtype=dtype, device=device)
+
+    lengths = _torch.stack((l_ij_t, l_jk_t, l_ik_t), dim=-1)
+    lengths_sorted, _ = _torch.sort(lengths, dim=-1)
+
+    c = lengths_sorted[..., 0]
+    b = lengths_sorted[..., 1]
+    a = lengths_sorted[..., 2]
+
+    heron_term = (a + (b + c)) * (c - (a - b)) * (c + (a - b)) * (a + (b - c))
+    A = 0.25 * _torch.sqrt(heron_term)
+
+    w_ij = 0.125 * (l_jk_t ** 2 + l_ik_t ** 2 - l_ij_t ** 2) / A
+    hnda_ijk = w_ij.unsqueeze(-1) * e_ij_t
+
+    h_ij = 0.5 * l_ij_t
+    b_ij = _torch.abs(w_ij) * l_ij_t
+    c_ijk = 0.5 * b_ij * h_ij
+    return hnda_ijk, c_ijk
+
+
+def heron_mean_curvature_vectors(points, faces, backend='numpy', device=None):
+    """
+    Assemble per-vertex mean-curvature vectors for a triangle mesh using the
+    vectorized Heron kernel.
+
+    Parameters
+    ----------
+    points : array_like, shape (V, 3)
+        Vertex coordinates.
+    faces : array_like, shape (F, 3)
+        Triangle connectivity (integer indices into *points*).
+    backend : ``'numpy'``, ``'torch'``, or a hyperct ``BatchBackend`` object
+        Computation backend.  When a ``BatchBackend`` instance is passed its
+        ``batch_heron_curvature`` method is used directly.
+    device : str or torch.device, optional
+        PyTorch device (only used when *backend* is ``'torch'``).
+
+    Returns
+    -------
+    H_vecs : ndarray, shape (V, 3)
+        Per-vertex integrated mean-curvature normal vector (HNdA_i).
+    """
+    points = np.asarray(points, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+
+    n_verts = points.shape[0]
+    if faces.size == 0:
+        return np.zeros((n_verts, 3), dtype=np.float64)
+
+    i, j, k = faces[:, 0], faces[:, 1], faces[:, 2]
+
+    vi, vj, vk = points[i], points[j], points[k]
+
+    # All six directed edge contributions per triangle
+    e_ij = vj - vi;  e_ik = vk - vi
+    e_ji = vi - vj;  e_jk = vk - vj
+    e_ki = vi - vk;  e_kj = vj - vk
+
+    l_ij = np.linalg.norm(e_ij, axis=1)
+    l_ik = np.linalg.norm(e_ik, axis=1)
+    l_jk = np.linalg.norm(e_jk, axis=1)
+
+    # Resolve backend: string shorthand or BatchBackend object
+    if hasattr(backend, 'batch_heron_curvature'):
+        kernel = backend.batch_heron_curvature
+        kwargs = {}
+        _to_np = np.asarray
+    elif backend == 'torch':
+        kernel = HNdC_ijk_batch_torch
+        kwargs = {'device': device}
+        def _to_np(t):
+            return t.detach().cpu().numpy()
+    else:
+        kernel = HNdC_ijk_batch
+        kwargs = {}
+        def _to_np(t):
+            return t
+
+    # Six directed half-edge curvature contributions
+    h_ij, _ = kernel(e_ij, l_ij, l_jk, l_ik, **kwargs)
+    h_ik, _ = kernel(e_ik, l_ik, l_jk, l_ij, **kwargs)
+    h_ji, _ = kernel(e_ji, l_ij, l_ik, l_jk, **kwargs)
+    h_jk, _ = kernel(e_jk, l_jk, l_ik, l_ij, **kwargs)
+    h_ki, _ = kernel(e_ki, l_ik, l_ij, l_jk, **kwargs)
+    h_kj, _ = kernel(e_kj, l_jk, l_ij, l_ik, **kwargs)
+
+    H_vecs = np.zeros((n_verts, 3), dtype=np.float64)
+    np.add.at(H_vecs, i, _to_np(h_ij))
+    np.add.at(H_vecs, i, _to_np(h_ik))
+    np.add.at(H_vecs, j, _to_np(h_ji))
+    np.add.at(H_vecs, j, _to_np(h_jk))
+    np.add.at(H_vecs, k, _to_np(h_ki))
+    np.add.at(H_vecs, k, _to_np(h_kj))
+    return H_vecs
 
 
 """

@@ -38,9 +38,10 @@ class TestStaticDroplet(unittest.TestCase):
             )
 
     def test_phase_assignment(self):
-        """All vertices have valid phase IDs."""
+        """All vertices have valid phase IDs (including INTERFACE_PHASE)."""
+        from ddgclib.multiphase import INTERFACE_PHASE
         for v in self.HC.V:
-            self.assertIn(v.phase, {0, 1})
+            self.assertIn(v.phase, {0, 1, INTERFACE_PHASE})
 
     def test_interface_detected(self):
         """Interface vertices are found."""

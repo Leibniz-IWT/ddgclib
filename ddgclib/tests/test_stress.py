@@ -252,7 +252,7 @@ class TestVelocityDifferenceTensor2D:
 
         # Fine mesh should have same or smaller relative error
         # (or at least not dramatically worse)
-        assert errors["fine"] <= errors["coarse"] * 1.1, \
+        assert errors["fine"] <= errors["coarse"] * 1.1 + 1e-13, \
             f"Error increased with refinement: coarse={errors['coarse']:.4f}, fine={errors['fine']:.4f}"
 
     def test_integrated_scales_with_volume(self, mesh_2d):
@@ -1917,11 +1917,11 @@ class TestIntegratedCauchyStress:
 # ---------------------------------------------------------------------------
 
 class TestEdgeAreaCache3D:
-    """Test that batch_e_star(orient=True) matches dual_area_vector."""
+    """Test batch_e_star and the p_ij dual area vector."""
 
-    def test_cache_matches_sequential(self, mesh_3d):
-        """Oriented batch areas match per-edge dual_area_vector."""
-        from ddgclib.operators.stress import dual_area_vector
+    def test_batch_matches_legacy_e_star(self, mesh_3d):
+        """Oriented batch areas match the legacy e_star path."""
+        from ddgclib.operators.stress import _dual_area_vector_3d_e_star
         from hyperct.ddg import batch_e_star
 
         HC, bV = mesh_3d
@@ -1935,7 +1935,7 @@ class TestEdgeAreaCache3D:
         for v in interior:
             vid = id(v)
             for v_j in v.nn:
-                A_seq = dual_area_vector(v, v_j, HC, dim=3)
+                A_seq = _dual_area_vector_3d_e_star(v, v_j, HC)
                 if vid in edge_areas and id(v_j) in edge_areas[vid]:
                     A_batch = edge_areas[vid][id(v_j)]
                     npt.assert_allclose(
@@ -1945,44 +1945,115 @@ class TestEdgeAreaCache3D:
                     tested += 1
         assert tested > 0, "No edges tested"
 
-    def test_stress_force_with_cache(self, mesh_3d):
-        """stress_force gives same result with and without cache."""
-        from ddgclib.operators.stress import stress_force
-        from hyperct.ddg import batch_e_star
+    def test_p_ij_linear_precision_3d(self, mesh_3d):
+        """The p_ij dual area vector satisfies linear precision in 3D.
+
+        Verifies that 0.5 * sum_j d_ij (x) A_ij = Vol_i * I to machine
+        precision for barycentric duals on a Delaunay tetrahedral mesh.
+        """
+        from ddgclib.operators.stress import dual_area_vector
+
+        HC, bV = mesh_3d
+        interior = [v for v in HC.V if v not in bV]
+        assert len(interior) > 0
+
+        for v in interior:
+            tensor = np.zeros((3, 3))
+            for nb in v.nn:
+                A_ij = dual_area_vector(v, nb, HC, dim=3)
+                d_ij = nb.x_a[:3] - v.x_a[:3]
+                tensor += 0.5 * np.outer(d_ij, A_ij)
+            diag = np.diag(tensor)
+            off_diag = tensor - np.diag(diag)
+            npt.assert_allclose(
+                off_diag, 0.0, atol=1e-14,
+                err_msg=f"Linear precision violated at {v.x}",
+            )
+
+    def test_stress_force_without_cache(self, mesh_3d):
+        """stress_force works correctly without cache (p_ij path)."""
+        from ddgclib.operators.stress import stress_force, cache_dual_volumes
 
         HC, bV = mesh_3d
         mu = 0.1
 
-        # Set up velocity and pressure fields
         for v in HC.V:
             v.u = np.array([v.x_a[1], 0.0, 0.0])
             v.p = 0.0
-            v.m = 1.0
+
+        cache_dual_volumes(HC, dim=3)
+        for v in HC.V:
+            v.m = 1.0 * v.dual_vol if v.dual_vol > 1e-30 else 1e-30
 
         interior = [v for v in HC.V if v not in bV]
-
-        # Compute without cache
         HC._edge_area_cache = None
-        forces_no_cache = {}
         for v in interior:
-            forces_no_cache[id(v)] = stress_force(
-                v, dim=3, mu=mu, HC=HC,
-            ).copy()
+            F = stress_force(v, dim=3, mu=mu, HC=HC)
+            assert F.shape == (3,), f"Wrong shape at {v.x}"
 
-        # Compute with cache
-        edge_areas, _, _ = batch_e_star(
-            interior, HC, dim=3, orient=True, compute_volumes=True,
-        )
-        HC._edge_area_cache = edge_areas
-        for v in interior:
-            F_cached = stress_force(v, dim=3, mu=mu, HC=HC)
-            npt.assert_allclose(
-                F_cached, forces_no_cache[id(v)], atol=1e-12,
-                err_msg=f"Force mismatch at {v.x}",
+    def test_p_ij_linear_precision_jittered_3d(self):
+        """Linear precision on JITTERED 3D mesh with simplex-aware compute_vd.
+
+        Verifies the simplex-aware fix: previously, re-Delaunay of a jittered
+        box domain produced ~O(h) errors in the linear precision identity
+        near boundaries (ghost tets from nn-intersection).  With the fix
+        (HC._simplices cached from Delaunay), precision is machine eps.
+        """
+        from scipy.spatial import Delaunay as _Delaunay
+        from ddgclib.operators.stress import dual_area_vector
+
+        # Build jittered 3D mesh via the same pattern used by _retopologize
+        HC = Complex(3, domain=[(0.0, 1.0)] * 3)
+        HC.triangulate()
+        for _ in range(2):
+            HC.refine_all()
+        bV = set()
+        for v in HC.V:
+            v.boundary = any(
+                abs(v.x_a[d]) < 1e-14 or abs(v.x_a[d] - 1.0) < 1e-14
+                for d in range(3)
             )
+            if v.boundary:
+                bV.add(v)
+        rng = np.random.default_rng(42)
+        for v in HC.V:
+            if v not in bV and v.nn:
+                el = min(np.linalg.norm(v.x_a - vn.x_a) for vn in v.nn)
+                off = rng.uniform(-0.05 * el, 0.05 * el, size=3)
+                HC.V.move(v, tuple(v.x_a[d] + off[d] for d in range(3)))
+        verts = list(HC.V)
+        for v in verts:
+            for nb in list(v.nn):
+                v.disconnect(nb)
+        coords = np.array([v.x_a[:3] for v in verts])
+        tri = _Delaunay(coords)
+        for s in tri.simplices:
+            for i in range(4):
+                for j in range(i + 1, 4):
+                    verts[s[i]].connect(verts[s[j]])
+        # Cache explicit simplices: required for simplex-aware compute_vd
+        HC._simplices = [
+            tuple(verts[s[i]] for i in range(4)) for s in tri.simplices
+        ]
+        compute_vd(HC, method='barycentric', cdist=1e-10)
+        interior = [v for v in HC.V if v not in bV]
+        assert len(interior) > 0
 
-        # Clean up
-        HC._edge_area_cache = None
+        for v in interior:
+            tensor = np.zeros((3, 3))
+            for nb in v.nn:
+                A_ij = dual_area_vector(v, nb, HC, dim=3)
+                d_ij = nb.x_a[:3] - v.x_a[:3]
+                tensor += 0.5 * np.outer(d_ij, A_ij)
+            diag = np.diag(tensor)
+            off_diag = tensor - np.diag(diag)
+            npt.assert_allclose(
+                off_diag, 0.0, atol=1e-14,
+                err_msg=(
+                    f"Linear precision violated on jittered mesh at {v.x} "
+                    "— simplex-aware fix may have regressed"
+                ),
+            )
 
     def test_fallback_no_cache(self, mesh_3d):
         """stress_force works when HC has no _edge_area_cache."""

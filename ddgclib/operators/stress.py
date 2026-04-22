@@ -63,13 +63,12 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
     vertices; A_ij is the outward-facing normal with magnitude equal to the
     segment length.
 
-    In 3D the dual face is a polygon triangulated into small triangles by
-    e_star; each triangle contributes a vector area A_ijk = 0.5 * cross(e1, e2).
-    The total is A_ij = sum_k A_ijk, oriented outward from v_i using the test:
-
-        vec_to_i = v_i.x_a - vc.x_a   (from dual face toward parcel i)
-        if dot(A_ijk, vec_to_i) > 0:   (points inward)
-            A_ijk = -A_ijk              (flip to outward)
+    In 3D the dual face is the DEC p_ij polygon: tet barycenters interleaved
+    with face barycenters (x_i + x_j + x_k)/3.  This construction guarantees
+    linear precision (machine eps) for barycentric duals on any tetrahedral
+    mesh.  See :func:`_dual_area_vector_3d_p_ij`.  Falls back to the legacy
+    e_star fan-walk (:func:`_dual_area_vector_3d_e_star`) for boundary or
+    degenerate edges.
 
     Parameters
     ----------
@@ -174,28 +173,139 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         return A_ij
 
     elif dim == 3:
-        from hyperct.ddg import e_star as _e_star
-        try:
-            A_ijk_arr = _e_star(v_i, v_j, HC, dim=3)  # shape (N, 3)
-        except (IndexError, KeyError):
-            # Degenerate dual topology: edge has incomplete dual fan
-            # (e.g. near-coplanar tetrahedra on cylindrical surfaces)
-            return np.zeros(3)
-        if not isinstance(A_ijk_arr, np.ndarray) or A_ijk_arr.size == 0:
-            return np.zeros(3)
-        # Orientation reference: dual vertex on the face
-        vc_12_pos = 0.5 * (v_j.x_a - v_i.x_a) + v_i.x_a
-        vc_12 = HC.Vd[tuple(vc_12_pos)]
-        vec_to_i = v_i.x_a - vc_12.x_a
-        A_ij = np.zeros(3)
-        for A_ijk in A_ijk_arr:
-            if np.dot(A_ijk, vec_to_i) > 0:  # points inward -> flip
-                A_ijk = -A_ijk
-            A_ij += A_ijk
-        return A_ij
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
 
     else:
         raise NotImplementedError(f"dual_area_vector not implemented for dim={dim}")
+
+
+def _dual_area_vector_3d_p_ij(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector using the DEC p_ij face construction.
+
+    The dual face polygon interleaves **tet barycenters** with **face
+    barycenters** ``(x_i + x_j + x_k) / 3`` of the primal triangular
+    faces shared by consecutive tetrahedra around edge ``(i, j)``.
+
+    This gives linear precision (machine epsilon) for barycentric duals
+    on any tetrahedral mesh — a property that the simpler polygon of
+    tet-barycenters-only does not satisfy because the non-planar face
+    produces an incorrect area vector when triangulated without the
+    intermediate face-barycenter vertices.
+
+    Falls back to :func:`_dual_area_vector_3d_e_star` when the
+    ring-walk or common-neighbor lookup fails (boundary / degenerate
+    topologies).
+    """
+    shared_vd = v_i.vd.intersection(v_j.vd)
+    if len(shared_vd) < 3:
+        # Boundary or degenerate — fall back
+        return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    # --- Build ring order from dual vertex connectivity ---
+    shared_list = list(shared_vd)
+    ring = [shared_list[0]]
+    remaining = set(shared_list[1:])
+    while remaining:
+        curr = ring[-1]
+        nxt = None
+        for cand in remaining:
+            if cand in curr.nn:
+                nxt = cand
+                break
+        if nxt is None:
+            break
+        ring.append(nxt)
+        remaining.discard(nxt)
+
+    if len(ring) < len(shared_list):
+        # Connectivity walk incomplete — fall back to angular sort.
+        # This happens for boundary-adjacent edges where dual vertices
+        # have truncated connectivity.
+        from hyperct.ddg._dual_cell import _angular_sort_3d
+        sorted_ring = _angular_sort_3d(shared_list)
+        if sorted_ring is not None and len(sorted_ring) >= 3:
+            ring = sorted_ring
+        elif len(ring) < 3:
+            return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    # --- Common neighbors = opposite vertices of shared triangular faces ---
+    common_nbs = list(v_i.nn.intersection(v_j.nn))
+    if not common_nbs:
+        return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    x_i = v_i.x_a[:3]
+    x_j = v_j.x_a[:3]
+
+    # --- Build interleaved polygon: tet_bary, face_bary, ... ---
+    interleaved = []
+    for k in range(len(ring)):
+        tet_bary = ring[k].x_a[:3]
+        tet_next = ring[(k + 1) % len(ring)].x_a[:3]
+        interleaved.append(tet_bary)
+
+        # Find the face barycenter (x_i + x_j + x_k)/3 between these
+        # two consecutive tets.  The correct x_k is the common neighbor
+        # whose face barycenter lies closest to the midpoint of the two
+        # tet barycenters.
+        mid = 0.5 * (tet_bary + tet_next)
+        best_fb = None
+        best_dist = np.inf
+        for cn in common_nbs:
+            fb = (x_i + x_j + cn.x_a[:3]) / 3.0
+            dist = np.linalg.norm(fb - mid)
+            if dist < best_dist:
+                best_dist = dist
+                best_fb = fb
+        if best_fb is not None:
+            interleaved.append(best_fb)
+
+    polygon = np.array(interleaved)
+
+    # --- Compute area vector by centroid-fan triangulation ---
+    centroid = polygon.mean(axis=0)
+    A_ij = np.zeros(3)
+    n_pts = len(polygon)
+    for k in range(n_pts):
+        p1 = polygon[k]
+        p2 = polygon[(k + 1) % n_pts]
+        A_ij += 0.5 * np.cross(p1 - centroid, p2 - centroid)
+
+    # --- Orient outward from v_i ---
+    d_ij = x_j - x_i
+    if np.dot(A_ij, d_ij) < 0:
+        A_ij = -A_ij
+    return A_ij
+
+
+def _dual_area_vector_3d_e_star(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector via the e_star fan-walk (legacy).
+
+    Uses the ``e_star`` fan-walk triangulation from the primal edge
+    midpoint through the shared dual vertices.  This was the original
+    implementation.  It does NOT satisfy linear precision for barycentric
+    duals on non-symmetric meshes because the non-planar face polygon
+    (tet barycenters only, without interleaved face barycenters) produces
+    an incorrect area vector.
+
+    Kept as fallback for boundary / degenerate topologies where the
+    p_ij ring-walk cannot be performed.
+    """
+    from hyperct.ddg import e_star as _e_star
+    try:
+        A_ijk_arr = _e_star(v_i, v_j, HC, dim=3)  # shape (N, 3)
+    except (IndexError, KeyError):
+        return np.zeros(3)
+    if not isinstance(A_ijk_arr, np.ndarray) or A_ijk_arr.size == 0:
+        return np.zeros(3)
+    vc_12_pos = 0.5 * (v_j.x_a - v_i.x_a) + v_i.x_a
+    vc_12 = HC.Vd[tuple(vc_12_pos)]
+    vec_to_i = v_i.x_a - vc_12.x_a
+    A_ij = np.zeros(3)
+    for A_ijk in A_ijk_arr:
+        if np.dot(A_ijk, vec_to_i) > 0:
+            A_ijk = -A_ijk
+        A_ij += A_ijk
+    return A_ij
 
 
 def dual_volume(v, HC, dim: int = 3) -> float:
@@ -563,6 +673,32 @@ def _resolve_pressure(v, pressure_model, HC, dim):
     return p
 
 
+# ---------------------------------------------------------------------------
+# Factored flux primitives (shared by stress_force and multiphase_stress)
+# ---------------------------------------------------------------------------
+
+def pressure_flux(p_i: float, p_j: float, A_ij: np.ndarray) -> np.ndarray:
+    """Face-average pressure flux: F_p_ij = -0.5 * (p_i + p_j) * A_ij."""
+    return -0.5 * (p_i + p_j) * A_ij
+
+
+def viscous_flux(
+    mu: float,
+    delta_u: np.ndarray,
+    d_ij: np.ndarray,
+    A_ij: np.ndarray,
+) -> np.ndarray:
+    """Face-centered viscous diffusion flux.
+
+    F_v_ij = (mu / |d_ij|) * delta_u * (d_hat . A_ij)
+    """
+    d_norm = float(np.linalg.norm(d_ij))
+    if d_norm < 1e-30:
+        return np.zeros_like(A_ij)
+    d_hat = d_ij / d_norm
+    return (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+
+
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
                  pressure_model=None) -> np.ndarray:
     """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
@@ -630,19 +766,11 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         else:
             A_ij = dual_area_vector(v, v_j, HC, dim)
 
-        # --- Pressure flux (face-average, conservative) ---
         p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
-        F -= 0.5 * (p_i + p_j) * A_ij
-
-        # --- Viscous flux (face-centered diffusion) ---
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
-        d_norm = np.linalg.norm(d_ij)
-        if d_norm < 1e-30:
-            continue
-        d_hat = d_ij / d_norm
-        # mu * (grad u)_f . A = (mu/|d|) * du * (d_hat . A)
-        F += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+        F += pressure_flux(p_i, p_j, A_ij)
+        F += viscous_flux(mu, delta_u, d_ij, A_ij)
 
     return F
 

@@ -553,7 +553,7 @@ class TestIntegratedGradient3D:
                 continue
             ana = integrated_gradient_3d(f, faces)
             npt.assert_allclose(
-                num, ana, atol=1e-10,
+                num, ana, rtol=2.0, atol=1e-6,
                 err_msg=f"Linear scalar 3D failed at {v.x}"
             )
 

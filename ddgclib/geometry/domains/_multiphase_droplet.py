@@ -12,8 +12,6 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.spatial import Delaunay
-
 from hyperct import Complex
 from hyperct.ddg import compute_vd
 
@@ -24,15 +22,45 @@ from ddgclib.geometry.domains._rectangles import rectangle
 from ddgclib.geometry.domains._boxes import box
 
 
-def _estimate_edge_length(HC, dim):
-    """Estimate typical edge length from a mesh."""
+def _estimate_edge_length(HC, dim, stat: str = "median"):
+    """Estimate a representative edge length across a mesh.
+
+    Parameters
+    ----------
+    stat : {'median', 'min'}
+        ``'median'`` (default) is appropriate for sizing interior
+        refinement; ``'min'`` is needed when a generated ring must not
+        land inside an interface arc — a median edge length on a
+        non-uniform radial distribution can exceed the smallest arc
+        spacing and produce ring vertices coincident with interface
+        vertices.
+    """
     lengths = []
     for v in HC.V:
         for nb in v.nn:
             lengths.append(np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim]))
         if len(lengths) > 50:
             break
-    return np.median(lengths) if lengths else 0.0
+    if not lengths:
+        return 0.0
+    if stat == "min":
+        return float(np.min(lengths))
+    return float(np.median(lengths))
+
+
+def _interface_min_edge(boundary_verts, dim):
+    """Minimum chord length between adjacent interface vertices."""
+    if len(boundary_verts) < 2:
+        return 0.0
+    pts = np.array([v.x_a[:dim] for v in boundary_verts])
+    # Sort by polar angle so that consecutive entries are neighbours
+    center = pts.mean(axis=0)
+    rel = pts - center
+    theta = np.arctan2(rel[:, 1], rel[:, 0]) if dim >= 2 else np.zeros(len(pts))
+    order = np.argsort(theta)
+    pts = pts[order]
+    diffs = np.diff(np.vstack([pts, pts[:1]]), axis=0)
+    return float(np.min(np.linalg.norm(diffs, axis=1)))
 
 
 def _build_combined_mesh(positions, phases, dim):
@@ -72,31 +100,47 @@ def _build_combined_mesh(positions, phases, dim):
         v = HC.V[tuple(pos)]
         v.phase = phases_clean[i]
 
-    # Delaunay triangulation
+    # Delaunay triangulation — connect edges and cache simplex list for
+    # the simplex-aware 3D dual construction.  The sharp droplet
+    # interface produces fixed-interface + denser-bulk geometry that
+    # generates boundary slivers (same pattern as domain walls), which
+    # the simplex-aware path handles correctly.  See
+    # docs/3d_simplex_aware_dual_fix.md.
+    from ddgclib.geometry import (
+        connect_and_cache_simplices, invalidate_simplex_cache,
+    )
     verts = list(HC.V)
     if len(verts) < dim + 1:
         raise ValueError(f"Need at least {dim + 1} vertices, got {len(verts)}")
 
     tri_coords = np.array([v.x_a[:dim] for v in verts])
-    tri = Delaunay(tri_coords)
-    for simplex in tri.simplices:
-        for i in range(len(simplex)):
-            for j in range(i + 1, len(simplex)):
-                verts[simplex[i]].connect(verts[simplex[j]])
+    connect_and_cache_simplices(HC, verts, dim, coords=tri_coords)
 
-    # Verify no isolated vertices remain
+    # Verify no isolated vertices remain; invalidate the cache if any
+    # vertex was removed (will be rebuilt on the next retopologization).
     isolated = [v for v in HC.V if len(v.nn) == 0]
-    for v in isolated:
-        HC.V.remove(v)
+    if isolated:
+        for v in isolated:
+            HC.V.remove(v)
+        invalidate_simplex_cache(HC)
 
     return HC
 
 
 def _setup_phases_and_duals(HC, R, center_arr, dim):
-    """Tag boundaries, compute duals, identify interface, cache volumes.
+    """Tag boundaries, compute duals, label simplices, extract interface.
 
-    Returns (bV_walls, interface).
+    Uses the primal-subcomplex model: top-simplices (triangles in 2D,
+    tets in 3D) are labelled phase 0 (outer) or phase 1 (droplet) by a
+    centroid-inside-circle/sphere test.  The interface subcomplex is
+    extracted and closure-validated.
+
+    Returns ``(bV_walls, interface_vertices, mps)`` where ``mps`` is a
+    :class:`MultiphaseSystem` with ``simplex_phase`` populated.
     """
+    from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
+    from ddgclib.eos import TaitMurnaghan
+
     # Identify domain boundary walls (outer box faces, not droplet interface)
     dV = HC.boundary()
     bV_walls = set()
@@ -116,22 +160,26 @@ def _setup_phases_and_duals(HC, R, center_arr, dim):
     from ddgclib.operators.stress import cache_dual_volumes
     cache_dual_volumes(HC, dim)
 
-    # Identify sharp interface: only droplet-phase (1) vertices
-    # that border the outer phase.  Outer-phase vertices near the
-    # interface are NOT interface — they are pure bulk gas.
-    interface = set()
-    for v in HC.V:
-        neighbor_phases = {nb.phase for nb in v.nn}
-        cross = neighbor_phases - {v.phase}
-        if v.phase == 1 and cross:
-            v.is_interface = True
-            v.interface_phases = frozenset(neighbor_phases | {v.phase})
-            interface.add(v)
-        else:
-            v.is_interface = False
-            v.interface_phases = frozenset({v.phase})
+    # Label top-simplices by centroid-inside test and extract the
+    # interface subcomplex (primal-subcomplex model).
+    R2 = R * R
 
-    return bV_walls, interface
+    def _phase_criterion(centroid):
+        d2 = float(np.dot(centroid[:dim] - center_arr, centroid[:dim] - center_arr))
+        return 1 if d2 < R2 else 0
+
+    mps = MultiphaseSystem(
+        phases=[
+            PhaseProperties(eos=TaitMurnaghan(rho0=1000), mu=0.1, rho0=1000,
+                            name="outer"),
+            PhaseProperties(eos=TaitMurnaghan(rho0=1000), mu=0.1, rho0=1000,
+                            name="droplet"),
+        ],
+    )
+    mps.assign_simplex_phases(HC, dim, criterion_fn=_phase_criterion)
+    interface = mps.identify_interface_from_subcomplex(HC, dim)
+
+    return bV_walls, interface, mps
 
 
 def droplet_in_box_2d(
@@ -233,7 +281,7 @@ def droplet_in_box_2d(
 
     # -- Step 5: Boundaries, duals, interface --
     center_arr = np.array([cx, cy])
-    bV_walls, interface = _setup_phases_and_duals(HC, R, center_arr, dim)
+    bV_walls, interface, mps = _setup_phases_and_duals(HC, R, center_arr, dim)
 
     groups = {'walls': bV_walls, 'interface': interface}
 
@@ -250,6 +298,9 @@ def droplet_in_box_2d(
             'volume_droplet': math.pi * R ** 2,
             'volume_outer': (2 * L) ** 2 - math.pi * R ** 2,
             'interface_vertices': interface,
+            'simplex_phase': mps.simplex_phase,
+            'interface_subcomplex': None,  # data lives on HC attributes
+            'mps': mps,
         },
     )
 
@@ -344,7 +395,7 @@ def droplet_in_box_3d(
     HC = _build_combined_mesh(positions, phases, dim)
 
     # -- Step 5: Boundaries, duals, interface --
-    bV_walls, interface = _setup_phases_and_duals(HC, R, center_3d, dim)
+    bV_walls, interface, mps = _setup_phases_and_duals(HC, R, center_3d, dim)
 
     groups = {'walls': bV_walls, 'interface': interface}
 
@@ -361,5 +412,8 @@ def droplet_in_box_3d(
             'volume_droplet': (4 / 3) * math.pi * R ** 3,
             'volume_outer': (2 * L) ** 3 - (4 / 3) * math.pi * R ** 3,
             'interface_vertices': interface,
+            'simplex_phase': mps.simplex_phase,
+            'interface_subcomplex': None,  # data lives on HC attributes
+            'mps': mps,
         },
     )

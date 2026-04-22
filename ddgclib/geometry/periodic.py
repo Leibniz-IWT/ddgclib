@@ -447,11 +447,13 @@ def retopologize_periodic(
             all_coords, len(real_verts), ghost_map, dim,
         )
 
-        # Connect real vertices per resolved simplices
-        for simplex in simplices:
-            for i in range(len(simplex)):
-                for j in range(i + 1, len(simplex)):
-                    real_verts[simplex[i]].connect(real_verts[simplex[j]])
+        # Connect real vertices per resolved simplices and cache the
+        # simplex list for the simplex-aware 3D dual path.
+        # See docs/3d_simplex_aware_dual_fix.md.
+        from ddgclib.geometry import connect_and_cache_simplices
+        connect_and_cache_simplices(
+            HC, real_verts, dim, simplices=simplices,
+        )
 
     # 7. Topological boundary detection
     dV = HC.boundary()

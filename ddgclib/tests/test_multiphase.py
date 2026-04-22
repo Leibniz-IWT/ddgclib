@@ -14,7 +14,7 @@ import numpy as np
 from hyperct import Complex
 from hyperct.ddg import compute_vd
 
-from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
+from ddgclib.multiphase import INTERFACE_PHASE, MultiphaseSystem, PhaseProperties
 from ddgclib.eos import TaitMurnaghan, IdealGas, MultiphaseEOS
 from ddgclib.initial_conditions import (
     ZeroVelocity, PhaseAssignment, MultiphaseMass, MultiphasePressure,
@@ -91,32 +91,35 @@ class TestInterfaceIdentification(unittest.TestCase):
         )
 
     def test_interface_detected(self):
-        """Interface vertices are found at the phase boundary."""
-        self.mps.assign_phases(self.HC, lambda x: 0 if x[0] < 0 else 1)
-        interface = self.mps.identify_interface(self.HC)
+        """Interface vertices form a closed polyline at the phase boundary."""
+        self.mps.assign_simplex_phases(
+            self.HC, 2, criterion_fn=lambda c: 0 if c[0] < 0 else 1,
+        )
+        interface = self.mps.identify_interface_from_subcomplex(self.HC, 2)
 
         self.assertTrue(len(interface) > 0)
-        # Interface vertices should be near x=0
         for v in interface:
             self.assertTrue(v.is_interface)
-            self.assertTrue(len(v.interface_phases) >= 2)
+            self.assertEqual(v.phase, INTERFACE_PHASE)
+            self.assertGreaterEqual(len(v.interface_phases), 2)
 
     def test_no_interface_single_phase(self):
-        """No interface when all vertices are the same phase."""
-        self.mps.assign_phases(self.HC, lambda x: 0)
-        interface = self.mps.identify_interface(self.HC)
+        """No interface when all top-simplices share one phase."""
+        self.mps.assign_simplex_phases(self.HC, 2, criterion_fn=lambda c: 0)
+        interface = self.mps.identify_interface_from_subcomplex(self.HC, 2)
         self.assertEqual(len(interface), 0)
 
     def test_bulk_not_interface(self):
-        """Bulk vertices far from boundary are not interface."""
-        self.mps.assign_phases(self.HC, lambda x: 0 if x[0] < 0 else 1)
-        self.mps.identify_interface(self.HC)
+        """Bulk vertices far from phase boundary have v.is_interface == False."""
+        self.mps.assign_simplex_phases(
+            self.HC, 2, criterion_fn=lambda c: 0 if c[0] < 0 else 1,
+        )
+        self.mps.identify_interface_from_subcomplex(self.HC, 2)
 
         for v in self.HC.V:
             if abs(v.x_a[0]) > 0.5:  # far from x=0
-                # May or may not be interface depending on mesh connectivity
-                # but definitely should have consistent flags
-                self.assertIsNotNone(getattr(v, 'is_interface', None))
+                self.assertFalse(v.is_interface)
+                self.assertIn(v.phase, (0, 1))
 
 
 class TestDualVolumeSplitting(unittest.TestCase):
@@ -133,7 +136,9 @@ class TestDualVolumeSplitting(unittest.TestCase):
                                 rho0=800),
             ],
         )
-        mps.assign_phases(HC, lambda x: 0 if x[0] < 0 else 1)
+        mps.assign_simplex_phases(
+            HC, 2, criterion_fn=lambda c: 0 if c[0] < 0 else 1,
+        )
         mps.refresh(HC, dim=2)
 
         for v in HC.V:
@@ -155,7 +160,9 @@ class TestDualVolumeSplitting(unittest.TestCase):
                                 rho0=800),
             ],
         )
-        mps.assign_phases(HC, lambda x: 0 if x[0] < 0 else 1)
+        mps.assign_simplex_phases(
+            HC, 2, criterion_fn=lambda c: 0 if c[0] < 0 else 1,
+        )
         mps.refresh(HC, dim=2)
 
         has_split = False
@@ -178,7 +185,9 @@ class TestDualVolumeSplitting(unittest.TestCase):
                                 rho0=500),
             ],
         )
-        mps.assign_phases(HC, lambda x: 0 if x[0] < 0 else 1)
+        mps.assign_simplex_phases(
+            HC, 2, criterion_fn=lambda c: 0 if c[0] < 0 else 1,
+        )
         mps.refresh(HC, dim=2)
 
         for v in HC.V:
