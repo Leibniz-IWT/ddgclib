@@ -20,6 +20,7 @@ import numpy as np
 
 def rayleigh_frequency(
     l: int, gamma: float, rho: float, R0: float, dim: int = 3,
+    rho_outer: float | None = None,
 ) -> float:
     """Rayleigh angular frequency for mode *l*.
 
@@ -30,21 +31,43 @@ def rayleigh_frequency(
     gamma : float
         Surface tension [N/m].
     rho : float
-        Droplet density [kg/m³].
+        Droplet (inner) density [kg/m³].
     R0 : float
         Equilibrium radius [m].
     dim : int
         2 or 3.
+    rho_outer : float or None
+        Outer-phase density.  When given, applies the Miller–Scriven
+        two-phase inertia correction; the single-phase Rayleigh formula
+        is recovered in the limit ``rho_outer → 0``.
 
     Returns
     -------
     float
         Angular frequency omega [rad/s].
+
+    References
+    ----------
+    Rayleigh (1879); Miller & Scriven, J. Fluid Mech. 32:417-435 (1968).
     """
     if dim == 3:
-        omega_sq = l * (l - 1) * (l + 2) * gamma / (rho * R0**3)
+        if rho_outer is None:
+            # Single-phase Rayleigh (drop in vacuum)
+            omega_sq = l * (l - 1) * (l + 2) * gamma / (rho * R0 ** 3)
+        else:
+            # Miller-Scriven two-phase: effective inertia
+            # [(l+1)*rho_in + l*rho_out]
+            inertia = (l + 1) * rho + l * rho_outer
+            omega_sq = l * (l - 1) * (l + 1) * (l + 2) * gamma \
+                / (inertia * R0 ** 3)
     elif dim == 2:
-        omega_sq = (l**3 - l) * gamma / (rho * R0**3)
+        if rho_outer is None:
+            omega_sq = (l ** 3 - l) * gamma / (rho * R0 ** 3)
+        else:
+            # 2D two-phase: symmetric inner/outer potential decay,
+            # effective inertia (rho + rho_outer)
+            omega_sq = (l ** 3 - l) * gamma \
+                / ((rho + rho_outer) * R0 ** 3)
     else:
         raise ValueError(f"dim must be 2 or 3, got {dim}")
     return np.sqrt(max(omega_sq, 0.0))
@@ -72,11 +95,28 @@ def lamb_damping_rate(
     -------
     float
         Damping rate beta [1/s].
+
+    Notes
+    -----
+    Both prefactors follow from Lamb's weak-viscosity energy-dissipation
+    method: an inviscid irrotational mode ``phi ~ r^l Y_l(theta)`` is
+    substituted into the viscous dissipation integral
+    ``D = 2 mu int e_ij e_ij dV``, and ``beta = <D>/(2 E_total)`` with
+    ``E_total = 2 <KE>`` for SHM.
+
+    - 3D: ``(l-1)(2l+1) mu/(rho R^2)`` — Lamb, *Hydrodynamics* 6th ed.
+      (1932) §355; Chandrasekhar (1961) §92; Prosperetti (1980).
+    - 2D: ``2 l (l-1) mu/(rho R^2)`` — derived in Aalilija, Gandin &
+      Hachem (2020), *Comput. Fluids* 197:104362, Eq. (34a), by the
+      same Lamb method applied to the 2D disk (cross-section of an
+      infinite cylinder, interior flow, inviscid exterior). The paper
+      notes that no prior analytical 2D formula had been published.
+      For ``l=2`` the coefficient is 4.
     """
     if dim == 3:
-        return (l - 1) * (2 * l + 1) * mu / (rho * R0**2)
+        return (l - 1) * (2 * l + 1) * mu / (rho * R0 ** 2)
     elif dim == 2:
-        return (2 * l**2 - 1) * mu / (rho * R0**2)
+        return 2 * l * (l - 1) * mu / (rho * R0 ** 2)
     else:
         raise ValueError(f"dim must be 2 or 3, got {dim}")
 
@@ -149,12 +189,13 @@ def max_radius_envelope(
     epsilon: float,
     omega: float,
     beta: float,
+    l: int = 2,
 ) -> float | np.ndarray:
     """Maximum interface radius over all angles at time t.
 
-    This is R(theta=0, t) since cos(l*0) = 1.
+    This is R(theta=0, t) since cos(l*0) = 1 for any ``l``.
     """
-    return radius_perturbation(t, 0.0, R0, epsilon, 2, omega, beta)
+    return radius_perturbation(t, 0.0, R0, epsilon, l, omega, beta)
 
 
 def pressure_jump_analytical(

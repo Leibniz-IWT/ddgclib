@@ -48,7 +48,7 @@ def main():
     print("3D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
 
-    omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim)
+    omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim, rho_outer=rho_o)
     beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
     omega_d = damped_frequency(omega, beta)
     regime = "underdamped" if omega_d > 0 else "overdamped"
@@ -116,6 +116,8 @@ def main():
     t_final = symplectic_euler(
         HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
         bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
+        remesh_mode=params['remesh_mode'],
+        remesh_kwargs=params['remesh_kwargs'],
     )
 
     diag_final = compute_diagnostics(HC, dim=dim)
@@ -126,7 +128,7 @@ def main():
 
     t_arr = np.array(t_arr)
     R_max_arr = np.array(R_max_arr)
-    R_max_analytical = max_radius_envelope(t_arr, R0, epsilon, omega, beta)
+    R_max_analytical = max_radius_envelope(t_arr, R0, epsilon, omega, beta, l=l)
 
     print(f"\nMass conservation: |dM/M0| = "
           f"{abs(mass_arr[-1] - mass_arr[0]) / mass_arr[0]:.4e}")

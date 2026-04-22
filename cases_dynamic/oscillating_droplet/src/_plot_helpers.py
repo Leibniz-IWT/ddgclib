@@ -122,6 +122,43 @@ def plot_radius_envelope(t_arr, R_max_sim, R_max_analytical=None, R0=None,
     return fig, ax
 
 
+def plot_apex_trajectory(
+    t_arr, r_apex_arr, theta_apex_arr, R0, epsilon, l, omega, beta,
+    ax=None, title: str = "",
+):
+    """Plot r_apex(t) with analytical Rayleigh-Lamb overlay evaluated
+    at the (time-varying) apex angle theta_apex(t).
+
+    Using the actual theta_apex each step (rather than theta=0) accounts
+    for tangential drift of the tracked interface vertex.
+    """
+    import matplotlib.pyplot as plt
+    from ._analytical import radius_perturbation
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    else:
+        fig = ax.get_figure()
+
+    t_arr = np.asarray(t_arr)
+    r_apex_arr = np.asarray(r_apex_arr)
+    theta_apex_arr = np.asarray(theta_apex_arr)
+
+    r_analytical = np.array([
+        float(radius_perturbation(t, theta, R0, epsilon, l, omega, beta))
+        for t, theta in zip(t_arr, theta_apex_arr)
+    ])
+
+    ax.plot(t_arr, r_apex_arr, 'b-', label=r'Numerical $r_{\mathrm{apex}}(t)$')
+    ax.plot(t_arr, r_analytical, 'r--', label='Rayleigh–Lamb (analytical)')
+    ax.axhline(R0, color='k', linestyle=':', alpha=0.5, label=f'$R_0={R0}$')
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Interface radius at apex [m]")
+    ax.set_title(title or r"Interface apex trajectory ($\theta\approx 0$)")
+    ax.legend()
+    return fig, ax
+
+
 def plot_energy_history(t_arr, KE_arr, ax=None, title: str = ""):
     """Kinetic energy vs time."""
     import matplotlib.pyplot as plt
@@ -139,23 +176,41 @@ def plot_energy_history(t_arr, KE_arr, ax=None, title: str = ""):
     return fig, ax
 
 
-def compute_diagnostics(HC, dim: int = 2):
+def compute_diagnostics(HC, dim: int = 2, theta_ref: float = 0.0):
     """Compute diagnostic quantities from current mesh state.
+
+    Parameters
+    ----------
+    HC : Complex
+    dim : int
+    theta_ref : float
+        Reference polar angle used to locate the "apex" tracer: the
+        interface vertex whose angle is closest to ``theta_ref`` is
+        returned as ``r_apex``. Re-searched every call because
+        retopology destroys per-vertex tag attributes.
 
     Returns
     -------
     dict with keys:
-        R_max : float — max distance from origin of interface vertices
-        R_min : float — min distance from origin of interface vertices
-        KE : float — total kinetic energy
-        total_mass : float — sum of all vertex masses
-        com : ndarray — center of mass position
+        R_max, R_min : extreme interface radii
+        KE : total kinetic energy
+        total_mass : sum of all vertex masses
+        com : centre of mass position
+        r_apex : interface radius at the vertex nearest theta_ref
+        theta_apex : actual angle of that vertex (drifts from theta_ref
+                     as tangential flow advects it)
+        n_interface : number of interface vertices
     """
     R_max = 0.0
     R_min = np.inf
     KE = 0.0
     total_mass = 0.0
     com = np.zeros(dim)
+
+    best_dtheta = np.inf
+    r_apex = 0.0
+    theta_apex = 0.0
+    n_interface = 0
 
     for v in HC.V:
         total_mass += v.m
@@ -164,9 +219,22 @@ def compute_diagnostics(HC, dim: int = 2):
         KE += 0.5 * v.m * np.dot(u, u)
 
         if getattr(v, 'is_interface', False):
-            r = np.linalg.norm(v.x_a[:dim])
+            x = v.x_a[:dim]
+            r = float(np.linalg.norm(x))
             R_max = max(R_max, r)
             R_min = min(R_min, r)
+            n_interface += 1
+            if dim == 2:
+                theta = float(np.arctan2(x[1], x[0]))
+            else:
+                # 3D: polar angle from +x (apex of the +x axis)
+                theta = float(np.arctan2(np.sqrt(x[1]**2 + x[2]**2), x[0]))
+            # Circular distance to theta_ref
+            dtheta = abs((theta - theta_ref + np.pi) % (2 * np.pi) - np.pi)
+            if dtheta < best_dtheta:
+                best_dtheta = dtheta
+                r_apex = r
+                theta_apex = theta
 
     if total_mass > 0:
         com /= total_mass
@@ -177,6 +245,9 @@ def compute_diagnostics(HC, dim: int = 2):
         'KE': KE,
         'total_mass': total_mass,
         'com': com,
+        'r_apex': r_apex,
+        'theta_apex': theta_apex,
+        'n_interface': n_interface,
     }
 
 

@@ -15,7 +15,7 @@ from hyperct.ddg import compute_vd
 
 from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
 from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
-from ddgclib.initial_conditions import ZeroVelocity, PhaseAssignment
+from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import (
     BoundaryCondition, BoundaryConditionSet, NoSlipWallBC,
 )
@@ -46,7 +46,7 @@ class AtmosphericPressureBC(BoundaryCondition):
         verts = target_vertices if target_vertices is not None else mesh.V
         count = 0
         for v in verts:
-            if v.phase != self.gas_phase:
+            if v.phase != self.gas_phase and not getattr(v, 'is_interface', False):
                 continue
             vol = getattr(v, 'dual_vol', 0.0)
             if vol < 1e-30:
@@ -100,9 +100,8 @@ def setup_cube_to_droplet(
             v.dual_vol = 0.0
 
     # -- Phases --
-    PhaseAssignment(
-        lambda x: 1 if all(abs(x[i]) <= R for i in range(dim)) else 0
-    ).apply(HC, bV)
+    def _cube_criterion(centroid):
+        return 1 if all(abs(centroid[i]) <= R for i in range(dim)) else 0
 
     eos_outer = TaitMurnaghan(rho0=rho_o, P0=P0, K=K_o, n=1.0,
                                rho_clip=(0.1, 10.0))
@@ -117,11 +116,8 @@ def setup_cube_to_droplet(
         gamma={(0, 1): gamma},
     )
 
-    # -- Interface + per-phase fields --
-    mps.identify_interface(HC)
-    mps.init_phase_fields(HC)
-    mps.split_dual_volumes(HC, dim)
-    mps.compute_phase_masses(HC)
+    # -- Interface + per-phase fields (primal subcomplex model) --
+    mps.refresh(HC, dim, reset_mass=True, criterion_fn=_cube_criterion)
 
     # -- ICs: zero velocity, mass from phase density * dual volume --
     ZeroVelocity(dim=dim).apply(HC, bV)

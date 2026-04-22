@@ -137,10 +137,10 @@ def build_case():
         ],
         gamma={(0, 1): GAMMA},
     )
-    mps.identify_interface(HC)
-    mps.init_phase_fields(HC)
-    mps.split_dual_volumes(HC, dim)
-    mps.compute_phase_masses(HC)
+    mps.refresh(
+        HC, dim, reset_mass=True,
+        criterion_fn=lambda c: 1 if all(abs(c[i]) <= R for i in range(dim)) else 0,
+    )
 
     ZeroVelocity(dim=dim).apply(HC, bV)
     for v in HC.V:

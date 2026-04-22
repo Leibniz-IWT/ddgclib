@@ -33,7 +33,11 @@ from cases_dynamic.oscillating_droplet.src._setup import (
 )
 from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     plot_droplet_fluid, plot_droplet_phases,
-    plot_radius_envelope, plot_energy_history, compute_diagnostics,
+    plot_radius_envelope, plot_energy_history, plot_apex_trajectory,
+    compute_diagnostics,
+)
+from cases_dynamic.oscillating_droplet.src._metrics import (
+    oscillation_score, save_score,
 )
 from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
@@ -51,7 +55,7 @@ def main():
     print("2D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
 
-    omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim)
+    omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim, rho_outer=rho_o)
     beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
     omega_d = damped_frequency(omega, beta)
     regime = "underdamped" if omega_d > 0 else "overdamped"
@@ -97,45 +101,65 @@ def main():
         save_dir=_SNAPSHOTS,
     )
 
-    t_arr, R_max_arr, KE_arr, mass_arr = [0.0], [], [], []
-    diag0 = compute_diagnostics(HC, dim=dim)
-    R_max_arr.append(diag0['R_max'])
-    KE_arr.append(diag0['KE'])
-    mass_arr.append(diag0['total_mass'])
+    diag_list: list[dict] = []
+
+    def record(t):
+        d = compute_diagnostics(HC, dim=dim)
+        d['t'] = float(t)
+        diag_list.append(d)
+
+    record(0.0)
 
     def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
         history.callback(step, t, HC_cb, bV_cb, diagnostics)
         if step % record_every == 0:
-            diag = compute_diagnostics(HC_cb, dim=dim)
-            t_arr.append(t)
-            R_max_arr.append(diag['R_max'])
-            KE_arr.append(diag['KE'])
-            mass_arr.append(diag['total_mass'])
+            record(t)
             if step % (record_every * 10) == 0:
-                print(f"  t={t:.4e} | R_max={diag['R_max']:.6f} | "
-                      f"KE={diag['KE']:.4e} | mass={diag['total_mass']:.6f}")
+                d = diag_list[-1]
+                print(f"  t={t:.4e} | R_max={d['R_max']:.6f} | "
+                      f"r_apex={d['r_apex']:.6f} | "
+                      f"KE={d['KE']:.4e} | mass={d['total_mass']:.6f}")
 
     # -- Run --
     print("\nRunning simulation...")
+    # remesh_mode / remesh_kwargs must be passed through the integrator:
+    # _do_retopologize inspects retopo_fn's signature and, if it accepts
+    # `remesh_mode`, forwards the integrator's value — so pre-binding
+    # via functools.partial alone does not work.
     t_final = symplectic_euler(
         HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
         bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
+        remesh_mode=params['remesh_mode'],
+        remesh_kwargs=params['remesh_kwargs'],
     )
 
-    diag_final = compute_diagnostics(HC, dim=dim)
-    t_arr.append(t_final)
-    R_max_arr.append(diag_final['R_max'])
-    KE_arr.append(diag_final['KE'])
-    mass_arr.append(diag_final['total_mass'])
+    record(t_final)
 
-    t_arr = np.array(t_arr)
-    R_max_arr = np.array(R_max_arr)
-    R_max_analytical = max_radius_envelope(t_arr, R0, epsilon, omega, beta)
+    t_arr = np.array([d['t'] for d in diag_list])
+    R_max_arr = np.array([d['R_max'] for d in diag_list])
+    KE_arr = np.array([d['KE'] for d in diag_list])
+    mass_arr = np.array([d['total_mass'] for d in diag_list])
+    r_apex_arr = np.array([d['r_apex'] for d in diag_list])
+    theta_apex_arr = np.array([d['theta_apex'] for d in diag_list])
+    R_max_analytical = max_radius_envelope(t_arr, R0, epsilon, omega, beta, l=l)
 
     print(f"\nMass conservation: |dM/M0| = "
           f"{abs(mass_arr[-1] - mass_arr[0]) / mass_arr[0]:.4e}")
     print(f"Final R_max: {R_max_arr[-1]:.6f} (R0 = {R0})")
     print(f"StateHistory: {history.n_snapshots} snapshots")
+
+    # -- Score --
+    score = oscillation_score(
+        diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
+    )
+    score_path = os.path.join(_RESULTS, 'score.json')
+    save_score(score_path, score)
+    print(f"\nOscillation score saved to {score_path}")
+    print(f"  summary                  = {score['summary']:.4e}")
+    print(f"  l2_error_normalized      = {score['l2_error_normalized']:.4e}")
+    print(f"  linf_error_normalized    = {score['linf_error_normalized']:.4e}")
+    print(f"  tail_growth              = {score['tail_growth']:.4e}")
+    print(f"  mass_drift               = {score['mass_drift']:.4e}")
 
     # -- Static plots --
     try:
@@ -155,8 +179,16 @@ def main():
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(8, 5))
-        plot_energy_history(t_arr, np.array(KE_arr), ax=ax)
+        plot_energy_history(t_arr, KE_arr, ax=ax)
         fig.savefig(os.path.join(_FIG, 'oscillating_droplet_2D_energy.png'), dpi=150)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        plot_apex_trajectory(
+            t_arr, r_apex_arr, theta_apex_arr,
+            R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta, ax=ax,
+        )
+        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_2D_apex.png'), dpi=150)
         plt.close(fig)
         print("Static plots saved to fig/")
     except ImportError:

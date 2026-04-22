@@ -1,17 +1,24 @@
-# Interface Stress Computation — Current Design
+# Interface Stress Computation — Primal Subcomplex Model
 
 ## Vertex classification
+
+The sharp interface is an explicit **primal subcomplex**: a closed
+polyline of primal edges (2D) or a closed 2-manifold of primal
+triangles (3D).  Top-simplices (triangles in 2D, tets in 3D) carry
+per-simplex phase labels (`MultiphaseSystem.simplex_phase`); the
+interface subcomplex is derived deterministically from these labels.
 
 Every vertex `v` in `HC.V` has exactly one of three roles:
 
 | Role | `v.phase` | `v.is_interface` | Location |
 |------|-----------|-------------------|----------|
 | **Bulk droplet** | 1 | `False` | Interior of droplet (r << R) |
-| **Sharp interface** | 1 | `True` | On the circle/sphere at r = R |
-| **Bulk gas** | 0 | `False` | Exterior (r > R), including the outer ring at r ~ R + h |
+| **Sharp interface** | -1 (`INTERFACE_PHASE`) | `True` | On the interface subcomplex at r = R |
+| **Bulk gas** | 0 | `False` | Exterior (r > R) |
 
-The outer ring vertices are **pure gas phase**.  They exist only to
-provide quality Delaunay triangles near the interface.
+Interface vertices carry `v.phase = INTERFACE_PHASE = -1` — they have
+no bulk phase.  `v.interface_phases` gives the frozenset of phases of
+their incident top-simplices (typically `{0, 1}`).
 
 ## Per-phase vertex data model
 
@@ -110,13 +117,30 @@ remain fixed.
 
 ## Initialisation sequence (`_setup.py`)
 
-1. Build mesh (`droplet_in_box_2d/3d`)
-2. `ZeroVelocity`
-3. `mps.refresh(HC, dim)` — identify interface, init per-phase fields,
-   split dual volumes, compute per-phase mass, compute per-phase pressure
-4. Young-Laplace jump: `v.p_phase[1] += gamma * kappa` for all droplet vertices
-5. Apply perturbation (move interface vertices)
-6. `mps.refresh(HC, dim)` — re-split volumes after perturbation
+1. Build mesh (`droplet_in_box_2d/3d`).
+2. `ZeroVelocity`.
+3. `mps.refresh(HC, dim, reset_mass=True)` — identify interface, init
+   per-phase fields, split dual volumes, compute per-phase mass and
+   pressure.
+4. Apply ellipsoidal perturbation (move interface vertices).
+5. `mass_conserving_merge(HC, cdist=1e-10)` — collapse any
+   bit-identical duplicates produced by the perturbation.
+6. Young-Laplace equilibrium by mass pre-load: compute
+   `rho_d_eq = eos_drop.density(p_outer + gamma * kappa)` and set
+   `v.m_phase[1] = rho_d_eq * v.dual_vol_phase[1]` for every droplet
+   / interface vertex.  This is equivalent to baking the Laplace
+   jump into the droplet density; the EOS then produces
+   `p_phase[1] = p_outer + gamma * kappa` at equilibrium.  Surface
+   tension is still applied as a force every step (see
+   `multiphase_stress.py:134-136`), and the compressed-droplet
+   pressure balances it — NOT double-counting of the force.
+7. `mps.refresh(HC, dim, reset_mass=False)` — recompute per-phase
+   pressures from the adjusted densities.
+
+Note: a prior revision of this doc described step 6 as
+`v.p_phase[1] += gamma * kappa` (a direct additive pressure bump).
+That code path does not exist; the mass-based approach above is what
+is actually executed.
 
 ## File locations
 

@@ -10,8 +10,6 @@ from functools import partial
 
 import numpy as np
 
-from hyperct.ddg import compute_vd
-
 from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
 from ddgclib.multiphase import MultiphaseSystem, PhaseProperties, mass_conserving_merge
 from ddgclib.initial_conditions import ZeroVelocity
@@ -129,16 +127,21 @@ def setup_oscillating_droplet(
     bV = result.bV
 
     # -- Apply initial conditions --
-    # Phase assignment is done by the builder (droplet_in_box_2d/3d).
-    # Do NOT re-assign phases here — the builder correctly labels
-    # droplet boundary vertices as phase 1.
+    # Phase labelling is done by the domain builder via
+    # simplex-centroid test (primal subcomplex model).  Transfer the
+    # criterion function so that mps.refresh can re-label after
+    # retriangulations.
+    builder_mps = result.metadata['mps']
+    mps.simplex_phase = builder_mps.simplex_phase
+    mps._simplex_criterion_fn = builder_mps._simplex_criterion_fn
 
     # 1. Zero velocity
     ZeroVelocity(dim=dim).apply(HC, bV)
 
     # 2. Initialise all per-phase fields, split dual volumes, set
     #    per-phase mass and pressure using the new n-phase data model.
-    mps.refresh(HC, dim, reset_mass=True)
+    split_method = 'neighbour_count'
+    mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
 
     # 3. Apply ellipsoidal perturbation to interface vertices.
     #    Interface vertices (phase 1 on the circle) are moved to the
@@ -158,16 +161,17 @@ def setup_oscillating_droplet(
     p_outer = float(eos_outer.pressure(rho_o))
     rho_d_eq = float(eos_drop.density(p_outer + delta_p))
     for v in HC.V:
-        if v.phase == 1 or getattr(v, 'is_interface', False):
-            # Adjust droplet-phase mass to equilibrium density
-            vol_d = v.dual_vol_phase[1]
-            if vol_d > 1e-30:
-                v.m_phase[1] = rho_d_eq * vol_d
-                v.m = float(np.sum(v.m_phase))
+        # Adjust droplet-phase (phase 1) mass for vertices that have
+        # a non-zero phase-1 dual volume.  This covers bulk phase-1
+        # vertices AND interface vertices (v.phase == INTERFACE_PHASE).
+        vol_d = v.dual_vol_phase[1]
+        if vol_d > 1e-30:
+            v.m_phase[1] = rho_d_eq * vol_d
+            v.m = float(np.sum(v.m_phase))
 
     # 5. Final refresh: recompute pressures from the adjusted densities.
     #    reset_mass=False so the adjusted masses are preserved.
-    mps.refresh(HC, dim, reset_mass=False)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
 
     # -- Boundary conditions --
     bc_set = BoundaryConditionSet()
@@ -181,9 +185,18 @@ def setup_oscillating_droplet(
     )
 
     # -- Retopologize function --
-    retopo_fn = partial(
-        _retopologize_multiphase, mps=mps,
-    )
+    # Stays on global Delaunay for now.  hyperct.remesh.adaptive_remesh
+    # is interface-preserving but has upstream issues that blow up this
+    # case:
+    #   1. edge_split_2d inserts a midpoint vertex with mass ~= mean of
+    #      its endpoints, silently inflating total mass on every split.
+    #      (hyperct/remesh/_operations_2d.py:198)
+    #   2. The driver uses a single global h_local, so a mixed
+    #      fine-droplet / coarse-outer mesh triggers unbounded splits
+    #      in the outer region when L_max is sized to the droplet.
+    adaptive_kwargs = None
+    retopo_fn = partial(_retopologize_multiphase, mps=mps,
+                        split_method=split_method)
 
     # -- Collect params --
     params = {
@@ -193,6 +206,8 @@ def setup_oscillating_droplet(
         'L_domain': L_domain, 'P0': P0,
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
+        'remesh_mode': 'delaunay',
+        'remesh_kwargs': adaptive_kwargs,
     }
 
     return HC, bV, mps, bc_set, dudt_fn, retopo_fn, params

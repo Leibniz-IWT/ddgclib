@@ -57,9 +57,13 @@ t_end_3d = 5 * tau_damp_3d
 t_end_2d = 5 * tau_damp_2d
 
 # EOS (weakly compressible)
-# Sound speed: 10× the max expected velocity scale
+# Sound speed: 10× the max expected velocity scale.
+# NOTE: raising the floor to 50 m/s cleans up acoustic reflections but
+# tightens dt by ~10x — net effect on the oscillation score is weak
+# once the real KE-growth bugs (interface stress) dominate.  Revisit
+# this after Phase 6 (per-phase interface stress rewrite) lands.
 u_scale = epsilon * R0 * max(np.sqrt(abs(omega_sq_3d)), beta_3d)
-c_s = max(10.0 * u_scale, 1.0)  # floor at 1 m/s
+c_s = max(10.0 * u_scale, 1.0)   # floor at 1 m/s
 K_d = rho_d * c_s**2             # bulk modulus (droplet)
 K_o = rho_o * c_s**2             # bulk modulus (outer)
 

@@ -31,6 +31,8 @@ from cases_dynamic.Cube2droplet.src._setup import AtmosphericPressureBC
 from ddgclib.operators.multiphase_stress import multiphase_dudt_i
 from ddgclib.operators.stress import dual_volume, cache_dual_volumes
 from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.data import StateHistory
+from ddgclib.visualization import dynamic_plot_fluid
 
 # =====================================================================
 # Parameters (same as main case)
@@ -154,10 +156,10 @@ def main():
         ],
         gamma={(0, 1): GAMMA},
     )
-    mps.identify_interface(HC)
-    mps.init_phase_fields(HC)
-    mps.split_dual_volumes(HC, dim)
-    mps.compute_phase_masses(HC)
+    mps.refresh(
+        HC, dim, reset_mass=True,
+        criterion_fn=lambda c: 1 if all(abs(c[i]) <= R for i in range(dim)) else 0,
+    )
     ZeroVelocity(dim=dim).apply(HC, bV)
     # Mass already set by compute_phase_masses: m_i = sum_k rho_k * V_k
     for v in HC.V:
@@ -191,8 +193,17 @@ def main():
     diag0 = compute_diagnostics(HC, dim)
     print(f"Initial circularity: {diag0['circularity']:.4f}")
 
-    # -- Recording --
-    frames = [(0.0, record_frame(HC, dim))]
+    # -- Recording (use StateHistory for unified visualization) --
+    _SNAPSHOTS = os.path.join(os.path.dirname(__file__), 'results',
+                              'snapshots_no_retopo')
+    os.makedirs(_SNAPSHOTS, exist_ok=True)
+
+    history = StateHistory(
+        fields=['u', 'p', 'phase', 'is_interface'],
+        record_every=RECORD_EVERY,
+        save_dir=_SNAPSHOTS,
+    )
+
     t_arr, circ_arr = [0.0], [diag0['circularity']]
     R_max_arr = [diag0['R_max']]
     R_min_arr = [diag0['R_min']]
@@ -200,8 +211,7 @@ def main():
     po_arr = [diag0['P_outer']]
 
     def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
-        if step % RECORD_EVERY == 0:
-            frames.append((t, record_frame(HC_cb, dim)))
+        history.callback(step, t, HC_cb, bV_cb, diagnostics)
         if step % 200 == 0:
             diag = compute_diagnostics(HC_cb, dim)
             t_arr.append(t)
@@ -268,19 +278,18 @@ def main():
     print(f"Final dP:             {dp:+.2f} Pa (Laplace={GAMMA/R_EQ:.3f})")
     print(f"Interface vertices:   {n_if_final} "
           f"(same as t=0: {same_final}/{n_iface_init})")
-    print(f"Frames recorded:      {len(frames)}")
+    print(f"StateHistory:         {history.n_snapshots} snapshots")
 
     # -- Plotting --
+    fig_dir = os.path.join(os.path.dirname(__file__), 'fig')
+    os.makedirs(fig_dir, exist_ok=True)
+
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        from matplotlib.animation import FuncAnimation
 
-        fig_dir = os.path.join(os.path.dirname(__file__), 'fig')
-        os.makedirs(fig_dir, exist_ok=True)
-
-        # Circularity comparison
+        # Circularity
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(t_arr * 1000, circ_arr, 'b-', lw=1.5)
         ax.axhline(1.0, color='k', ls=':', alpha=0.4, label='Circle')
@@ -311,76 +320,30 @@ def main():
                                  'diagnostic_no_retopo_pressure.png'),
                     dpi=150, bbox_inches='tight')
         plt.close(fig)
+        print("Static plots saved to fig/")
+    except ImportError:
+        pass
 
-        # Animation
-        print("\nGenerating animation...")
-        all_p = np.concatenate([f['p'] for _, f in frames])
-        pvmin, pvmax = np.percentile(all_p, [2, 98])
-        if pvmin == pvmax:
-            pvmin, pvmax = pvmin - 1, pvmax + 1
+    # -- Animation (same unified visualisation as oscillating droplet) --
+    if history.n_snapshots > 1:
+        try:
+            anim = dynamic_plot_fluid(
+                history, HC, bV=bV,
+                save_path=os.path.join(fig_dir,
+                                       'diagnostic_no_retopo_fluid.mp4'),
+                fps=20, dpi=100,
+                xlim=(-ZOOM, ZOOM),
+                ylim=(-ZOOM, ZOOM),
+                phase_field='phase',
+                interface_field='is_interface',
+                reference_R=R_EQ,
+            )
+            print(f"Animation saved to fig/diagnostic_no_retopo_fluid.mp4")
+        except Exception as e:
+            print(f"Animation failed: {e}")
+            import traceback; traceback.print_exc()
 
-        fig_a, axes_a = plt.subplots(1, 2, figsize=(14, 6))
-        fig_a.subplots_adjust(top=0.88)
-        sup = fig_a.suptitle('t = 0.0000 s', fontsize=13)
-
-        def update(fi):
-            t, fd = frames[fi]
-            x, p, u = fd['x'], fd['p'], fd['u']
-            phase, is_if = fd['phase'], fd['is_interface']
-            for ax in axes_a:
-                ax.clear()
-            sup.set_text(f't = {t:.4f} s')
-
-            # Left: pressure
-            ax_p = axes_a[0]
-            ax_p.scatter(x[:, 0], x[:, 1], c=p, cmap='viridis',
-                         vmin=pvmin, vmax=pvmax, s=8, zorder=2)
-            if np.any(is_if):
-                ax_p.scatter(x[is_if, 0], x[is_if, 1],
-                             facecolors='none', edgecolors='red',
-                             s=30, lw=1.0, zorder=4,
-                             label='Interface')
-            ax_p.set_title('Pressure [Pa]')
-            ax_p.set_xlim(-ZOOM, ZOOM)
-            ax_p.set_ylim(-ZOOM, ZOOM)
-            ax_p.set_aspect('equal')
-            ax_p.legend(fontsize=7, loc='upper right')
-
-            # Right: phase + velocity
-            ax_v = axes_a[1]
-            c_ph = np.where(phase == 1, 'lightsalmon', 'lightblue')
-            ax_v.scatter(x[:, 0], x[:, 1], c=c_ph, s=8, zorder=1,
-                         alpha=0.6)
-            u_mag = np.linalg.norm(u, axis=1)
-            mx = u_mag.max()
-            if mx > 1e-15:
-                ax_v.quiver(x[:, 0], x[:, 1], u[:, 0], u[:, 1],
-                            u_mag, cmap='hot', scale=mx * 20,
-                            width=0.003, zorder=3)
-            if np.any(is_if):
-                ax_v.scatter(x[is_if, 0], x[is_if, 1],
-                             facecolors='none', edgecolors='red',
-                             s=30, lw=1.0, zorder=4,
-                             label='Interface')
-            ax_v.set_title('Phase + Velocity')
-            ax_v.set_xlim(-ZOOM, ZOOM)
-            ax_v.set_ylim(-ZOOM, ZOOM)
-            ax_v.set_aspect('equal')
-            ax_v.legend(fontsize=7, loc='upper right')
-            return []
-
-        anim = FuncAnimation(fig_a, update, frames=len(frames),
-                             interval=33, blit=False)
-        mp4 = os.path.join(fig_dir, 'diagnostic_no_retopo_fluid.mp4')
-        anim.save(mp4, writer='ffmpeg', fps=30, dpi=120)
-        plt.close(fig_a)
-        print(f"Animation: {mp4}")
-
-        print(f"\nAll output in {fig_dir}/")
-    except Exception as e:
-        print(f"Plotting error: {e}")
-        import traceback; traceback.print_exc()
-
+    print(f"\nAll output in {fig_dir}/")
     print("\nDone.")
 
 
