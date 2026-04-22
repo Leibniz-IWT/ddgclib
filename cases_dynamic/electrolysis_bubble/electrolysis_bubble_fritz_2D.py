@@ -199,28 +199,36 @@ def _sample_gas_interior(
     r_profile: np.ndarray,
     z_profile: np.ndarray,
     n_rows: int,
-    n_cols: int,
-    safety: float = 0.92,
+    safety: float = 0.88,
 ) -> np.ndarray:
     """Sample interior points inside the Fritz profile.
 
-    Uses a structured grid over ``[-r(z), +r(z)] x [z_foot, z_top]``,
-    scaled inward by ``safety`` so interior vertices never land on the
-    interface (which would collide with the interface vertices during
-    Delaunay triangulation).
+    Places a variable-density row of vertices at each z slice — the
+    number of columns scales with the local bubble width ``r(z)``
+    relative to the widest ``r_foot`` so the interior edge length is
+    roughly uniform.  Rows are shrunk radially by ``safety`` so
+    interior vertices never collide with interface vertices during
+    Delaunay triangulation.
     """
-    z_top = float(z_profile[0])   # apex (= 0 in raw profile coords)
+    z_top = float(z_profile[0])    # apex (= 0 in raw profile coords)
     z_foot = float(z_profile[-1])  # negative in raw profile coords
+    r_foot = float(r_profile[-1])
 
     z_grid = np.linspace(z_foot, z_top, n_rows + 2)[1:-1]  # strict interior
-    pts = [np.array([0.0, 0.5 * (z_top + z_foot)])]
-    # sort profile by z for 1-D interpolation (z is monotonically
-    # decreasing from apex=0 down to foot=-height, so reverse)
     z_sorted = z_profile[::-1]
     r_sorted = r_profile[::-1]
+
+    pts: list[np.ndarray] = []
     for z in z_grid:
         r_max = float(np.interp(z, z_sorted, r_sorted)) * safety
         if r_max <= 1e-12:
+            continue
+        # Keep the per-row vertex spacing similar to the widest row's
+        # spacing (≈ r_foot / n_rows) so triangles stay roughly
+        # equilateral throughout the bubble.
+        n_cols = max(1, int(round(n_rows * r_max / r_foot)))
+        if n_cols == 1:
+            pts.append(np.array([0.0, z]))
             continue
         for j in range(n_cols):
             x_frac = -1.0 + 2.0 * (j + 0.5) / n_cols
