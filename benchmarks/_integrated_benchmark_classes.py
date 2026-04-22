@@ -171,8 +171,6 @@ class IntegratedGradientBenchmark:
         then re-triangulates via ``scipy.spatial.Delaunay`` to
         maintain a valid Delaunay mesh (required for circumcentric duals).
         """
-        from scipy.spatial import Delaunay
-
         rng = np.random.default_rng(self.seed)
 
         # 1. Move interior vertices
@@ -213,12 +211,11 @@ class IntegratedGradientBenchmark:
             for i in range(len(sorted_verts) - 1):
                 sorted_verts[i].connect(sorted_verts[i + 1])
         else:
+            from ddgclib.geometry import connect_and_cache_simplices
             coords = np.array([v.x_a[:self.dim] for v in verts])
-            tri = Delaunay(coords)
-            for simplex in tri.simplices:
-                for i in range(len(simplex)):
-                    for j in range(i + 1, len(simplex)):
-                        verts[simplex[i]].connect(verts[simplex[j]])
+            connect_and_cache_simplices(
+                HC, verts, self.dim, coords=coords,
+            )
 
     def assign_field(self) -> None:
         """Set field values on all vertices from the analytical function."""
