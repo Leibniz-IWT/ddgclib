@@ -64,73 +64,35 @@ The tutorials progressively introduce the main functionality of the library and 
 
 The original code for the manuscripts are contained in the `v0.3.1-alpha` tag. Currently we are refactoring the library so that some code might be broken. The published figures can be generated using the code inside `./manuscript_figures`
 
-# Building the Documentation Locally
+# Documentation
 
-The documentation uses [Sphinx](https://www.sphinx-doc.org/) with the Read the Docs theme and autodoc for API reference generation.
+The documentation uses [Sphinx](https://www.sphinx-doc.org/) with the Read the Docs theme and includes user guides, API reference, and tutorials.
 
-## 1. Install documentation dependencies
+**Contents:**
+
+- **Getting Started** — installation, quick start
+- **User Guide** — simulation workflow, multiphase flows, DEM, mean curvature flow
+- **API Reference** — operators, multiphase, EOS, BCs, ICs, integrators, geometry, visualization, DEM
+
+## Build the docs
 
 ```bash
 pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints
-```
-
-## 2. Scaffold the docs (first time only)
-
-```bash
-mkdir -p docs
-sphinx-quickstart docs \
-  --sep \
-  --project "ddgclib" \
-  --author "Stefan Endres, Lutz Mädler, Ianto Cannon, Songyi Deng, Marcello Zani" \
-  --release "0.4.3" \
-  --language en \
-  --extensions sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.viewcode,sphinx.ext.mathjax,sphinx_autodoc_typehints
-```
-
-Then edit `docs/source/conf.py` to use the RTD theme:
-
-```python
-html_theme = "sphinx_rtd_theme"
-```
-
-And ensure the package is importable by adding to the top of `conf.py`:
-
-```python
-import os, sys
-sys.path.insert(0, os.path.abspath("../.."))
-```
-
-## 3. Build the HTML docs
-
-```bash
 cd docs
 make html
 ```
 
-The built documentation will be in `docs/build/html/`.
-
-## 4. View locally
-
-Open the docs in your browser:
+The built HTML is in `docs/build/html/`. Open with:
 
 ```bash
-# Linux
-xdg-open docs/build/html/index.html
-
-# macOS
-open docs/build/html/index.html
-
-# Or start a local server
-python -m http.server 8000 --directory docs/build/html
-# then visit http://localhost:8000
+xdg-open docs/build/html/index.html   # Linux
+open docs/build/html/index.html        # macOS
 ```
 
-## 5. Live-reload during editing (optional)
-
-For a live-reloading dev server that rebuilds on file changes:
+For live-reload during editing:
 
 ```bash
 pip install sphinx-autobuild
 sphinx-autobuild docs/source docs/build/html
-# then visit http://127.0.0.1:8000
+# visit http://127.0.0.1:8000
 ```
