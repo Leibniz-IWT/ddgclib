@@ -42,26 +42,23 @@ from ddgclib.operators.multiphase_stress import multiphase_dudt_i
 _WALL_TOL = 1e-10
 
 
-def _classify_walls(bV_all, dim, L_x, L_y, L_z=None):
-    """Split the outer-box boundary set into plate and periodic groups.
+def _classify_box_faces(HC, dim, L_x, L_y, L_z=None):
+    """Identify and classify outer-box face vertices by position.
 
-    Parameters
-    ----------
-    bV_all : set
-        All vertices on the outer box faces (from droplet_in_box_*).
-    dim : int
-    L_x, L_y, L_z : float
-        Half-extents of the box (domain is [-L_*, L_*]).
+    Scans all vertices in ``HC.V`` (not a pre-built set, because the
+    anisotropic rescale above mutates vertex hashes via
+    ``HC.V.move`` — any set populated before the rescale is broken).
 
     Returns
     -------
-    dict with keys ``top_wall``, ``bottom_wall``, ``periodic_faces``,
-    ``corners`` (vertices that lie on both a periodic face AND a plate;
-    these are returned in *both* the matching plate group and the
-    ``corners`` set so that plate BCs win).
+    dict with keys:
+    - ``top_wall`` / ``bottom_wall``: vertices exactly on the plates.
+    - ``periodic_faces``: vertices on the periodic side faces *and not*
+      on a plate (corners are counted as plates, so the plate BC wins).
+    - ``all_walls``: ``top_wall | bottom_wall`` (frozen wall set).
     """
-    top, bottom, periodic, corners = set(), set(), set(), set()
-    for v in bV_all:
+    top, bottom, periodic = set(), set(), set()
+    for v in HC.V:
         x = v.x_a
         on_top = abs(x[1] - L_y) < _WALL_TOL
         on_bottom = abs(x[1] - (-L_y)) < _WALL_TOL
@@ -72,18 +69,14 @@ def _classify_walls(bV_all, dim, L_x, L_y, L_z=None):
 
         if on_top:
             top.add(v)
-            if on_x_face or on_z_face:
-                corners.add(v)
         elif on_bottom:
             bottom.add(v)
-            if on_x_face or on_z_face:
-                corners.add(v)
         elif on_x_face or on_z_face:
-            # Pure periodic-face vertex (not on a plate).
             periodic.add(v)
 
     return {'top_wall': top, 'bottom_wall': bottom,
-            'periodic_faces': periodic, 'corners': corners}
+            'periodic_faces': periodic,
+            'all_walls': top | bottom}
 
 
 def setup_shearing_plate_droplet(
