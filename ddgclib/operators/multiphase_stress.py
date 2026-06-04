@@ -58,6 +58,7 @@ from __future__ import annotations
 import numpy as np
 
 from ddgclib.operators.stress import (
+    VolumeGradientPressureState,
     dual_area_vector,
     pressure_flux,
     viscous_flux,
@@ -69,6 +70,28 @@ from ddgclib.geometry._dual_split_2d import edge_phase_area_fractions
 # ---------------------------------------------------------------------------
 # Benchmark add-on operators: multiphase tet-volume pressure closure
 # ---------------------------------------------------------------------------
+
+class MultiphaseVolumeGradientPressureState(VolumeGradientPressureState):
+    """Phase-labelled tet-volume pressure state for dynamic integrators.
+
+    The equations are inherited from ``VolumeGradientPressureState``:
+    ``B=dV/dx`` is rebuilt after active retopology, phase densities provide
+    ``V_t^tar=m_t/rho_phase``, and phase bulk moduli provide the EOS stiffness.
+    This is intentionally separate from ``multiphase_stress_force``: the
+    pressure-reference benchmark needs the pressure force ``B^T p`` to be
+    adjoint to the tet-volume continuity operator ``B``.
+
+    References: Chorin (1968) pressure projection; Hirt, Amsden & Cook (1974)
+    ALE moving mesh; Toro (2009) Riemann fluxes; ddgclib HC Heron curvature.
+    """
+
+
+def multiphase_volume_gradient_pressure_acceleration(vertex, *, state, HC=None, dt=None, dim: int = 3, mu: float = 0.0):
+    """Multiphase ``dudt_fn`` wrapper for the tet-volume pressure state."""
+    if HC is None:
+        HC = getattr(state, "HC", None)
+    return state.acceleration(vertex, HC=HC, dt=dt, dim=dim, mu=mu)
+
 
 def multiphase_tet_volume_matrix(points: np.ndarray, tets: np.ndarray):
     """Tet volume-gradient operator for a multiphase simplicial mesh.

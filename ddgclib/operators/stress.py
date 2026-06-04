@@ -577,6 +577,511 @@ def active_retopology_tet_remap(
     return new_tets, reference_tet_volumes, tet_masses, stats
 
 
+def _tet_phase_retopology_remap(
+    points: np.ndarray,
+    current_tets: np.ndarray,
+    current_phases: np.ndarray,
+    *,
+    phase_densities: dict[int, float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, float]]:
+    """Rebuild a phase-labelled tet list and reset tet mass/target volumes.
+
+    Each new Delaunay tet is assigned the phase of the nearest old tet center.
+    This compact remap is used by the oscillating-droplet pressure-reference
+    benchmark to make the pressure operator insensitive to HC dual-volume jumps
+    caused by Delaunay flips.
+    """
+    pts = np.asarray(points, dtype=float)
+    old_tets = np.asarray(current_tets, dtype=int)
+    old_phases = np.asarray(current_phases, dtype=int)
+    old_centers = np.mean(pts[old_tets], axis=1)
+    new_tets = delaunay_retriangulate_points(pts, old_tets)
+    new_centers = np.mean(pts[new_tets], axis=1)
+    new_phases = np.zeros(new_tets.shape[0], dtype=int)
+    for tet_idx, center in enumerate(new_centers):
+        nearest = int(np.argmin(np.sum((old_centers - center) ** 2, axis=1)))
+        new_phases[tet_idx] = int(old_phases[nearest])
+    new_volumes = tet_cell_volumes(pts, new_tets)
+    rho = np.asarray([float(phase_densities[int(phase)]) for phase in new_phases], dtype=float)
+    tet_masses = rho * new_volumes
+    old_sorted = {tuple(sorted(int(v) for v in tet)) for tet in old_tets}
+    new_sorted = {tuple(sorted(int(v) for v in tet)) for tet in new_tets}
+    changed = len(old_sorted.symmetric_difference(new_sorted))
+    stats = {
+        "retriangulation_active": 1.0,
+        "display_tet_count": float(new_tets.shape[0]),
+        "display_internal_face_count": float(len(tet_face_pairs(new_tets))),
+        "display_changed_tets": float(changed),
+        "display_changed_fraction": float(changed) / max(float(len(old_sorted) + len(new_sorted)), 1.0),
+    }
+    return new_tets, new_phases, new_volumes, tet_masses, stats
+
+
+class VolumeGradientPressureState:
+    """Cached tet-volume pressure operator for dynamic integrators.
+
+    This state is the pressure-reference drop-in for the face-average pressure
+    flux in :func:`stress_force`.  It keeps the standard vertex update
+
+        du_i/dt = F_i / m_i,     dx_i/dt = u_i
+
+    but computes the pressure force from tet-volume gradients,
+
+        B[t, 3*i:3*i+3] = dV_t / dx_i,        F^p = B^T p.
+
+    The compressible branch solves the EOS/continuity correction
+
+        (I + dt^2 D_K B M^{-1} B^T) dp
+          = -D_K (V - V_tar + dt B u*),
+
+    while the incompressible branch solves the local projection enforcing
+    ``B u^{n+1} = -(V - V_tar)/dt``.  References: Chorin (1968) projection
+    method; Hirt, Amsden & Cook (1974) ALE formulation; Toro (2009) Riemann
+    fluxes.  The Heron surface force is the ddgclib/HyperCT HC curvature force.
+    """
+
+    vertex_index_attr = "_volume_gradient_index"
+
+    def __init__(
+        self,
+        *,
+        tets: np.ndarray,
+        surface_indices: np.ndarray,
+        surface_faces: np.ndarray,
+        gamma: float,
+        density: float,
+        bulk_modulus: float | np.ndarray,
+        closure: str,
+        reference_tet_volumes: np.ndarray,
+        tet_masses: np.ndarray,
+        base_tet_pressures: float | np.ndarray,
+        dt: float,
+        inertia_scale: float = 1.0,
+        inertial_mass_addition: np.ndarray | None = None,
+        damping_rate: float = 0.0,
+        fixed_indices: np.ndarray | None = None,
+        phase_ids: np.ndarray | None = None,
+        phase_densities: dict[int, float] | None = None,
+        phase_bulk_moduli: dict[int, float] | None = None,
+        phase_base_pressures: dict[int, float] | None = None,
+        active_retopology: bool = False,
+        mass_flux_coupling: float = 0.0,
+        momentum_flux_coupling: float = 0.0,
+        density_change_limit: float | None = None,
+        flux_cfl_limit: float = 0.25,
+        flux_scheme: str = "upwind",
+        face_flux_mode: str = "lagrangian",
+        flux_timing: str = "pre-pressure",
+        mass_floor_fraction: float = 0.35,
+        sound_speed: float | None = None,
+        incompressible_target_mode: str = "reference",
+    ) -> None:
+        if closure not in {"compressible", "incompressible"}:
+            raise ValueError("closure must be 'compressible' or 'incompressible'")
+        if flux_timing not in {"pre-pressure", "post-pressure"}:
+            raise ValueError("flux_timing must be 'pre-pressure' or 'post-pressure'")
+        if incompressible_target_mode not in {"reference", "mass"}:
+            raise ValueError("incompressible_target_mode must be 'reference' or 'mass'")
+        self.tets = np.asarray(tets, dtype=int).copy()
+        self.surface_indices = np.asarray(surface_indices, dtype=int).copy()
+        self.surface_faces = np.asarray(surface_faces, dtype=int).copy()
+        self.gamma = float(gamma)
+        self.density = float(density)
+        self.bulk_modulus = np.asarray(bulk_modulus, dtype=float)
+        self.closure = closure
+        self.reference_tet_volumes = np.asarray(reference_tet_volumes, dtype=float).copy()
+        self.tet_masses = np.asarray(tet_masses, dtype=float).copy()
+        self.reference_tet_masses = self.tet_masses.copy()
+        self.base_tet_pressures = np.asarray(base_tet_pressures, dtype=float)
+        self.dt = float(dt)
+        self.inertia_scale = float(inertia_scale)
+        self.inertial_mass_addition = (
+            None if inertial_mass_addition is None else np.asarray(inertial_mass_addition, dtype=float).copy()
+        )
+        self.damping_rate = float(damping_rate)
+        self.fixed_indices = np.asarray(fixed_indices if fixed_indices is not None else [], dtype=int)
+        self.phase_ids = None if phase_ids is None else np.asarray(phase_ids, dtype=int).copy()
+        self.phase_densities = dict(phase_densities or {})
+        self.phase_bulk_moduli = dict(phase_bulk_moduli or {})
+        self.phase_base_pressures = dict(phase_base_pressures or {})
+        self.active_retopology = bool(active_retopology)
+        self.mass_flux_coupling = float(mass_flux_coupling)
+        self.momentum_flux_coupling = float(momentum_flux_coupling)
+        self.density_change_limit = density_change_limit
+        self.flux_cfl_limit = float(flux_cfl_limit)
+        self.flux_scheme = flux_scheme
+        self.face_flux_mode = face_flux_mode
+        self.flux_timing = flux_timing
+        self.mass_floor_fraction = float(mass_floor_fraction)
+        self.sound_speed = float(sound_speed) if sound_speed is not None else float(np.sqrt(float(np.max(self.bulk_modulus)) / self.density))
+        self.incompressible_target_mode = incompressible_target_mode
+        self.reference_total_mass = float(np.sum(self.tet_masses))
+        self.reference_total_volume = float(np.sum(self.reference_tet_volumes))
+        self.reference_display_tet_set = {tuple(sorted(int(v) for v in tet)) for tet in self.tets}
+        self.reference_nodal_volumes: np.ndarray | None = None
+        self.face_pairs = tet_face_pairs(self.tets)
+        self.accelerations: np.ndarray | None = None
+        self.last_new_velocities: np.ndarray | None = None
+        self.last_inertial_masses: np.ndarray | None = None
+        self.last_tet_volumes: np.ndarray | None = None
+        self.last_pressure_values: np.ndarray | None = None
+        self.last_fheron_pressure = 0.0
+        self.last_flux_stats = self._empty_flux_stats()
+        self.last_retopology_stats = self._empty_retopology_stats()
+        self.dirty = True
+
+    def _empty_flux_stats(self) -> dict[str, float]:
+        return {
+            "mass_flux_l1_kg_s": 0.0,
+            "mass_flux_max_kg_s": 0.0,
+            "momentum_flux_l1_n": 0.0,
+            "volume_flux_l1_m3_s": 0.0,
+            "flux_limiter_scale": 1.0,
+            "mass_update_coupling": float(self.mass_flux_coupling),
+            "momentum_force_coupling": float(self.momentum_flux_coupling),
+            "density_change_limit": float(self.density_change_limit) if self.density_change_limit is not None else 0.0,
+            "flux_cfl_limit": float(self.flux_cfl_limit),
+            "face_flux_lagrangian": 1.0 if self.face_flux_mode == "lagrangian" else 0.0,
+        }
+
+    def _empty_retopology_stats(self) -> dict[str, float]:
+        return {
+            "retriangulation_active": 1.0 if self.active_retopology else 0.0,
+            "display_tet_count": float(self.tets.shape[0]),
+            "display_internal_face_count": float(len(self.face_pairs)),
+            "display_changed_tets": 0.0,
+            "display_changed_fraction": 0.0,
+        }
+
+    def mark_dirty(self) -> None:
+        self.dirty = True
+
+    def read_hc_state(self, HC) -> tuple[np.ndarray, np.ndarray]:
+        n_vertices = 1 + max(int(getattr(v, self.vertex_index_attr)) for v in HC.V)
+        points = np.zeros((n_vertices, 3), dtype=float)
+        velocities = np.zeros((n_vertices, 3), dtype=float)
+        seen = np.zeros(n_vertices, dtype=bool)
+        for vertex in HC.V:
+            index = int(getattr(vertex, self.vertex_index_attr))
+            points[index] = np.asarray(vertex.x_a[:3], dtype=float)
+            velocities[index] = np.asarray(getattr(vertex, "u", np.zeros(3))[:3], dtype=float)
+            seen[index] = True
+        if not np.all(seen):
+            missing = np.flatnonzero(~seen)
+            raise ValueError(f"HC is missing volume-gradient vertex indices: {missing[:8]}")
+        return points, velocities
+
+    def write_hc_state(self, HC, points: np.ndarray, velocities: np.ndarray, bV=None) -> None:
+        boundary = set() if bV is None else bV
+        for vertex in list(HC.V):
+            index = int(getattr(vertex, self.vertex_index_attr))
+            vertex.u[:3] = np.asarray(velocities[index], dtype=float)
+            if vertex in boundary:
+                boundary.remove(vertex)
+                HC.V.move(vertex, tuple(np.asarray(points[index], dtype=float)))
+                boundary.add(vertex)
+            else:
+                HC.V.move(vertex, tuple(np.asarray(points[index], dtype=float)))
+
+    def retopologize_callback(self, HC, bV, dim, **_kwargs) -> None:
+        """Dynamic-integrator retopology hook.
+
+        The HyperCT vertices remain the ODE state.  This hook rebuilds only the
+        tet list, tet masses, target volumes, and cached pressure topology so
+        the next ``dudt_fn`` call uses the new Delaunay pressure operator.
+        """
+        if not self.active_retopology:
+            self.mark_dirty()
+            return
+        points, _velocities = self.read_hc_state(HC)
+        if self.phase_ids is None:
+            new_tets, new_reference_volumes, new_masses, stats = active_retopology_tet_remap(
+                points,
+                self.tets,
+                target_total_mass=self.reference_total_mass,
+                target_total_volume=self.reference_total_volume,
+            )
+            self.tets = np.asarray(new_tets, dtype=int)
+            self.reference_tet_volumes = np.asarray(new_reference_volumes, dtype=float)
+            self.tet_masses = np.asarray(new_masses, dtype=float)
+        else:
+            new_tets, new_phases, new_reference_volumes, new_masses, stats = _tet_phase_retopology_remap(
+                points,
+                self.tets,
+                self.phase_ids,
+                phase_densities=self.phase_densities,
+            )
+            self.tets = np.asarray(new_tets, dtype=int)
+            self.phase_ids = np.asarray(new_phases, dtype=int)
+            self.reference_tet_volumes = np.asarray(new_reference_volumes, dtype=float)
+            self.tet_masses = np.asarray(new_masses, dtype=float)
+        self.reference_tet_masses = self.tet_masses.copy()
+        self.face_pairs = tet_face_pairs(self.tets)
+        self.last_retopology_stats = stats
+        self.mark_dirty()
+
+    def _fixed_mask(self, n_vertices: int) -> np.ndarray:
+        mask = np.zeros(int(n_vertices), dtype=bool)
+        valid = self.fixed_indices[(self.fixed_indices >= 0) & (self.fixed_indices < n_vertices)]
+        mask[valid] = True
+        return mask
+
+    def _nodal_masses(self, n_vertices: int) -> np.ndarray:
+        nodal_mass = tet_volume_lumped_nodal_values(n_vertices, self.tets, self.tet_masses)
+        if self.inertial_mass_addition is not None:
+            nodal_mass = nodal_mass + np.asarray(self.inertial_mass_addition, dtype=float)
+        return np.maximum(float(self.inertia_scale) * nodal_mass, 1.0e-18)
+
+    def _inverse_mass_dof(self, masses: np.ndarray, fixed_mask: np.ndarray) -> np.ndarray:
+        inv_mass = np.repeat(1.0 / np.maximum(np.asarray(masses, dtype=float), 1.0e-300), 3)
+        inv_mass[np.repeat(np.asarray(fixed_mask, dtype=bool), 3)] = 0.0
+        return inv_mass
+
+    def _bulk_by_tet(self) -> np.ndarray:
+        if self.phase_ids is not None and self.phase_bulk_moduli:
+            return np.asarray([float(self.phase_bulk_moduli[int(phase)]) for phase in self.phase_ids], dtype=float)
+        if self.bulk_modulus.shape == ():
+            return np.full(self.tets.shape[0], float(self.bulk_modulus), dtype=float)
+        if self.bulk_modulus.shape[0] != self.tets.shape[0]:
+            return np.full(self.tets.shape[0], float(np.mean(self.bulk_modulus)), dtype=float)
+        return np.asarray(self.bulk_modulus, dtype=float)
+
+    def _base_pressures(self, reference_pressure: float) -> np.ndarray:
+        if self.phase_ids is not None and self.phase_base_pressures:
+            return np.asarray([float(self.phase_base_pressures.get(int(phase), 0.0)) for phase in self.phase_ids], dtype=float)
+        if self.base_tet_pressures.shape == ():
+            return np.full(self.tets.shape[0], float(self.base_tet_pressures), dtype=float)
+        if self.base_tet_pressures.shape[0] == self.tets.shape[0]:
+            return np.asarray(self.base_tet_pressures, dtype=float)
+        return np.full(self.tets.shape[0], float(reference_pressure), dtype=float)
+
+    def _density_by_tet(self) -> np.ndarray:
+        if self.phase_ids is not None and self.phase_densities:
+            return np.asarray([float(self.phase_densities[int(phase)]) for phase in self.phase_ids], dtype=float)
+        return np.full(self.tets.shape[0], float(self.density), dtype=float)
+
+    def _project_volume_velocity(
+        self,
+        velocities: np.ndarray,
+        volume_matrix: np.ndarray,
+        inv_mass_dof: np.ndarray,
+        target_rates: np.ndarray,
+    ) -> np.ndarray:
+        velocity_vec = np.asarray(velocities, dtype=float).reshape(-1)
+        stiffness = (np.asarray(volume_matrix, dtype=float) * np.asarray(inv_mass_dof, dtype=float)[None, :]) @ np.asarray(volume_matrix, dtype=float).T
+        rhs = np.asarray(volume_matrix, dtype=float) @ velocity_vec - np.asarray(target_rates, dtype=float)
+        multipliers = solve_regularized(stiffness, rhs)
+        projected = velocity_vec - np.asarray(inv_mass_dof, dtype=float) * (np.asarray(volume_matrix, dtype=float).T @ multipliers)
+        return projected.reshape(np.asarray(velocities).shape)
+
+    def prepare(self, HC, dt: float | None = None) -> None:
+        if not self.dirty and self.accelerations is not None:
+            return
+        step_dt = float(self.dt if dt is None else dt)
+        points, velocities = self.read_hc_state(HC)
+        n_vertices = points.shape[0]
+        tet_volumes, volume_matrix = tet_volume_matrix(points, self.tets)
+        fixed_mask = self._fixed_mask(n_vertices)
+        inertial_masses = self._nodal_masses(n_vertices)
+        inv_mass_dof = self._inverse_mass_dof(inertial_masses, fixed_mask)
+
+        flux_forces = np.zeros_like(points)
+        if self.flux_timing == "pre-pressure":
+            self.tet_masses, flux_forces, self.last_flux_stats = tet_face_ale_fluxes(
+                points,
+                velocities,
+                self.tets,
+                self.face_pairs,
+                self.tet_masses,
+                self.reference_tet_masses,
+                tet_volumes,
+                step_dt,
+                reference_density=self.density,
+                sound_speed=self.sound_speed,
+                mass_floor_fraction=self.mass_floor_fraction,
+                mass_update_coupling=self.mass_flux_coupling,
+                momentum_force_coupling=self.momentum_flux_coupling,
+                density_change_limit=self.density_change_limit,
+                flux_cfl_limit=self.flux_cfl_limit,
+                flux_scheme=self.flux_scheme,
+                face_flux_mode=self.face_flux_mode,
+            )
+            inertial_masses = self._nodal_masses(n_vertices)
+            inv_mass_dof = self._inverse_mass_dof(inertial_masses, fixed_mask)
+        else:
+            self.last_flux_stats = self._empty_flux_stats()
+
+        surface_forces, _surface_area_vectors, fheron_pressure, _surface_volume = heron_forces_for_points(
+            points[self.surface_indices],
+            self.surface_faces,
+            self.gamma,
+        )
+        self.last_fheron_pressure = float(fheron_pressure)
+        forces = np.zeros_like(points)
+        forces[self.surface_indices] += surface_forces
+        damping_forces = -float(self.damping_rate) * inertial_masses[:, None] * velocities
+        # This is the key pressure-reference choice.  The continuity residual
+        # and pressure force both use tet volumes, so after retopology the
+        # solver reacts to physical tet-volume error, not to HC dual-volume
+        # jumps caused by connectivity flips.
+        if self.closure == "compressible" or self.incompressible_target_mode == "mass":
+            target_tet_volumes = self.tet_masses / np.maximum(self._density_by_tet(), 1.0e-300)
+        else:
+            target_tet_volumes = self.reference_tet_volumes
+        pressure_matrix = volume_gradient_pressure_matrix(volume_matrix)
+
+        if self.closure == "compressible":
+            # Weak-compressible EOS correction:
+            #   (I + dt^2 D_K B M^-1 B^T) dp
+            #     = -D_K (V - Vtar + dt B u*)
+            # The pressure force is B^T p, which is adjoint to the same B that
+            # measures volume/continuity.  This adjoint pairing is what makes
+            # the Rayleigh response stable after retopology.
+            base_pressures = self._base_pressures(fheron_pressure)
+            nonpressure = forces + (pressure_matrix @ base_pressures).reshape(points.shape) + damping_forces + flux_forces
+            u_star = velocities + step_dt * (inv_mass_dof * nonpressure.reshape(-1)).reshape(points.shape)
+            u_star[fixed_mask] = 0.0
+            bulk_by_tet = self._bulk_by_tet()
+            compressibility = bulk_by_tet / np.maximum(self.reference_tet_volumes, 1.0e-300)
+            stiffness = (volume_matrix * inv_mass_dof[None, :]) @ pressure_matrix
+            linear_error = tet_volumes - target_tet_volumes + step_dt * (volume_matrix @ u_star.reshape(-1))
+            system = np.eye(self.tets.shape[0]) + (compressibility[:, None] * step_dt * step_dt) * stiffness
+            rhs = -compressibility * linear_error
+            pressure_delta = solve_regularized(system, rhs)
+            new_velocities = (
+                u_star.reshape(-1) + step_dt * inv_mass_dof * (pressure_matrix @ pressure_delta)
+            ).reshape(points.shape)
+            new_velocities[fixed_mask] = 0.0
+            self.last_pressure_values = base_pressures + pressure_delta
+        else:
+            # Local incompressible projection:
+            #   B u^{n+1} = -(V - Vtar)/dt
+            # This is the tet-volume analogue of a Chorin/Temam projection on
+            # a moving Lagrangian mesh.
+            target_rates = -(tet_volumes - target_tet_volumes) / step_dt
+            velocity_vec = velocities.reshape(-1)
+            nonpressure_vec = (forces + damping_forces + flux_forces).reshape(-1)
+            stiffness = (volume_matrix * inv_mass_dof[None, :]) @ pressure_matrix
+            rhs = (target_rates - volume_matrix @ velocity_vec) / step_dt - volume_matrix @ (inv_mass_dof * nonpressure_vec)
+            pressure_values = solve_regularized(stiffness, rhs)
+            total_forces = forces + (pressure_matrix @ pressure_values).reshape(points.shape) + damping_forces + flux_forces
+            new_velocities = velocities + step_dt * (inv_mass_dof * total_forces.reshape(-1)).reshape(points.shape)
+            new_velocities = self._project_volume_velocity(new_velocities, volume_matrix, inv_mass_dof, target_rates)
+            new_velocities[fixed_mask] = 0.0
+            self.last_pressure_values = pressure_values
+
+        if self.flux_timing == "post-pressure":
+            self.tet_masses, post_flux_forces, self.last_flux_stats = tet_face_ale_fluxes(
+                points,
+                new_velocities,
+                self.tets,
+                self.face_pairs,
+                self.tet_masses,
+                self.reference_tet_masses,
+                tet_volumes,
+                step_dt,
+                reference_density=self.density,
+                sound_speed=self.sound_speed,
+                mass_floor_fraction=self.mass_floor_fraction,
+                mass_update_coupling=self.mass_flux_coupling,
+                momentum_force_coupling=self.momentum_flux_coupling,
+                density_change_limit=self.density_change_limit,
+                flux_cfl_limit=self.flux_cfl_limit,
+                flux_scheme=self.flux_scheme,
+                face_flux_mode=self.face_flux_mode,
+            )
+            if self.momentum_flux_coupling:
+                post_masses = self._nodal_masses(n_vertices)
+                post_inv = self._inverse_mass_dof(post_masses, fixed_mask)
+                new_velocities = new_velocities + step_dt * (post_inv * post_flux_forces.reshape(-1)).reshape(points.shape)
+                new_velocities[fixed_mask] = 0.0
+
+        self.last_new_velocities = new_velocities
+        self.last_inertial_masses = inertial_masses
+        self.last_tet_volumes = tet_volumes
+        self.reference_nodal_volumes = tet_volume_lumped_nodal_values(n_vertices, self.tets, self.reference_tet_volumes)
+        self.accelerations = (new_velocities - velocities) / step_dt
+        self.dirty = False
+
+    def acceleration(self, vertex, *, HC=None, dt: float | None = None, dim: int = 3, mu: float = 0.0) -> np.ndarray:
+        """Return the cached acceleration for one vertex.
+
+        ``mu`` is accepted for API compatibility with ``dudt_i``.  The benchmark
+        pressure-reference runs set viscosity to zero so the pressure closure can
+        be compared directly with Rayleigh's inviscid oscillation frequency.
+        """
+        if HC is None:
+            raise ValueError("HC must be passed through the state or dudt wrapper")
+        if mu not in (0, 0.0):
+            raise NotImplementedError("VolumeGradientPressureState benchmark runs require mu=0")
+        self.prepare(HC, dt=dt)
+        index = int(getattr(vertex, self.vertex_index_attr))
+        accel = np.asarray(self.accelerations[index], dtype=float)
+        return accel[:dim]
+
+    def remove_rigid_translation(self, HC, bV=None) -> None:
+        """Remove center-of-mass drift after a completed Lagrangian step."""
+        if self.last_inertial_masses is None:
+            return
+        points, velocities = self.read_hc_state(HC)
+        masses = np.maximum(np.asarray(self.last_inertial_masses, dtype=float), 1.0e-300)
+        mass_sum = max(float(np.sum(masses)), 1.0e-300)
+        center = np.sum(points * masses[:, None], axis=0) / mass_sum
+        mean_velocity = np.sum(velocities * masses[:, None], axis=0) / mass_sum
+        fixed_mask = self._fixed_mask(points.shape[0])
+        points[~fixed_mask] -= center[None, :]
+        velocities[~fixed_mask] -= mean_velocity[None, :]
+        velocities[fixed_mask] = 0.0
+        self.write_hc_state(HC, points, velocities, bV=bV)
+        self.mark_dirty()
+
+    def diagnostics(self, HC) -> dict[str, float]:
+        points, velocities = self.read_hc_state(HC)
+        tet_volumes, _matrix = tet_volume_matrix(points, self.tets)
+        target = self.tet_masses / np.maximum(self._density_by_tet(), 1.0e-300) if self.closure == "compressible" else self.reference_tet_volumes
+        nodal_mass = tet_volume_lumped_nodal_values(points.shape[0], self.tets, self.tet_masses)
+        nodal_volume = tet_volume_lumped_nodal_values(points.shape[0], self.tets, tet_volumes)
+        pressure = self.last_pressure_values if self.last_pressure_values is not None else np.zeros(self.tets.shape[0])
+        local_volume_rel = tet_volumes / np.maximum(target, 1.0e-300)
+        if self.phase_ids is not None and self.phase_densities:
+            tet_density_reference = self._density_by_tet()
+            nodal_density_reference = tet_volume_lumped_nodal_values(points.shape[0], self.tets, tet_density_reference * tet_volumes)
+            nodal_density_reference = nodal_density_reference / np.maximum(nodal_volume, 1.0e-300)
+        else:
+            nodal_density_reference = np.full(points.shape[0], float(self.density), dtype=float)
+        density_rel = nodal_mass / np.maximum(nodal_volume, 1.0e-300) / np.maximum(nodal_density_reference, 1.0e-300)
+        stats = {
+            "closure_pressure_pa": float(np.mean(pressure)) if np.asarray(pressure).size else 0.0,
+            "fheron_pressure_pa": float(self.last_fheron_pressure),
+            "vol_m3": float(np.sum(tet_volumes)),
+            "vol0_mesh_m3": float(np.sum(self.reference_tet_volumes)),
+            "vol_rel": float(np.sum(tet_volumes) / max(float(np.sum(self.reference_tet_volumes)), 1.0e-300)),
+            "local_volume_rel_max_abs": float(np.max(np.abs(local_volume_rel - 1.0))) if local_volume_rel.size else 0.0,
+            "nodal_density_rel_min": float(np.min(density_rel[nodal_volume > 0.0])) if np.any(nodal_volume > 0.0) else 1.0,
+            "nodal_density_rel_max": float(np.max(density_rel[nodal_volume > 0.0])) if np.any(nodal_volume > 0.0) else 1.0,
+            "total_mass_kg": float(np.sum(self.tet_masses)),
+            "max_speed_m_s": float(np.max(np.linalg.norm(velocities, axis=1))) if velocities.size else 0.0,
+            "solver_tet_count": float(self.tets.shape[0]),
+        }
+        stats.update(self.last_flux_stats)
+        stats.update(self.last_retopology_stats)
+        current_tet_set = {tuple(sorted(int(v) for v in tet)) for tet in self.tets}
+        union = self.reference_display_tet_set | current_tet_set
+        changed = self.reference_display_tet_set ^ current_tet_set
+        stats["display_tet_count"] = float(self.tets.shape[0])
+        stats["display_internal_face_count"] = float(len(tet_face_pairs(self.tets)))
+        stats["display_changed_tets"] = float(len(changed))
+        stats["display_changed_fraction"] = float(len(changed)) / max(float(len(union)), 1.0)
+        return stats
+
+
+def volume_gradient_pressure_acceleration(vertex, *, state: VolumeGradientPressureState, HC=None, dt=None, dim: int = 3, mu: float = 0.0) -> np.ndarray:
+    """Dynamic-integrator ``dudt_fn`` for tet-volume pressure closure."""
+    if HC is None:
+        HC = getattr(state, "HC", None)
+    return state.acceleration(vertex, HC=HC, dt=dt, dim=dim, mu=mu)
+
+
 
 # ---------------------------------------------------------------------------
 # Geometry: dual area vectors and dual volumes
@@ -707,7 +1212,14 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         return A_ij
 
     elif dim == 3:
-        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+        try:
+            return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+        except ModuleNotFoundError:
+            # Compatibility fallback for HyperCT versions that do not expose
+            # the newer p_ij helper.  The pressure-reference benchmark itself
+            # uses B^T p, but existing stress-force callers still need a 3D
+            # dual-face area vector.
+            return _dual_area_vector_3d_e_star(v_i, v_j, HC)
 
     else:
         raise NotImplementedError(f"dual_area_vector not implemented for dim={dim}")
@@ -755,7 +1267,10 @@ def _dual_area_vector_3d_p_ij(v_i, v_j, HC) -> np.ndarray:
         # Connectivity walk incomplete — fall back to angular sort.
         # This happens for boundary-adjacent edges where dual vertices
         # have truncated connectivity.
-        from hyperct.ddg._dual_cell import _angular_sort_3d
+        try:
+            from hyperct.ddg._dual_cell import _angular_sort_3d
+        except ModuleNotFoundError:
+            return _dual_area_vector_3d_e_star(v_i, v_j, HC)
         sorted_ring = _angular_sort_3d(shared_list)
         if sorted_ring is not None and len(sorted_ring) >= 3:
             ring = sorted_ring

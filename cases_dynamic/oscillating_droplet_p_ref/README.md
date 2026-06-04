@@ -2,7 +2,10 @@
 
 This folder contains the benchmark material used to compare EOS pressure,
 local incompressible projection, internal ALE flux, pairwise pressure trials,
-and Delaunay retopology for a Rayleigh-Lamb oscillating droplet.
+and Delaunay retopology for a Rayleigh-Lamb oscillating droplet. The main
+addition is a tet-volume pressure-reference operator that can replace the
+face-average pressure flux in an oscillating-droplet test while still using the
+standard dynamic integrator update `du_i/dt = F_i/m_i`, `dx_i/dt = u_i`.
 
 The presentation is included as:
 
@@ -22,7 +25,8 @@ The same geometry is used to test:
 - deliberately nonzero cell-average/Rusanov flux stress tests,
 - pairwise `A_ij` pressure trials,
 - active Delaunay retopology with a tet-volume pressure closure,
-- GitHub `ddgclib` two-phase triangulation visual comparison.
+- `ddgclib` two-phase liquid/gas triangulation with a multiphase EOS/projection
+  pressure-reference solve.
 
 The stable physical cases use a moving Lagrangian tet mesh. For a material
 face, the mesh velocity equals the material face velocity, so the internal mass
@@ -32,27 +36,43 @@ forces.
 ## Achieved Result
 
 The corrected cases reproduce the Rayleigh-Lamb `a2(t)` response for the
-selected mesh and time horizon. The ddgclib-backed repeats match the previous
-successful benchmark rows to numerical roundoff:
+selected mesh and time horizon. Cases #5/#6 are ddgclib-backed repeats of the
+successful one-phase benchmark. Cases #11/#12 keep a two-phase liquid/gas mesh
+and verify that active Delaunay retopology occurs while the liquid pressure
+operator remains stable:
 
 | case | closure | key setting | result |
 |---|---|---|---|
 | #5_ddgclib | compressible EOS | Lagrangian full flux | same `a2(t)` as old #5 |
 | #6_ddgclib | incompressible projection | Lagrangian full flux | same `a2(t)` as old #6 |
-| #11_ddgclib | compressible EOS | active retopology | same `a2(t)` as old #11, nonzero tet flips |
-| #12_ddgclib | incompressible projection | active retopology | same `a2(t)` as old #12, nonzero tet flips |
+| #11_ddgclib | compressible EOS | liquid + gas mesh, active retopology | Rayleigh match with nonzero tet flips |
+| #12_ddgclib | incompressible projection | liquid + gas mesh, active retopology | Rayleigh match with nonzero tet flips |
 
-For #11/#12 the solver tet list is actively rebuilt. The final comparison run
-showed hundreds of changed tets, confirming that retopology happened in the
-solver path, not only in the visualization.
+For #11/#12 the full liquid-plus-gas vertex cloud is actively rebuilt by
+Delaunay retopology. New tetrahedra are reclassified by their persistent
+Lagrangian vertex phase, and the liquid EOS/projection pressure operator is
+rebuilt from the liquid tet subset. The validation rows report both liquid and
+gas tetrahedra, plus more than one thousand changed combined tets, confirming
+that retopology happened in the solver path, not only in the visualization.
+
+Representative dynamic-integrator validation at `t = 0.016 s`, `AR = 1.05`,
+`R = 1 mm`, `gamma = 0.072 N/m`, and `rho = 1000 kg/m^3`:
+
+| case | final `a2` | Rayleigh `a2` | changed tets | note |
+|---|---:|---:|---:|---|
+| #5_ddgclib | 0.02810 | 0.02989 | 0 | one-phase compressible EOS |
+| #6_ddgclib | 0.02810 | 0.02989 | 0 | one-phase incompressible projection |
+| #11_ddgclib | 0.02830 | 0.02989 | 1084 | two-phase compressible, active retopology |
+| #12_ddgclib | 0.02830 | 0.02989 | 1060 | two-phase incompressible, active retopology |
 
 ## Problem Addressed
 
 The upstream oscillating-droplet setup can suffer from a retopology artifact:
 after a Delaunay flip, the HC local dual cell around a vertex can change even
 when the physical liquid has not locally compressed by that amount. If density
-and pressure are computed from that changing HC dual volume, this can create an
-artificial density/pressure jump.
+and pressure are computed from that changing HC dual volume, the code can read a
+topological connectivity change as a physical compression/expansion event. That
+creates an artificial density/pressure jump and changes the droplet frequency.
 
 The benchmark workaround is:
 
@@ -61,6 +81,13 @@ The benchmark workaround is:
 3. remap tet mass and target volume from the new tet volumes,
 4. lump tet quantities to vertices barycentrically only for nodal mass/volume
    diagnostics.
+
+This works for the benchmark because the pressure equation measures and
+corrects exactly the same quantity after every retopology step: tet volume.
+The operator `B = dV_t/dx_i`, the target tet volumes, and the nodal masses are
+all rebuilt from the same new tet list. The pressure force therefore pushes in
+the direction that reduces the measured tet-volume error instead of reacting to
+an unrelated HC dual-volume jump.
 
 This is a controlled benchmark closure, not a full conservative old-dual to
 new-dual overlap remap.
@@ -131,13 +158,16 @@ V_t^tar = scaled V_t
 ## ddgclib Operator Additions
 
 The benchmark adds new functions to `ddgclib/operators/stress.py` and
-`ddgclib/operators/multiphase_stress.py`. Existing functions are not changed;
-the new operators are added in a separate benchmark add-on block near the top
-of each file.
+`ddgclib/operators/multiphase_stress.py`. The old public pressure-flux path is
+kept available; the pressure-reference method is exposed as a separate operator
+path so existing cases do not have to opt in. A small 3D dual-area fallback is
+also added for HyperCT versions that do not expose the newer `p_ij` helper.
 
 Important one-phase functions:
 
 ```text
+VolumeGradientPressureState
+volume_gradient_pressure_acceleration
 heron_surface_force_from_faces
 heron_forces_for_points
 tet_volume_matrix
@@ -151,6 +181,8 @@ active_retopology_tet_remap
 Important multiphase wrappers:
 
 ```text
+MultiphaseVolumeGradientPressureState
+multiphase_volume_gradient_pressure_acceleration
 multiphase_tet_volume_matrix
 multiphase_tet_volume_lumped_masses
 multiphase_compressible_eos_pressure_correction
@@ -167,9 +199,11 @@ figures:
 sphere_fheron_eos_projection_benchmark.py
 sphere_fheron_flux_fv_benchmark.py
 sphere_fheron_flux_fv_ddgclib_benchmark.py
+sphere_fheron_dynamic_integrator_p_ref.py
 sphere_fheron_twophase_gasmesh_benchmark.py
 run_github_twophase_oscillating_preview.py
 render_github_twophase_triangulation_active_retopology.py
+render_dynamic_integrator_twophase.py
 render_twophase_gasmesh_active_retopology.py
 render_free_surface_air_mesh_preview.py
 plot_github_case_a2_vs_t.py
@@ -223,34 +257,57 @@ python3 scripts/sphere_fheron_flux_fv_ddgclib_benchmark.py \
   --out-dir out/case6_ddgclib
 ```
 
-Run #11/#12 ddgclib active-retopology source rows:
+Run #11/#12 ddgclib dynamic-integrator two-phase active-retopology rows:
 
 ```bash
-python3 scripts/sphere_fheron_flux_fv_ddgclib_benchmark.py \
-  --closure both \
+python3 scripts/sphere_fheron_dynamic_integrator_p_ref.py \
+  --case-id 11 \
   --subdivision 1 \
   --steps 81 \
   --substeps-per-sample 5 \
   --t-final 0.016 \
   --shape-mode-ar 1.05 \
+  --inertia-scale 1.08 \
+  --out-dir out/dynamic_integrator_p_ref_case11_multiphase
+```
+
+Use `--case-id 12 --out-dir out/dynamic_integrator_p_ref_case12_multiphase`
+for the incompressible projection repeat.
+
+Run the built-in dynamic-integrator pressure-reference validation:
+
+```bash
+python3 scripts/sphere_fheron_dynamic_integrator_p_ref.py \
+  --case-id 5 \
+  --subdivision 1 \
+  --steps 81 \
+  --substeps-per-sample 20 \
+  --t-final 0.016 \
+  --shape-mode-ar 1.05 \
   --damping-ratio 0 \
   --inertia-scale 1.08 \
-  --mass-model star-volume \
   --mass-flux-coupling 1 \
   --momentum-flux-coupling 1 \
   --face-flux-mode lagrangian \
   --density-change-limit 0 \
-  --retriangulation-mode active \
-  --out-dir out/case11_12_ddgclib_active_retopology
+  --out-dir out/dynamic_integrator_p_ref_case5
 ```
 
-Render the GitHub two-phase triangulation view for #11/#12:
+Use `--case-id 6`, `--case-id 11`, or `--case-id 12` for the other
+validation runs. Cases #11/#12 use the integrator `retopologize_fn` callback,
+so the pressure state rebuilds the tet list, `B=dV/dx`, masses, and target
+volumes before the next `dudt_fn` call.
+
+Render the dynamic-integrator two-phase GIFs:
 
 ```bash
-python3 scripts/render_github_twophase_triangulation_active_retopology.py \
-  --source-dir out/case11_12_ddgclib_active_retopology \
-  --out-dir out/case11_12_ddgclib_github_twophase_triangulation
+python3 scripts/render_dynamic_integrator_twophase.py \
+  --case-id 11 \
+  --source-dir out/dynamic_integrator_p_ref_case11_multiphase
 ```
+
+Use `--case-id 12 --source-dir out/dynamic_integrator_p_ref_case12_multiphase`
+for the incompressible projection GIF.
 
 ## Literature References
 
