@@ -10,8 +10,9 @@ The flux model here is deliberately compact for a benchmark GIF.  It is not a
 production CFD discretization.
 
 This copy keeps the old benchmark file untouched, but routes the force,
-volume-gradient pressure, ALE flux, and active-retopology remap through new
-non-breaking ddgclib operator functions added under ``ddgclib.operators``.
+volume-gradient pressure, ALE flux, and active-retopology remap through the
+benchmark-local ``pr33_operators`` wrapper.  The core ``ddgclib.operators``
+stress modules are intentionally left untouched by this benchmark.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ddgclib.operators import stress as ddg_stress
+import pr33_operators as pr33_ops
 
 import sphere_fheron_eos_projection_benchmark as base
 
@@ -46,11 +47,11 @@ ScalarFormatter = base.ScalarFormatter
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def install_ddgclib_operator_aliases() -> None:
-    """Route benchmark kernels through ddgclib operator add-ons.
+def install_pr33_operator_aliases() -> None:
+    """Install the single benchmark-local operator wrapper.
 
-    The old benchmark file stays untouched.  This runner uses ddgclib
-    operators for:
+    The old benchmark file stays untouched.  This wrapper binds the PR #33
+    helper module into the runner for:
     - HC/FHeron interface force, Heron (curvature force)
     - B=dV/dx tet-volume pressure/continuity operator, Chorin/Temam style
     - ALE material-face flux, Hirt-Amsden-Cook/Toro
@@ -58,17 +59,17 @@ def install_ddgclib_operator_aliases() -> None:
     """
     global tet_face_pairs, delaunay_tets_for_points, nodal_from_tets, compute_ale_fluxes
 
-    base.fheron_forces_for_points = ddg_stress.heron_forces_for_points
-    base.tet_cell_volumes = ddg_stress.tet_cell_volumes
-    base.tet_volume_matrix = ddg_stress.tet_volume_matrix
-    base.lump_tet_masses = ddg_stress.lump_tet_masses
-    base._local_volume_stiffness = ddg_stress.local_volume_stiffness
-    base._solve_regularized = ddg_stress.solve_regularized
+    base.fheron_forces_for_points = pr33_ops.heron_forces_for_points
+    base.tet_cell_volumes = pr33_ops.tet_cell_volumes
+    base.tet_volume_matrix = pr33_ops.tet_volume_matrix
+    base.lump_tet_masses = pr33_ops.lump_tet_masses
+    base._local_volume_stiffness = pr33_ops.local_volume_stiffness
+    base._solve_regularized = pr33_ops.solve_regularized
 
-    tet_face_pairs = ddg_stress.tet_face_pairs
-    delaunay_tets_for_points = ddg_stress.delaunay_retriangulate_points
-    nodal_from_tets = ddg_stress.tet_volume_lumped_nodal_values
-    compute_ale_fluxes = ddg_stress.tet_face_ale_fluxes
+    tet_face_pairs = pr33_ops.tet_face_pairs
+    delaunay_tets_for_points = pr33_ops.delaunay_retriangulate_points
+    nodal_from_tets = pr33_ops.tet_volume_lumped_nodal_values
+    compute_ale_fluxes = pr33_ops.tet_face_ale_fluxes
 
 
 def tet_face_pairs(tets: np.ndarray) -> list[tuple[np.ndarray, int, int]]:
@@ -663,7 +664,7 @@ def run_flux_dynamic(
         nonlocal tets, reference_tet_volumes, tet_masses, reference_tet_masses
         nonlocal reference_nodal_volumes, face_pairs
 
-        new_tets, new_reference_volumes, new_masses, _retopo_stats = ddg_stress.active_retopology_tet_remap(
+        new_tets, new_reference_volumes, new_masses, _retopo_stats = pr33_ops.active_retopology_tet_remap(
             points,
             tets,
             target_total_mass=reference_total_mass,
@@ -1434,7 +1435,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    install_ddgclib_operator_aliases()
+    install_pr33_operator_aliases()
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     omega, frequency, period = base.rayleigh_lamb_frequency(args.rayleigh_mode, args.gamma, args.rho, args.radius)

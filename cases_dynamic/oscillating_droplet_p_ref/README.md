@@ -155,19 +155,17 @@ m_t = rho V_t
 V_t^tar = scaled V_t
 ```
 
-## ddgclib Operator Additions
+## Benchmark Operator Wrapper
 
-The benchmark adds new functions to `ddgclib/operators/stress.py` and
-`ddgclib/operators/multiphase_stress.py`. The old public pressure-flux path is
-kept available; the pressure-reference method is exposed as a separate operator
-path so existing cases do not have to opt in. A small 3D dual-area fallback is
-also added for HyperCT versions that do not expose the newer `p_ij` helper.
+The benchmark-specific operators now live in `scripts/pr33_operators.py`.
+The core `ddgclib/operators/stress.py` and
+`ddgclib/operators/multiphase_stress.py` files are left on their existing API
+surface.  The benchmark runners use local wrapper imports to bind the PR #33
+helpers into the unchanged base benchmark scripts.
 
-Important one-phase functions:
+Important one-phase helpers:
 
 ```text
-VolumeGradientPressureState
-volume_gradient_pressure_acceleration
 heron_surface_force_from_faces
 heron_forces_for_points
 tet_volume_matrix
@@ -176,9 +174,11 @@ compressible_eos_pressure_correction
 incompressible_volume_projection
 tet_face_ale_fluxes
 active_retopology_tet_remap
+VolumeGradientPressureState
+volume_gradient_pressure_acceleration
 ```
 
-Important multiphase wrappers:
+Important multiphase helpers kept out of the core multiphase operator file:
 
 ```text
 MultiphaseVolumeGradientPressureState

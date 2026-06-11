@@ -2,7 +2,7 @@
 
 This runner validates the Stefan/Mädler pressure-reference implementation:
 
-* the state/cache object is ``ddgclib.operators.stress.VolumeGradientPressureState``;
+* the state/cache object is ``pr33_operators.VolumeGradientPressureState``;
 * the acceleration is the dynamic-integrator ``dudt_fn``
   ``volume_gradient_pressure_acceleration(v, state=...)``;
 * ``symplectic_euler`` advances the vertices with ``du/dt=Ftot/m`` and
@@ -32,8 +32,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.operators import multiphase_stress as ddg_multiphase
-from ddgclib.operators import stress as ddg_stress
+import pr33_operators as ddg_multiphase
+import pr33_operators as ddg_stress
 
 import sphere_fheron_eos_projection_benchmark as base
 import sphere_fheron_twophase_gasmesh_benchmark as twophase
