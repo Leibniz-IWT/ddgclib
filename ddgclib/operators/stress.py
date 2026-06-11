@@ -63,13 +63,12 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
     vertices; A_ij is the outward-facing normal with magnitude equal to the
     segment length.
 
-    In 3D the dual face is a polygon triangulated into small triangles by
-    e_star; each triangle contributes a vector area A_ijk = 0.5 * cross(e1, e2).
-    The total is A_ij = sum_k A_ijk, oriented outward from v_i using the test:
-
-        vec_to_i = v_i.x_a - vc.x_a   (from dual face toward parcel i)
-        if dot(A_ijk, vec_to_i) > 0:   (points inward)
-            A_ijk = -A_ijk              (flip to outward)
+    In 3D the dual face is the DEC p_ij polygon: tet barycenters interleaved
+    with face barycenters (x_i + x_j + x_k)/3.  This construction guarantees
+    linear precision (machine eps) for barycentric duals on any tetrahedral
+    mesh.  See :func:`_dual_area_vector_3d_p_ij`.  Falls back to the legacy
+    e_star fan-walk (:func:`_dual_area_vector_3d_e_star`) for boundary or
+    degenerate edges.
 
     Parameters
     ----------
@@ -96,6 +95,67 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         return np.array([np.sign(direction)])
 
     elif dim == 2:
+        # When periodic axes are set, always compute dual area from primal
+        # geometry using minimum-image coordinates.  compute_vd's dual
+        # vertex positions are wrong for any triangle that includes a
+        # periodic-face vertex with wrapped neighbors.
+        periodic_axes = getattr(HC, '_periodic_axes', None)
+        if periodic_axes:
+            periodic_bounds = HC._periodic_bounds
+            x_i = v_i.x_a[:2]
+
+            def _min_image(x_other):
+                result = x_other.copy()
+                for ax in periodic_axes:
+                    p = periodic_bounds[ax][1] - periodic_bounds[ax][0]
+                    delta = result[ax] - x_i[ax]
+                    result[ax] -= round(delta / p) * p
+                return result
+
+            x_j = _min_image(v_j.x_a[:2])
+            common = v_i.nn.intersection(v_j.nn)
+            if len(common) < 2:
+                # Boundary edge: use single triangle + edge midpoint
+                if len(common) < 1:
+                    return np.zeros(2)
+                v3 = list(common)[0]
+                x3 = _min_image(v3.x_a[:2])
+                bary = (x_i + x_j + x3) / 3.0
+                midpt = 0.5 * (x_i + x_j)
+                dual_edge = bary - midpt
+                A_ij = np.array([-dual_edge[1], dual_edge[0]])
+                vec_to_i = x_i - 0.5 * (bary + midpt)
+                if np.dot(A_ij, vec_to_i) > 0:
+                    A_ij = -A_ij
+                return A_ij
+            # Interior edge: pick two triangles (one on each side of edge).
+            # With ghost resolution, shared count can be >2. Use cross
+            # product sign to find one neighbor on each side.
+            edge_vec = x_j - x_i
+            left = None
+            right = None
+            for v3 in common:
+                x3 = _min_image(v3.x_a[:2])
+                cross = edge_vec[0] * (x3[1] - x_i[1]) - edge_vec[1] * (x3[0] - x_i[0])
+                if cross > 0 and left is None:
+                    left = x3
+                elif cross <= 0 and right is None:
+                    right = x3
+                if left is not None and right is not None:
+                    break
+            if left is None or right is None:
+                return np.zeros(2)
+            bary_l = (x_i + x_j + left) / 3.0
+            bary_r = (x_i + x_j + right) / 3.0
+            dual_edge = bary_l - bary_r
+            A_ij = np.array([-dual_edge[1], dual_edge[0]])
+            centroid = 0.5 * (bary_l + bary_r)
+            vec_to_i = x_i - centroid
+            if np.dot(A_ij, vec_to_i) > 0:
+                A_ij = -A_ij
+            return A_ij
+
+        # Standard (non-periodic) path
         vdnn = v_i.vd.intersection(v_j.vd)
         vd_list = list(vdnn)
         if len(vd_list) < 2:
@@ -113,23 +173,139 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         return A_ij
 
     elif dim == 3:
-        from hyperct.ddg import e_star as _e_star
-        A_ijk_arr = _e_star(v_i, v_j, HC, dim=3)  # shape (N, 3)
-        if not isinstance(A_ijk_arr, np.ndarray) or A_ijk_arr.size == 0:
-            return np.zeros(3)
-        # Orientation reference: dual vertex on the face
-        vc_12_pos = 0.5 * (v_j.x_a - v_i.x_a) + v_i.x_a
-        vc_12 = HC.Vd[tuple(vc_12_pos)]
-        vec_to_i = v_i.x_a - vc_12.x_a
-        A_ij = np.zeros(3)
-        for A_ijk in A_ijk_arr:
-            if np.dot(A_ijk, vec_to_i) > 0:  # points inward -> flip
-                A_ijk = -A_ijk
-            A_ij += A_ijk
-        return A_ij
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
 
     else:
         raise NotImplementedError(f"dual_area_vector not implemented for dim={dim}")
+
+
+def _dual_area_vector_3d_p_ij(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector using the DEC p_ij face construction.
+
+    The dual face polygon interleaves **tet barycenters** with **face
+    barycenters** ``(x_i + x_j + x_k) / 3`` of the primal triangular
+    faces shared by consecutive tetrahedra around edge ``(i, j)``.
+
+    This gives linear precision (machine epsilon) for barycentric duals
+    on any tetrahedral mesh — a property that the simpler polygon of
+    tet-barycenters-only does not satisfy because the non-planar face
+    produces an incorrect area vector when triangulated without the
+    intermediate face-barycenter vertices.
+
+    Falls back to :func:`_dual_area_vector_3d_e_star` when the
+    ring-walk or common-neighbor lookup fails (boundary / degenerate
+    topologies).
+    """
+    shared_vd = v_i.vd.intersection(v_j.vd)
+    if len(shared_vd) < 3:
+        # Boundary or degenerate — fall back
+        return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    # --- Build ring order from dual vertex connectivity ---
+    shared_list = list(shared_vd)
+    ring = [shared_list[0]]
+    remaining = set(shared_list[1:])
+    while remaining:
+        curr = ring[-1]
+        nxt = None
+        for cand in remaining:
+            if cand in curr.nn:
+                nxt = cand
+                break
+        if nxt is None:
+            break
+        ring.append(nxt)
+        remaining.discard(nxt)
+
+    if len(ring) < len(shared_list):
+        # Connectivity walk incomplete — fall back to angular sort.
+        # This happens for boundary-adjacent edges where dual vertices
+        # have truncated connectivity.
+        from hyperct.ddg._dual_cell import _angular_sort_3d
+        sorted_ring = _angular_sort_3d(shared_list)
+        if sorted_ring is not None and len(sorted_ring) >= 3:
+            ring = sorted_ring
+        elif len(ring) < 3:
+            return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    # --- Common neighbors = opposite vertices of shared triangular faces ---
+    common_nbs = list(v_i.nn.intersection(v_j.nn))
+    if not common_nbs:
+        return _dual_area_vector_3d_e_star(v_i, v_j, HC)
+
+    x_i = v_i.x_a[:3]
+    x_j = v_j.x_a[:3]
+
+    # --- Build interleaved polygon: tet_bary, face_bary, ... ---
+    interleaved = []
+    for k in range(len(ring)):
+        tet_bary = ring[k].x_a[:3]
+        tet_next = ring[(k + 1) % len(ring)].x_a[:3]
+        interleaved.append(tet_bary)
+
+        # Find the face barycenter (x_i + x_j + x_k)/3 between these
+        # two consecutive tets.  The correct x_k is the common neighbor
+        # whose face barycenter lies closest to the midpoint of the two
+        # tet barycenters.
+        mid = 0.5 * (tet_bary + tet_next)
+        best_fb = None
+        best_dist = np.inf
+        for cn in common_nbs:
+            fb = (x_i + x_j + cn.x_a[:3]) / 3.0
+            dist = np.linalg.norm(fb - mid)
+            if dist < best_dist:
+                best_dist = dist
+                best_fb = fb
+        if best_fb is not None:
+            interleaved.append(best_fb)
+
+    polygon = np.array(interleaved)
+
+    # --- Compute area vector by centroid-fan triangulation ---
+    centroid = polygon.mean(axis=0)
+    A_ij = np.zeros(3)
+    n_pts = len(polygon)
+    for k in range(n_pts):
+        p1 = polygon[k]
+        p2 = polygon[(k + 1) % n_pts]
+        A_ij += 0.5 * np.cross(p1 - centroid, p2 - centroid)
+
+    # --- Orient outward from v_i ---
+    d_ij = x_j - x_i
+    if np.dot(A_ij, d_ij) < 0:
+        A_ij = -A_ij
+    return A_ij
+
+
+def _dual_area_vector_3d_e_star(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector via the e_star fan-walk (legacy).
+
+    Uses the ``e_star`` fan-walk triangulation from the primal edge
+    midpoint through the shared dual vertices.  This was the original
+    implementation.  It does NOT satisfy linear precision for barycentric
+    duals on non-symmetric meshes because the non-planar face polygon
+    (tet barycenters only, without interleaved face barycenters) produces
+    an incorrect area vector.
+
+    Kept as fallback for boundary / degenerate topologies where the
+    p_ij ring-walk cannot be performed.
+    """
+    from hyperct.ddg import e_star as _e_star
+    try:
+        A_ijk_arr = _e_star(v_i, v_j, HC, dim=3)  # shape (N, 3)
+    except (IndexError, KeyError):
+        return np.zeros(3)
+    if not isinstance(A_ijk_arr, np.ndarray) or A_ijk_arr.size == 0:
+        return np.zeros(3)
+    vc_12_pos = 0.5 * (v_j.x_a - v_i.x_a) + v_i.x_a
+    vc_12 = HC.Vd[tuple(vc_12_pos)]
+    vec_to_i = v_i.x_a - vc_12.x_a
+    A_ij = np.zeros(3)
+    for A_ijk in A_ijk_arr:
+        if np.dot(A_ijk, vec_to_i) > 0:
+            A_ijk = -A_ijk
+        A_ij += A_ijk
+    return A_ij
 
 
 def dual_volume(v, HC, dim: int = 3) -> float:
@@ -160,9 +336,21 @@ def dual_volume(v, HC, dim: int = 3) -> float:
     -----
     # TODO: move to hyperct.ddg._operators (pure geometry, no physics)
     """
-    if dim <= 2:
-        from hyperct.ddg import d_area
-        return d_area(v)
+    if dim == 1:
+        # 1D dual cell = interval between the two dual vertices
+        vd_list = list(v.vd)
+        if len(vd_list) < 2:
+            # Boundary vertex with single dual vertex: half-edge
+            if len(vd_list) == 1 and v.nn:
+                v_j = next(iter(v.nn))
+                return 0.5 * abs(v_j.x_a[0] - v.x_a[0])
+            return 0.0
+        positions = [vd.x_a[0] for vd in vd_list]
+        return max(positions) - min(positions)
+
+    elif dim == 2:
+        from hyperct.ddg import dual_cell_area_2d
+        return dual_cell_area_2d(v, include_edge_midpoints=True)
 
     elif dim == 3:
         from hyperct.ddg import v_star as _v_star
@@ -204,7 +392,11 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
         Spatial dimension.
     """
     for v in HC.V:
-        v.dual_vol = dual_volume(v, HC, dim)
+        try:
+            v.dual_vol = dual_volume(v, HC, dim)
+        except (ValueError, IndexError):
+            # Degenerate vertex (e.g. domain corner with too few neighbors)
+            v.dual_vol = 0.0
 
 
 def _get_dual_vol(v, HC, dim: int = 3) -> float:
@@ -250,72 +442,19 @@ def velocity_difference_tensor(v, HC, dim: int = 3) -> np.ndarray:
         Integrated velocity difference tensor, shape ``(dim, dim)``.
         Component ``Du_i[a, b] = 0.5 * sum_j (u_j^a - u_i^a) * A_ij^b``.
     """
-    Du_i, _ = _velocity_difference_tensor_partial(v, HC, dim)
-    return Du_i
+    _cache = getattr(HC, '_edge_area_cache', None)
+    _vid = id(v) if _cache is not None else None
 
-
-def _velocity_difference_tensor_partial(v, HC, dim: int = 3):
-    """Boundary-safe integrated velocity difference tensor.
-
-    Uses all neighbors whose dual-area contribution can be evaluated, and
-    skips invalid/degenerate neighbors instead of raising.  This enables
-    partial-fan DDG reconstruction near boundaries or locally broken dual
-    connectivity.
-
-    Returns
-    -------
-    tuple[np.ndarray, list]
-        ``(Du_i, valid_neighbors)`` where ``Du_i`` is shape ``(dim, dim)``.
-    """
     Du_i = np.zeros((dim, dim))
-    valid_neighbors = []
     for v_j in v.nn:
-        try:
+        if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
+            A_ij = _cache[_vid][id(v_j)]
+        else:
             A_ij = dual_area_vector(v, v_j, HC, dim)
-        except (
-            KeyError,
-            IndexError,
-            ValueError,
-            RuntimeError,
-            ZeroDivisionError,
-            StopIteration,
-        ):
-            continue
-
-        A_ij = np.asarray(A_ij, dtype=float)
-        if A_ij.shape != (dim,) or not np.all(np.isfinite(A_ij)):
-            continue
-
-        delta_u = np.asarray(v_j.u[:dim] - v.u[:dim], dtype=float)
-        if delta_u.shape != (dim,) or not np.all(np.isfinite(delta_u)):
-            continue
-
+        delta_u = v_j.u[:dim] - v.u[:dim]
         Du_i += np.outer(delta_u, A_ij)
-        valid_neighbors.append(v_j)
-
     Du_i *= 0.5
-    return Du_i, valid_neighbors
-
-
-def _dual_volume_partial(v, HC, neighbors, dim: int = 3) -> float:
-    """Dual-volume approximation using only the supplied neighbor subset."""
-    if dim <= 2:
-        return _get_dual_vol(v, HC, dim)
-
-    from hyperct.ddg import v_star as _v_star
-
-    total_vol = 0.0
-    for v_j in neighbors:
-        try:
-            result = _v_star(v, v_j, HC, dim=3)
-            if isinstance(result, tuple) and len(result) == 2:
-                _, V_ij = result
-                total_vol += np.sum(np.abs(V_ij))
-            else:
-                total_vol += float(result)
-        except (KeyError, IndexError, ValueError, RuntimeError, ZeroDivisionError):
-            continue
-    return float(total_vol)
+    return Du_i
 
 
 def velocity_difference_tensor_pointwise(v, HC, dim: int = 3) -> np.ndarray:
@@ -338,14 +477,58 @@ def velocity_difference_tensor_pointwise(v, HC, dim: int = 3) -> np.ndarray:
     np.ndarray
         Pointwise velocity gradient, shape ``(dim, dim)``.
     """
-    Du_i, valid_neighbors = _velocity_difference_tensor_partial(v, HC, dim)
-    if not valid_neighbors:
-        return np.zeros((dim, dim))
-
-    Vol_i = _dual_volume_partial(v, HC, valid_neighbors, dim)
+    Vol_i = _get_dual_vol(v, HC, dim)
     if Vol_i < 1e-30:
         return np.zeros((dim, dim))
-    return Du_i / Vol_i
+    return velocity_difference_tensor(v, HC, dim) / Vol_i
+
+
+def scalar_gradient_integrated(
+    v,
+    HC,
+    dim: int = 3,
+    field_attr: str = 'f',
+) -> np.ndarray:
+    """Integrated gradient of a scalar field over the dual cell of v.
+
+    Computes the DDG volume-integrated quantity::
+
+        Df_i = 0.5 * sum_j (f_j - f_i) * A_ij
+
+    This is the scalar analog of :func:`velocity_difference_tensor`.
+    It approximates ``∫_{V_i} ∇f dV``.
+
+    Parameters
+    ----------
+    v : vertex object
+        Must have the scalar field attribute (default ``v.f``) and
+        ``v.nn``, ``v.vd`` populated.
+    HC : Complex
+        Simplicial complex with duals computed.
+    dim : int
+        Spatial dimension.
+    field_attr : str
+        Name of the scalar field attribute on vertices (default ``'f'``).
+
+    Returns
+    -------
+    np.ndarray
+        Integrated gradient vector, shape ``(dim,)``.
+    """
+    _cache = getattr(HC, '_edge_area_cache', None)
+    _vid = id(v) if _cache is not None else None
+
+    f_i = getattr(v, field_attr)
+    Df_i = np.zeros(dim)
+    for v_j in v.nn:
+        if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
+            A_ij = _cache[_vid][id(v_j)]
+        else:
+            A_ij = dual_area_vector(v, v_j, HC, dim)
+        delta_f = getattr(v_j, field_attr) - f_i
+        Df_i += delta_f * A_ij
+    Df_i *= 0.5
+    return Df_i
 
 
 def strain_rate(du: np.ndarray) -> np.ndarray:
@@ -448,13 +631,77 @@ def integrated_cauchy_stress(
     return -p * Vol_i * np.eye(dim) + 2.0 * mu * strain_rate(Du)
 
 
-def stress_force(
-    v,
-    dim: int = 3,
-    mu: float = 8.9e-4,
-    HC=None,
+def _resolve_pressure(v, pressure_model, HC, dim):
+    """Resolve the pressure for a single vertex.
+
+    Parameters
+    ----------
+    v : vertex object
+    pressure_model : None, callable, or EquationOfState
+        - ``None``: read ``v.p`` as-is (default, incompressible).
+        - callable ``fn(v) -> float``: externally defined pressure field.
+        - :class:`~ddgclib.eos.EquationOfState`: compute pressure from
+          density ``rho = v.m / dual_vol`` via the EOS.  Also updates
+          ``v.p`` and ``v.rho`` in-place so downstream code sees fresh
+          values.
+    HC : Complex
+    dim : int
+
+    Returns
+    -------
+    float
+        Pressure at the vertex.
+    """
+    if pressure_model is None:
+        p = v.p
+        return float(p) if np.ndim(p) == 0 else float(p[0])
+
+    if callable(pressure_model) and not hasattr(pressure_model, 'pressure'):
+        # Plain callable: fn(v) -> float
+        return float(pressure_model(v))
+
+    # EquationOfState: P = eos.pressure(m / dual_vol)
+    # Uses cached dual_vol (updated by _retopologize at each step).
+    vol = _get_dual_vol(v, HC, dim)
+    if vol < 1e-30:
+        return float(pressure_model.pressure(pressure_model.rho0))
+    rho = v.m / vol
+    p = float(pressure_model.pressure(rho))
+    # Update vertex in-place so other code (callbacks, diagnostics) sees it
+    v.rho = rho
+    v.p = p
+    return p
+
+
+# ---------------------------------------------------------------------------
+# Factored flux primitives (shared by stress_force and multiphase_stress)
+# ---------------------------------------------------------------------------
+
+def pressure_flux(p_i: float, p_j: float, A_ij: np.ndarray) -> np.ndarray:
+    """Face-average pressure flux: F_p_ij = -0.5 * (p_i + p_j) * A_ij."""
+    return -0.5 * (p_i + p_j) * A_ij
+
+
+def viscous_flux(
+    mu: float,
+    delta_u: np.ndarray,
+    d_ij: np.ndarray,
+    A_ij: np.ndarray,
 ) -> np.ndarray:
-    """Integrated force on a parcel via face-centered fluxes.
+    """Face-centered viscous diffusion flux.
+
+    F_v_ij = (mu / |d_ij|) * delta_u * (d_hat . A_ij)
+    """
+    d_norm = float(np.linalg.norm(d_ij))
+    if d_norm < 1e-30:
+        return np.zeros_like(A_ij)
+    d_hat = d_ij / d_norm
+    return (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+
+
+def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
+                 pressure_model=None) -> np.ndarray:
+    """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
 
     For each dual flux plane between parcels i and j, the force has two
     contributions computed directly from edge data:
@@ -488,38 +735,42 @@ def stress_force(
         Dynamic viscosity [Pa.s].
     HC : Complex
         Simplicial complex with duals computed.
+    pressure_model : None, callable, or EquationOfState
+        Controls how vertex pressure is obtained:
+
+        - ``None`` (default): read ``v.p`` as-is (prescribed or constant).
+        - callable ``fn(v) -> float``: externally defined pressure field,
+          evaluated each time the force is computed.
+        - :class:`~ddgclib.eos.EquationOfState`: weakly compressible
+          pressure from density ``rho = m / dual_vol``.  Updates ``v.p``
+          and ``v.rho`` in-place.
+
     Returns
     -------
     np.ndarray
         Force vector, shape ``(dim,)``.
     """
+    p_i = _resolve_pressure(v, pressure_model, HC, dim)
+    u_i = v.u[:dim]
+    x_i = v.x_a[:dim]
+
+    # Use cached oriented edge area vectors when available (set by
+    # batch_e_star(..., orient=True) during retopologization).
+    _cache = getattr(HC, '_edge_area_cache', None)
+    _vid = id(v) if _cache is not None else None
+
     F = np.zeros(dim)
-    can_use_flux_terms = HC is not None and hasattr(v, "vd")
+    for v_j in v.nn:
+        if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
+            A_ij = _cache[_vid][id(v_j)]
+        else:
+            A_ij = dual_area_vector(v, v_j, HC, dim)
 
-    if can_use_flux_terms:
-        p_i = float(v.p) if np.ndim(v.p) == 0 else float(v.p[0])
-        u_i = v.u[:dim]
-        x_i = v.x_a[:dim]
-
-        for v_j in v.nn:
-            try:
-                A_ij = dual_area_vector(v, v_j, HC, dim)
-            except (KeyError, IndexError, ValueError, RuntimeError, ZeroDivisionError):
-                continue
-
-            # --- Pressure flux (face-average, conservative) ---
-            p_j = float(v_j.p) if np.ndim(v_j.p) == 0 else float(v_j.p[0])
-            F -= 0.5 * (p_i + p_j) * A_ij
-
-            # --- Viscous flux (face-centered diffusion) ---
-            delta_u = v_j.u[:dim] - u_i
-            d_ij = v_j.x_a[:dim] - x_i
-            d_norm = np.linalg.norm(d_ij)
-            if d_norm < 1e-30:
-                continue
-            d_hat = d_ij / d_norm
-            # mu * (grad u)_f . A = (mu/|d|) * du * (d_hat . A)
-            F += (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
+        p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
+        delta_u = v_j.u[:dim] - u_i
+        d_ij = v_j.x_a[:dim] - x_i
+        F += pressure_flux(p_i, p_j, A_ij)
+        F += viscous_flux(mu, delta_u, d_ij, A_ij)
 
     return F
 
@@ -529,6 +780,7 @@ def stress_acceleration(
     dim: int = 3,
     mu: float = 8.9e-4,
     HC=None,
+    pressure_model=None,
 ) -> np.ndarray:
     """Acceleration from Cauchy stress: a_i = F_stress_i / m_i.
 
@@ -544,6 +796,13 @@ def stress_acceleration(
         dudt_fn = partial(stress_acceleration, dim=3, mu=1e-3, HC=HC)
         t = euler(HC, bV, dudt_fn, dt=1e-4, n_steps=100)
 
+    For weakly compressible flow with an equation of state::
+
+        from ddgclib.eos import TaitMurnaghan
+        eos = TaitMurnaghan(rho0=1000.0, P0=101325.0)
+        dudt_fn = partial(stress_acceleration, dim=2, mu=1e-3, HC=HC,
+                          pressure_model=eos)
+
     Parameters
     ----------
     v : vertex object
@@ -554,13 +813,16 @@ def stress_acceleration(
         Dynamic viscosity [Pa.s].
     HC : Complex
         Simplicial complex with duals computed.
+    pressure_model : None, callable, or EquationOfState
+        See :func:`stress_force`.
+
     Returns
     -------
     np.ndarray
         Acceleration vector, shape ``(dim,)``.
     """
-    F = stress_force(v, dim=dim, mu=mu, HC=HC)
-    return F / v.m
+    return stress_force(v, dim=dim, mu=mu, HC=HC,
+                        pressure_model=pressure_model) / v.m
 
 
 # Simplified alias for use as dudt_fn in dynamic integrators
