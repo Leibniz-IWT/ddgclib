@@ -1,3 +1,5 @@
+
+
 # Oscillating droplet pressure-reference benchmark
 
 This folder contains the benchmark material used to compare EOS pressure,
@@ -48,6 +50,7 @@ operator remains stable:
 | #11_ddgclib | compressible EOS | liquid + gas mesh, active retopology | Rayleigh match with nonzero tet flips |
 | #12_ddgclib | incompressible projection | liquid + gas mesh, active retopology | Rayleigh match with nonzero tet flips |
 
+
 For #11/#12 the full liquid-plus-gas vertex cloud is actively rebuilt by
 Delaunay retopology. New tetrahedra are reclassified by their persistent
 Lagrangian vertex phase, and the liquid EOS/projection pressure operator is
@@ -64,6 +67,12 @@ Representative dynamic-integrator validation at `t = 0.016 s`, `AR = 1.05`,
 | #6_ddgclib | 0.02810 | 0.02989 | 0 | one-phase incompressible projection |
 | #11_ddgclib | 0.02830 | 0.02989 | 1084 | two-phase compressible, active retopology |
 | #12_ddgclib | 0.02830 | 0.02989 | 1060 | two-phase incompressible, active retopology |
+
+
+
+### Dev note 
+
+USE ONLY case 11 and 12 for dev purposes.
 
 ## Problem Addressed
 
