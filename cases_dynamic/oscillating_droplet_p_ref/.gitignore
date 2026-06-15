@@ -1,0 +1,8 @@
+out/
+__pycache__/
+*.pyc
+*.npz
+*.csv
+*.json
+*.gif
+*.png
