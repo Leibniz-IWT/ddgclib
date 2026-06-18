@@ -1,0 +1,8 @@
+figure.dpi: 120
+savefig.dpi: 120
+axes.grid: True
+grid.alpha: 0.25
+axes.spines.top: True
+axes.spines.right: True
+font.size: 9
+legend.frameon: False
