@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+# Generated case outputs. These folders contain time histories, mesh snapshots,
+# PNG frames, and GIFs and are intentionally not committed.
+scripts/v5Conti_vd_Dimentionless_VolFlux0_speed_FHeron_cu0_ddgclib_case*/
+
+# Generated initial mesh rebuild outputs. The canonical meshes are committed in
+# initial_mesh/rcl_*/mesh/.
+initial_mesh/rcl_1p540_mm/scripts/out/
+initial_mesh/rcl_1p486_mm/generated/
+initial_mesh/rcl_1p486_mm/scripts/out/
