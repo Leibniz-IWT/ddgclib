@@ -51,6 +51,29 @@ def snapshot_pressure_multiphase(HC, n_phases: int) -> dict[int, np.ndarray]:
     return snap
 
 
+def snapshot_geometry_multiphase(HC, n_phases: int) -> dict[int, dict]:
+    """Capture per-vertex pre-retopo per-phase pressure AND sub-volume.
+
+    Returns ``{id(v): {'p_phase': ndarray, 'dual_vol_phase': ndarray}}``.
+
+    The pre-retopo ``dual_vol_phase`` is what lets
+    :func:`redistribute_mass_multiphase` decide phase-presence at *v*
+    independently of pressure magnitude — without this, a phase at
+    reference pressure ``P0=0`` looks identical to an absent phase.
+    """
+    snap = {}
+    for v in HC.V:
+        p_phase = getattr(v, 'p_phase', None)
+        dvp = getattr(v, 'dual_vol_phase', None)
+        snap[id(v)] = {
+            'p_phase': (np.array(p_phase, dtype=float).copy()
+                        if p_phase is not None else np.zeros(n_phases)),
+            'dual_vol_phase': (np.array(dvp, dtype=float).copy()
+                               if dvp is not None else np.zeros(n_phases)),
+        }
+    return snap
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -196,12 +219,35 @@ def redistribute_mass_single_phase(
 # Multiphase redistribution
 # ---------------------------------------------------------------------------
 
+def _extract_snapshot_views(snapshot, n_phases: int):
+    """Return ``(pressure_view, dual_vol_view)`` from a snapshot dict.
+
+    Accepts both the legacy ``snapshot_pressure_multiphase`` format
+    (``{id(v): p_phase_array}``) and the newer
+    ``snapshot_geometry_multiphase`` format
+    (``{id(v): {'p_phase': ..., 'dual_vol_phase': ...}}``).
+
+    For the legacy format ``dual_vol_view`` is ``None``, which signals
+    callers to fall back to the legacy ``p_phase > 1e-30`` guard.
+    """
+    pressure_view: dict[int, np.ndarray] = {}
+    dual_vol_view: dict[int, np.ndarray] | None = {}
+    for vid, rec in snapshot.items():
+        if isinstance(rec, dict):
+            pressure_view[vid] = np.asarray(rec['p_phase'], dtype=float)
+            dual_vol_view[vid] = np.asarray(rec['dual_vol_phase'], dtype=float)
+        else:
+            pressure_view[vid] = np.asarray(rec, dtype=float)
+            dual_vol_view = None  # legacy snapshot, no geometry info
+    return pressure_view, dual_vol_view
+
+
 def redistribute_mass_multiphase(
     HC,
     dim: int,
     mps,
     bV: set | None = None,
-    pressure_snapshot: dict[int, np.ndarray] | None = None,
+    pressure_snapshot: dict | None = None,
 ) -> dict:
     """Per-phase pressure-preserving mass redistribution.
 
@@ -219,7 +265,15 @@ def redistribute_mass_multiphase(
         Provides ``.phases[k].eos`` and ``.n_phases``.
     bV : set or None
     pressure_snapshot : dict or None
-        ``{id(v): p_phase_array_copy}`` from :func:`snapshot_pressure_multiphase`.
+        Either the legacy
+        ``{id(v): p_phase_array_copy}`` from
+        :func:`snapshot_pressure_multiphase`, or the geometry-aware
+        ``{id(v): {'p_phase': ..., 'dual_vol_phase': ...}}`` from
+        :func:`snapshot_geometry_multiphase`.  The geometry-aware
+        format gates phase presence at *v* on the pre-retopo
+        ``dual_vol_phase[k]`` instead of pressure magnitude, which is
+        required for cases at reference pressure ``P0=0`` (otherwise
+        the entire reference-pressure phase is skipped).
 
     Returns
     -------
@@ -229,15 +283,15 @@ def redistribute_mass_multiphase(
     n_phases = mps.n_phases
 
     if pressure_snapshot is None:
-        pressure_snapshot = snapshot_pressure_multiphase(HC, n_phases)
+        pressure_snapshot = snapshot_geometry_multiphase(HC, n_phases)
+
+    p_snap, dvp_snap = _extract_snapshot_views(pressure_snapshot, n_phases)
 
     phase_diag = []
 
     for k in range(n_phases):
         eos_k = mps.phases[k].eos
 
-        # Compute target per-phase masses (only vertices with valid
-        # pressure snapshot AND positive sub-volume for this phase)
         targets_k = {}
         M_k_target = 0.0
         for v in HC.V:
@@ -246,9 +300,17 @@ def redistribute_mass_multiphase(
             dvp = getattr(v, 'dual_vol_phase', None)
             if dvp is None or dvp[k] < 1e-30:
                 continue
-            p_k_before = pressure_snapshot[id(v)][k]
-            if p_k_before < 1e-30:
-                continue
+            p_k_before = p_snap[id(v)][k]
+            # Phase-presence guard.  Prefer the pre-retopo sub-volume
+            # when available — pressure can legitimately be zero at the
+            # reference state (P0=0), so a pressure-only guard skips
+            # whole phases that need redistribution.
+            if dvp_snap is not None:
+                if dvp_snap[id(v)][k] < 1e-30:
+                    continue
+            else:
+                if p_k_before < 1e-30:
+                    continue
             rho_target = float(eos_k.density(p_k_before))
             rho_target = max(rho_target, 1e-30)
             m_target = rho_target * dvp[k]

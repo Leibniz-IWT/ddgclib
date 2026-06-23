@@ -10,6 +10,86 @@ which was actually validated (which is in lsm?)
 import numpy as np
 
 
+def _apex_via_simplex_cache(HC, vi, vj):
+    """Return apex vertex objects for edge (vi, vj), or ``None`` to fall back.
+
+    Uses ``HC._edge_to_apex`` (built lazily from ``HC._simplices``).
+    Only valid when the simplex cache holds 2-simplices (triangles,
+    3-tuples) — ``hndA_i`` and friends compute *surface* curvature on a
+    2-manifold, so a volumetric tet mesh (4-tuples) is not an
+    appropriate apex source and we fall back to the legacy
+    ``vi.nn.intersection(vj.nn)`` path.
+
+    Returns
+    -------
+    list of vertex | None
+        ``None`` signals the caller to use the legacy nn-intersection
+        path.  An empty list means "no triangle in the cache contains
+        this edge" (the caller should also fall back, since the
+        curvature algorithms expect at least one apex per neighbour).
+
+    Notes
+    -----
+    The legacy path is unreliable on Delaunay-derived meshes with
+    skinny / sliver simplices because the 1-skeleton flag complex can
+    contain spurious K_{dim+1} cliques near boundaries — see
+    ``grok_1-skeleton-comment.pdf`` and
+    :func:`hyperct.ddg.boundary_from_simplices`.
+    """
+    if HC is None:
+        return None
+    simplices = getattr(HC, '_simplices', None)
+    if not simplices:
+        return None
+    # Only triangle (3-tuple) simplices are valid for surface-curvature
+    # apex enumeration.  Tet caches return apex *pairs* per simplex,
+    # which the curvature loops here would silently misuse.
+    if len(simplices[0]) != 3:
+        return None
+    try:
+        from hyperct.ddg import get_edge_apex_map
+    except ImportError:
+        return None
+    apex_map = get_edge_apex_map(HC)
+    if apex_map is None:
+        return None
+    return apex_map.get(frozenset((id(vi), id(vj))), [])
+
+
+def _apex_via_interface_triangles(HC, vi, vj):
+    """Return apex vertex objects for edge (vi, vj) on the interface mesh.
+
+    Looks up ``HC.interface_triangles`` (3D set of frozensets of vertex
+    coordinate keys; populated by
+    :func:`ddgclib.geometry._interface_subcomplex.extract_interface`).
+
+    Returns ``None`` if interface_triangles is not populated, signalling
+    caller to fall back.  Returns ``[]`` if no interface triangle
+    contains both vi and vj.  Otherwise returns the list of third
+    vertices (apex of each interface triangle containing edge ij).
+    """
+    if HC is None:
+        return None
+    iface_tris = getattr(HC, 'interface_triangles', None)
+    if iface_tris is None:
+        return None
+    apex_cache = getattr(HC, '_interface_edge_to_apex', None)
+    if apex_cache is None:
+        # Build coordinate-key -> vertex object lookup once.
+        x_to_v = {v.x: v for v in HC.V}
+        apex_cache = {}
+        for tri_key in iface_tris:
+            tri_verts = [x_to_v[xk] for xk in tri_key]
+            for a in range(3):
+                for b in range(a + 1, 3):
+                    va, vb = tri_verts[a], tri_verts[b]
+                    apex = tri_verts[3 - a - b]
+                    key = frozenset((id(va), id(vb)))
+                    apex_cache.setdefault(key, []).append(apex)
+        HC._interface_edge_to_apex = apex_cache
+    return apex_cache.get(frozenset((id(vi), id(vj))), [])
+
+
 def HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     """
     Computes the dual edge and dual area using Heron's formula.
@@ -42,11 +122,15 @@ def HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     return hnda_ijk, c_ijk
 
 
-def A_i(v, n_i=None):
+def A_i(v, n_i=None, HC=None):
     """
     Compute the discrete normal area of vertex v_i
 
     :param v: vertex object
+    :param HC: optional Complex.  When supplied and ``HC._simplices`` is
+        populated, the apex enumeration uses the simplex-aware
+        ``HC._edge_to_apex`` cache instead of the legacy
+        ``vi.nn.intersection(vj.nn)`` flag-complex path.
     :return: HNdA_i: the curvature tensor at input vertex v
              c_i:  the dual area of the vertex
     """
@@ -59,8 +143,17 @@ def A_i(v, n_i=None):
     C_i = 0.0  # np.zeros([len(v.nn), 3])  # Dual area around edge in a surface
     vi = v
     for vj in v.nn:
-        # Compute the intersection set of vertices i and j:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        # Apex enumeration: prefer simplex cache, fall back to v.nn ∩ v.nn
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        else:
+            # Cache returns list (with possible duplicates if a vertex is
+            # apex of >1 simplex containing edge ij).  Triangle meshes
+            # produce 1 (boundary) or 2 (interior) distinct apices.
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a  # Compute edge ij (1x3 vector)
         e_ij = - e_ij  # WHY???
         vk = list(e_i_int_e_j)[0]  # index in triangle ijk  # NOTE: k = vk.index
@@ -117,11 +210,14 @@ def A_i(v, n_i=None):
 #      This is simple to parallelise on CPUs, but might be much harder
 #      to do on GPUs.
 
-def hndA_i(v, n_i=None):
+def hndA_i(v, n_i=None, HC=None):
     """
     Compute the mean normal curvature of vertex
 
     :param v: vertex object
+    :param HC: optional Complex.  When supplied and ``HC._simplices`` is
+        populated, apex enumeration uses ``HC._edge_to_apex`` instead
+        of the legacy flag-complex ``vi.nn.intersection(vj.nn)`` path.
     :return: HNdA_i: the curvature tensor at input vertex v
              c_i:  the dual area of the vertex
     """
@@ -134,8 +230,13 @@ def hndA_i(v, n_i=None):
     C_i = 0.0  # np.zeros([len(v.nn), 3])  # Dual area around edge in a surface
     vi = v
     for vj in v.nn:
-        # Compute the intersection set of vertices i and j:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        else:
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a  # Compute edge ij (1x3 vector)
         e_ij = - e_ij  # WHY???
         vk = list(e_i_int_e_j)[0]  # index in triangle ijk  # NOTE: k = vk.index
@@ -206,7 +307,7 @@ def _pad3(x_a):
     return out
 
 
-def hndA_i_interface(v, interface_set, n_i=None):
+def hndA_i_interface(v, interface_set, n_i=None, HC=None):
     """Mean curvature normal restricted to interface sub-mesh.
 
     Same algorithm as :func:`hndA_i` but only considers neighbours that are
@@ -224,6 +325,13 @@ def hndA_i_interface(v, interface_set, n_i=None):
         Set of vertex objects forming the interface sub-mesh.
     n_i : ignored
         Kept for API compatibility.
+    HC : Complex, optional
+        When supplied and ``HC.interface_triangles`` is populated, apex
+        enumeration uses the explicit interface triangle list (the
+        primal-subcomplex model) instead of the legacy
+        ``vi.nn ∩ vj.nn ∩ interface_set`` flag-complex path.  The
+        legacy path can return spurious K_3 cliques on interface
+        boundaries adjacent to the domain wall.
 
     Returns
     -------
@@ -238,7 +346,15 @@ def hndA_i_interface(v, interface_set, n_i=None):
     for vj in v.nn:
         if vj not in interface_set:
             continue
-        e_i_int_e_j = vi.nn.intersection(vj.nn).intersection(interface_set)
+        apex = _apex_via_interface_triangles(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn).intersection(interface_set)
+        else:
+            # Filter to interface_set in case caller passes a stricter
+            # interface set than HC.interface_triangles spans (e.g. a
+            # local sub-region during validation).
+            e_i_int_e_j = [vk for vk in dict.fromkeys(apex)
+                           if vk in interface_set]
         if len(e_i_int_e_j) == 0:
             continue
         e_ij = _pad3(vj.x_a) - _pad3(vi.x_a)
@@ -277,6 +393,135 @@ def hndA_i_interface(v, interface_set, n_i=None):
     return HNdA_i, C_i
 
 
+def integrated_hndA_i_interface(v, interface_set, HC, gamma=1.0):
+    """Integrated surface-tension force on a 3D interface vertex via Stokes.
+
+    Replaces the cotangent-Heron pointwise stencil with a direct
+    boundary-integral discretisation::
+
+        F_st_i  =  gamma * integral_{Gamma_i} 2H N dA
+                =  gamma * boundary-integral_{partial Gamma_i} nu dl    (Stokes)
+
+    where ``Gamma_i`` is the portion of the interface inside the
+    *barycentric* dual cell of ``v_i`` and ``nu`` is the in-surface
+    conormal (perpendicular to the boundary, lying in the triangle's
+    tangent plane, pointing outward from the dual cell).
+
+    The boundary of the dual cell inside an interface triangle
+    ``(v_i, v_j, v_k)`` consists of the two straight segments
+    ``midpoint(v_i, v_j) -> centroid(v_i, v_j, v_k) -> midpoint(v_i, v_k)``.
+    On a closed, oriented, piecewise-linear interface mesh the conormal
+    contributions are summed across every interface triangle containing
+    ``v_i``; on a closed manifold the dual cell boundary is closed and
+    the formula is the *exact* Stokes-theorem image of the integrated
+    mean curvature normal.
+
+    Parities
+    --------
+    - Planar interface (kappa = 0 everywhere): ``F_st = 0`` by direct
+      cancellation of opposite conormal segments around v_i, *not* by
+      a kappa = 0 sample.  Holds to machine precision on any
+      triangulation, no symmetry required.
+    - Spherical interface of radius R (uniform refinement):
+      ``F_st = -(2 gamma / R) * A_i * N`` where N is the outward sphere
+      normal and ``A_i`` is the barycentric-dual interface area around
+      v_i — the analytical Young-Laplace inward pull.
+
+    Sign convention matches the existing
+    :func:`_interface_surface_tension` 3D branch: positive components
+    of ``F_st`` push the interface vertex outward; on a convex droplet
+    ``F_st`` is anti-parallel to the outward normal.
+
+    Parameters
+    ----------
+    v : vertex object
+        Must have ``v.x_a`` and be flagged ``is_interface=True``.
+    interface_set : set or iterable of vertex
+        Set of interface vertex objects.  Used as a guard so that
+        triangles touching v_i but whose other two vertices fall
+        outside the *caller-supplied* interface subset are dropped
+        (useful for local validation harnesses).  Pass
+        ``{v} | interface_neighbours`` for the standard case.
+    HC : Complex
+        Must have ``HC.interface_triangles`` populated (set by
+        :func:`ddgclib.geometry._interface_subcomplex.extract_interface`).
+        If absent, returns ``np.zeros(3)`` (caller should fall back).
+    gamma : float
+        Surface-tension coefficient [N/m].  Returns zero immediately
+        when ``gamma == 0``.
+
+    Returns
+    -------
+    F_st : ndarray, shape (3,)
+        The integrated surface-tension force on v_i.
+    """
+    if gamma == 0.0:
+        return np.zeros(3)
+
+    iface_tris = getattr(HC, 'interface_triangles', None) if HC is not None else None
+    if iface_tris is None:
+        return np.zeros(3)
+
+    # Build (and cache on HC) the coordinate-key -> vertex object lookup.
+    x_to_v = getattr(HC, '_interface_x_to_v', None)
+    if x_to_v is None:
+        x_to_v = {vv.x: vv for vv in HC.V}
+        HC._interface_x_to_v = x_to_v
+
+    interface_set = set(interface_set) if not isinstance(interface_set, set) else interface_set
+    v_key = v.x
+    x_i = _pad3(v.x_a)
+    F = np.zeros(3)
+
+    for tri_key in iface_tris:
+        if v_key not in tri_key:
+            continue
+        other_keys = [k for k in tri_key if k != v_key]
+        if len(other_keys) != 2:
+            continue  # degenerate (shouldn't happen with frozensets of size 3)
+        v_j = x_to_v.get(other_keys[0])
+        v_k = x_to_v.get(other_keys[1])
+        if v_j is None or v_k is None:
+            continue
+        # Honor caller's interface_set filter: skip triangles whose other
+        # vertices are not in the supplied interface set.
+        if v_j not in interface_set or v_k not in interface_set:
+            continue
+
+        x_j = _pad3(v_j.x_a)
+        x_k = _pad3(v_k.x_a)
+
+        # Triangle normal (unit).  ||cross|| = 2 * triangle_area.
+        normal2A = np.cross(x_j - x_i, x_k - x_i)
+        twoA = np.linalg.norm(normal2A)
+        if twoA < 1e-30:
+            continue
+        n_tri = normal2A / twoA
+
+        # Barycentric centroid and incident-edge midpoints.
+        c = (x_i + x_j + x_k) / 3.0
+        m_ij = 0.5 * (x_i + x_j)
+        m_ik = 0.5 * (x_i + x_k)
+
+        # Two dual-cell boundary segments inside this triangle, traversed
+        # as a path from m_ij to c to m_ik (orientation handled per
+        # segment via the dot-product check below).
+        for p_start, p_end in ((m_ij, c), (c, m_ik)):
+            seg = p_end - p_start
+            L = float(np.linalg.norm(seg))
+            if L < 1e-30:
+                continue
+            t = seg / L
+            nu = np.cross(n_tri, t)
+            # Orient nu OUTWARD from v_i (away from dual cell centre).
+            seg_mid = 0.5 * (p_start + p_end)
+            if np.dot(nu, seg_mid - x_i) < 0.0:
+                nu = -nu
+            F += gamma * L * nu
+
+    return F
+
+
 def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     """
     Computes the dual edge and dual area using Heron's formula.
@@ -309,11 +554,14 @@ def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     return hnda_ijk, c_ijk
 
 
-def int_hndA_i(v, n_i=None):
+def int_hndA_i(v, n_i=None, HC=None):
     """
     Compute the mean normal curvature of vertex
 
     :param v: vertex object
+    :param HC: optional Complex.  When supplied and ``HC._simplices`` is
+        populated, apex enumeration uses ``HC._edge_to_apex`` instead
+        of the legacy flag-complex ``vi.nn.intersection(vj.nn)`` path.
     :return: HNdA_i: the curvature tensor at input vertex v
              c_i:  the dual area of the vertex
     """
@@ -326,8 +574,13 @@ def int_hndA_i(v, n_i=None):
     C_i = 0.0  # np.zeros([len(v.nn), 3])  # Dual area around edge in a surface
     vi = v
     for vj in v.nn:
-        # Compute the intersection set of vertices i and j:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)  # Set of size 1 or 2
+        else:
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a  # Compute edge ij (1x3 vector)
         e_ij = - e_ij  # WHY???
         vk = list(e_i_int_e_j)[0]  # index in triangle ijk  # NOTE: k = vk.index

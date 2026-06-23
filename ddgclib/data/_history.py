@@ -41,6 +41,16 @@ class StateHistory:
     save_dir : str or None
         When set, each snapshot is automatically saved to disk as
         ``{save_dir}/state_{idx:06d}_t{time:.6f}.json`` via ``save_state()``.
+    conservation : bool
+        When True, every recorded snapshot computes conservation
+        diagnostics (kinetic energy, momentum, mass, volume, per-phase
+        breakdowns, ``h_min``/``h_max``, velocity/pressure extrema) via
+        :func:`ddgclib.data.compute_conservation` and merges them into
+        the snapshot's ``diagnostics`` dict. Default False (opt-in so
+        existing cases are unaffected).
+    dim : int or None
+        Spatial dimension forwarded to ``compute_conservation``. Inferred
+        from the first vertex's ``x_a`` if not given.
     """
 
     def __init__(
@@ -49,11 +59,15 @@ class StateHistory:
         record_every: int = 1,
         record_every_t: Optional[float] = None,
         save_dir: Optional[str] = None,
+        conservation: bool = False,
+        dim: Optional[int] = None,
     ):
         self.fields = list(fields)
         self.record_every = record_every
         self.record_every_t = record_every_t
         self.save_dir = save_dir
+        self.conservation = conservation
+        self.dim = dim
 
         # Storage: list of (time, {vertex_key: {field: value}}, diagnostics)
         self._snapshots: list[tuple[float, dict, dict]] = []
@@ -98,6 +112,9 @@ class StateHistory:
             snapshot[key] = vdata
 
         diag = dict(diagnostics) if diagnostics else {}
+        if self.conservation:
+            from ddgclib.data._conservation import compute_conservation
+            diag.update(compute_conservation(HC, dim=self.dim))
         self._snapshots.append((float(t), snapshot, diag))
         self._last_recorded_t = float(t)
 
@@ -131,6 +148,9 @@ class StateHistory:
             snapshot[key] = vdata
 
         diag = dict(diagnostics) if diagnostics else {}
+        if self.conservation:
+            from ddgclib.data._conservation import compute_conservation
+            diag.update(compute_conservation(HC, dim=self.dim))
         self._snapshots.append((float(t), snapshot, diag))
 
     def query_vertex(self, vertex_key: tuple, field: str):

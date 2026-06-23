@@ -122,9 +122,24 @@ def extract_interface(
 def interface_nn(v, HC) -> set:
     """Return the interface-restricted neighbours of ``v``.
 
-    Equivalent to ``v.nn & HC.interface_vertices``.
+    Prefers the explicit ``HC.interface_edges`` membership test (a
+    primal subcomplex edge connects two interface vertices on the
+    sharp interface).  Falls back to ``v.nn & HC.interface_vertices``
+    when ``interface_edges`` is not populated — the legacy form,
+    correct on closed manifolds but susceptible to spurious K_3
+    cliques on Delaunay-derived meshes near contact lines (e.g. when
+    two interface vertices are connected by a flag-complex edge that
+    is not part of the actual sharp interface subcomplex).
     """
-    return v.nn & HC.interface_vertices
+    iface_verts = getattr(HC, 'interface_vertices', None)
+    if iface_verts is None:
+        return set()
+    iface_edges = getattr(HC, 'interface_edges', None)
+    if iface_edges is None:
+        return v.nn & iface_verts
+    return {nb for nb in v.nn
+            if nb in iface_verts
+            and frozenset({v.x, nb.x}) in iface_edges}
 
 
 def curve_neighbours(v, HC):

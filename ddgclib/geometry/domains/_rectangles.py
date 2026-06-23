@@ -17,6 +17,7 @@ def rectangle(
     refinement: int = 2,
     origin: tuple[float, float] = (0.0, 0.0),
     flow_axis: int = 0,
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 2D rectangular domain.
 
@@ -33,6 +34,12 @@ def rectangle(
     flow_axis : int
         Primary flow direction (0 or 1).  Determines which faces are
         labelled ``'inlet'`` and ``'outlet'``.
+    retopologize : bool, optional
+        If True, run ``_retopologize`` once after the structured build
+        so the returned mesh has ``HC._simplices`` populated and the
+        simplex-aware dual + boundary paths are active.  See
+        :meth:`DomainResult.retopologize` for caveats.  Default False
+        keeps the existing structured tessellation bit-for-bit.
 
     Returns
     -------
@@ -72,7 +79,7 @@ def rectangle(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -84,6 +91,9 @@ def rectangle(
             'lb': lb, 'ub': ub,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result
 
 
 def l_shape(
@@ -93,6 +103,7 @@ def l_shape(
     notch_h: float = 0.5,
     refinement: int = 2,
     origin: tuple[float, float] = (0.0, 0.0),
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build an L-shaped 2D domain (rectangle with rectangular notch removed).
 
@@ -176,7 +187,7 @@ def l_shape(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -187,3 +198,6 @@ def l_shape(
             'origin': origin,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result

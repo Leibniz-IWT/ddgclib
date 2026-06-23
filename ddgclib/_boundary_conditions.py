@@ -224,6 +224,74 @@ class MovingWallBC(BoundaryCondition):
         return count
 
 
+class ShearingPlateBC(BoundaryCondition):
+    """No-slip plate whose vertices translate along the plate surface.
+
+    Intended for Couette-type shear cells: each step the BC advances
+    target vertex positions by ``plate_velocity * dt`` (using
+    ``HC.V.move``), clamps the coordinate normal to the plate to
+    ``plate_coord`` (so viscous drag from the fluid cannot push the
+    plate off its y=const surface), sets ``v.u = plate_velocity``, and
+    optionally wraps the streamwise coordinate through a periodic
+    interval.
+
+    Unlike :class:`MovingWallBC` (which only imposes a velocity),
+    :class:`ShearingPlateBC` actually translates the wall vertices so
+    that the plate visibly slides in animations.  It also means the
+    wall vertices do NOT need to be members of ``bV``: they are
+    frozen in the *normal* direction by the clamp, but free to
+    advect tangentially.
+
+    Parameters
+    ----------
+    plate_velocity : array-like, length ``dim``
+        Velocity of the plate surface (e.g. ``(+U, 0)`` top plate,
+        ``(-U, 0)`` bottom plate).
+    plate_axis : int
+        Coordinate axis normal to the plate (e.g. ``1`` for plates
+        at ``y = ±L_y``).
+    plate_coord : float
+        Value of the normal coordinate (e.g. ``+L_y`` or ``-L_y``).
+    wrap_axes : list of (axis, (lb, ub)) or None
+        Periodic wrap instructions.  Each entry wraps ``v.x_a[axis]``
+        into ``[lb, ub]`` after advection.  Typical usage::
+
+            wrap_axes=[(0, (-L_x, +L_x))]
+
+        to handle a streamwise periodic x direction.
+    dim : int
+        Spatial dimension.
+    """
+
+    def __init__(self, plate_velocity, plate_axis: int, plate_coord: float,
+                 wrap_axes=None, dim: int = 2):
+        super().__init__()
+        self.plate_velocity = np.asarray(plate_velocity, dtype=float)
+        self.plate_axis = int(plate_axis)
+        self.plate_coord = float(plate_coord)
+        self.wrap_axes = list(wrap_axes) if wrap_axes else []
+        self.dim = dim
+
+    def apply(self, mesh, dt, target_vertices=None):
+        verts = target_vertices if target_vertices is not None else mesh.V
+        count = 0
+        for v in list(verts):
+            new_x = list(v.x)
+            for i in range(self.dim):
+                new_x[i] = v.x_a[i] + self.plate_velocity[i] * dt
+            new_x[self.plate_axis] = self.plate_coord
+            for ax, (lb, ub) in self.wrap_axes:
+                period = ub - lb
+                if new_x[ax] > ub:
+                    new_x[ax] -= period
+                elif new_x[ax] < lb:
+                    new_x[ax] += period
+            mesh.V.move(v, tuple(new_x))
+            v.u = self.plate_velocity.copy()
+            count += 1
+        return count
+
+
 class DirichletVelocityBC(BoundaryCondition):
     """Fixed velocity on boundary vertices.
 
@@ -361,6 +429,12 @@ class OutletDeleteBC(BoundaryCondition):
                 self.bV.discard(v)
             mesh.V.remove(v)
 
+        # Drop the simplex cache when topology changes — the next
+        # _retopologize will rebuild it.
+        if to_delete:
+            from hyperct.ddg import invalidate_simplex_cache
+            invalidate_simplex_cache(mesh)
+
         # Prevent backflow in the outlet buffer zone
         if self.backflow_clamp is not None:
             clamp_start = self.outlet_pos - self.backflow_clamp
@@ -428,6 +502,10 @@ class OutletBufferedDeleteBC(BoundaryCondition):
             if self.bV is not None:
                 self.bV.discard(v)
             mesh.V.remove(v)
+
+        if to_delete:
+            from hyperct.ddg import invalidate_simplex_cache
+            invalidate_simplex_cache(mesh)
 
         # 2. Detect new buffer entries (just crossed outlet_pos)
         buf_ids = set(self._buffer.keys())
@@ -609,6 +687,13 @@ class PeriodicInletBC(BoundaryCondition):
             self._reset_ghost()
 
         mesh.V.merge_all(cdist=self.cdist)
+
+        # Vertex injection + merge changes topology — invalidate the
+        # simplex cache so the next _retopologize rebuilds it.
+        if entered:
+            from hyperct.ddg import invalidate_simplex_cache
+            invalidate_simplex_cache(mesh)
+
         return len(entered)
 
 

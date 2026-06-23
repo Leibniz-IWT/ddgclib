@@ -16,6 +16,7 @@ def disk(
     center: tuple[float, float] = (0.0, 0.0),
     refinement: int = 2,
     distr_law: str = "sinusoidal",
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 2D disk of radius *R*.
 
@@ -60,7 +61,7 @@ def disk(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -71,6 +72,9 @@ def disk(
             'volume': math.pi * R ** 2,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result
 
 
 def annulus(
@@ -79,6 +83,7 @@ def annulus(
     center: tuple[float, float] = (0.0, 0.0),
     refinement: int = 2,
     distr_law: str = "sinusoidal",
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 2D annulus (ring) domain.
 
@@ -157,7 +162,7 @@ def annulus(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -169,3 +174,6 @@ def annulus(
             'volume': math.pi * (R_outer ** 2 - R_inner ** 2),
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result

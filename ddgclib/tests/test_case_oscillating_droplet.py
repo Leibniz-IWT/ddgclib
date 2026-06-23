@@ -143,5 +143,288 @@ class TestPerturbedDroplet3D(unittest.TestCase):
         self.assertGreater(diag['R_max'], 0.01)
 
 
+@pytest.mark.slow
+class TestStaticDroplet2DRetopologyFloor(unittest.TestCase):
+    """Tier 2B 2D long-run regression — pins the static-droplet
+    interface |F| floor under repeated retopology.
+
+    Long-run probe (`diagnose_a5_bisection.py --skip-3d --n-steps 2000
+    --redistribute-mass`) confirmed bit-stability over 2000 steps:
+      - step 0 max|F| = 2.3748568e-3  (pre-retopo, ≡ A.5.a frozen floor)
+      - step 1.. max|F| = 2.2716938e-3 (post-retopo, single unique value,
+        std = 4.34e-19, |dM/M0| = 1.64e-15, |dV/V0| = 3.54e-16,
+        311->311 verts, 32->32 interface)
+
+    Locks the post-Phase-2c (2026-04-29) ``dual_vol_phase``-gated
+    ``redistribute_mass`` guard fix in place so any future refactor that
+    breaks retopology-neutrality of the 2D Lagrangian multiphase loop is
+    caught at the regression layer.  See
+    ``.claude/plans/please-do-some-deep-vectorized-tarjan.md`` (status
+    log 2026-05-28).
+    """
+
+    EXPECTED_STEP0_MAXF = 2.3748568e-03
+    EXPECTED_STEP1_MAXF = 2.2716938e-03
+    REL_TOL = 0.01
+    N_STEPS = 30
+
+    def test_retopology_neutrality_floor(self):
+        from cases_dynamic.oscillating_droplet.src._params import (
+            R0, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o, L_domain,
+            n_refine_outer, n_refine_droplet,
+        )
+        from ddgclib.operators.multiphase_stress import multiphase_stress_force
+        from ddgclib.dynamic_integrators import euler
+        from ddgclib.data import compute_conservation
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+            setup_oscillating_droplet(
+                dim=2, R0=R0, epsilon=0.0, l=l,
+                rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
+                gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
+                refinement_outer=n_refine_outer,
+                refinement_droplet=n_refine_droplet,
+            )
+
+        def max_iface_F(HC_):
+            mx = 0.0
+            for v in HC_.V:
+                if not getattr(v, 'is_interface', False):
+                    continue
+                F = multiphase_stress_force(v, dim=2, mps=mps, HC=HC_)
+                mag = float(np.linalg.norm(F))
+                if mag > mx:
+                    mx = mag
+            return mx
+
+        f0 = max_iface_F(HC)
+        cons0 = compute_conservation(HC, dim=2)
+        n_verts0 = sum(1 for _ in HC.V)
+        n_iface0 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+
+        self.assertAlmostEqual(
+            f0, self.EXPECTED_STEP0_MAXF,
+            delta=self.REL_TOL * self.EXPECTED_STEP0_MAXF,
+            msg=(f"Step-0 max|F| {f0:.4e} drifted from expected "
+                 f"{self.EXPECTED_STEP0_MAXF:.4e} by >{self.REL_TOL*100:.1f}% "
+                 "(A.5.a curvature-stencil floor on the frozen mesh).")
+        )
+
+        c_s = float(np.sqrt(K_d / rho_d))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:2] - nb.x_a[:2]) > 1e-15
+        )
+        dt_acoustic = 0.25 * dx_min / c_s
+        dt_capillary = 0.5 * np.sqrt(rho_d * dx_min ** 3 / gamma)
+        dt = min(dt_acoustic, dt_capillary)
+
+        history = []
+
+        def zero_u_callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
+            history.append(max_iface_F(HC_cb))
+            for v in HC_cb.V:
+                v.u[:] = 0.0
+
+        euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS, dim=2,
+            bc_set=bc_set, callback=zero_u_callback,
+            retopologize_fn=retopo_fn,
+            remesh_mode=params['remesh_mode'],
+            remesh_kwargs=params['remesh_kwargs'],
+        )
+
+        self.assertEqual(len(history), self.N_STEPS)
+
+        f1 = history[0]
+        self.assertAlmostEqual(
+            f1, self.EXPECTED_STEP1_MAXF,
+            delta=self.REL_TOL * self.EXPECTED_STEP1_MAXF,
+            msg=(f"Step-1 max|F| {f1:.4e} drifted from expected "
+                 f"{self.EXPECTED_STEP1_MAXF:.4e} by >{self.REL_TOL*100:.1f}% "
+                 "(post-retopo steady state under u=0).")
+        )
+
+        history_arr = np.asarray(history)
+        rel_spread = float((history_arr.max() - history_arr.min()) / f1)
+        self.assertLess(
+            rel_spread, 1e-10,
+            msg=(f"Post-retopo max|F| spread {rel_spread:.3e} over "
+                 f"{self.N_STEPS} steps; expected bit-stable from step 1 "
+                 "(2000-step long-run had std=4.3e-19, single unique value).")
+        )
+
+        cons1 = compute_conservation(HC, dim=2)
+        mass_drift = abs(cons1['mass_total'] - cons0['mass_total']) / abs(cons0['mass_total'])
+        vol_drift = abs(cons1['volume_total'] - cons0['volume_total']) / abs(cons0['volume_total'])
+        self.assertLess(mass_drift, 1e-10)
+        self.assertLess(vol_drift, 1e-10)
+
+        n_verts1 = sum(1 for _ in HC.V)
+        n_iface1 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        self.assertEqual(n_verts1, n_verts0)
+        self.assertEqual(n_iface1, n_iface0)
+
+
+@pytest.mark.slow
+class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
+    """Tier 2B 3D long-run regression — pins the static-spherical-droplet
+    interface |F| floor under repeated retopology, symmetric with
+    ``TestStaticDroplet2DRetopologyFloor``.
+
+    Long-run probe (``diagnose_a5_bisection.py --n-steps 2000
+    --redistribute-mass``, refine 2/2) confirmed over 2000 steps:
+      - step 0   max|F| = 6.0153e-5  (frozen mesh, A.5.a curvature floor)
+      - step 1   max|F| = 7.0325e-5  (one-step retopo transient)
+      - step 2.. max|F| = 7.3768e-5  (post-retopo steady state; bit-identical
+        across steps 2-2000, std 0.0, |dM/M0| = 8.78e-15, 472->472 verts,
+        98->98 interface)
+
+    Two 3D-specific differences from the 2D floor:
+      1. The plateau is reached at step 2, not step 1 (one extra retopo
+         settle step on the near-cospherical interface cloud), so the
+         bit-stability window starts after ``SETTLE_STEPS``.
+      2. The one-shot ``|dV/V0|`` = 0.305 at step 0->1 is the documented
+         boundary dual-cell zeroing artefact (outer-box boundary vertices
+         lose their 'shell' dual volume on the first retopo —
+         ``_integrators_dynamic.py`` boundary handling); total volume is
+         bit-stable from step 2 onward, so volume drift is checked across
+         the plateau window, not from step 0.
+
+    Locks the post-Phase-2c (2026-04-29) ``dual_vol_phase``-gated
+    ``redistribute_mass`` guard fix in 3D so any future refactor that
+    breaks retopology-neutrality of the 3D Lagrangian multiphase loop is
+    caught at the regression layer.  See
+    ``.claude/plans/please-do-some-deep-vectorized-tarjan.md`` (status
+    log 2026-06-02, Probe 6).
+    """
+
+    EXPECTED_STEP0_MAXF = 6.0153e-05
+    EXPECTED_PLATEAU_MAXF = 7.3768e-05
+    REL_TOL = 0.01
+    REFINE_OUTER = 2
+    REFINE_DROPLET = 2
+    SETTLE_STEPS = 2       # plateau reached at step 2 (history idx 1)
+    N_STEPS = 10           # >> settle; ~0.34 s/step in 3D
+
+    def test_retopology_neutrality_floor(self):
+        from cases_dynamic.oscillating_droplet.src._params import (
+            R0, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o, L_domain,
+        )
+        from ddgclib.operators.multiphase_stress import multiphase_stress_force
+        from ddgclib.dynamic_integrators import euler
+        from ddgclib.data import compute_conservation
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+            setup_oscillating_droplet(
+                dim=3, R0=R0, epsilon=0.0, l=l,
+                rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
+                gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
+                refinement_outer=self.REFINE_OUTER,
+                refinement_droplet=self.REFINE_DROPLET,
+            )
+
+        def max_iface_F(HC_):
+            mx = 0.0
+            for v in HC_.V:
+                if not getattr(v, 'is_interface', False):
+                    continue
+                F = multiphase_stress_force(v, dim=3, mps=mps, HC=HC_)
+                mag = float(np.linalg.norm(F))
+                if mag > mx:
+                    mx = mag
+            return mx
+
+        f0 = max_iface_F(HC)
+        cons0 = compute_conservation(HC, dim=3)
+        n_verts0 = sum(1 for _ in HC.V)
+        n_iface0 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+
+        self.assertAlmostEqual(
+            f0, self.EXPECTED_STEP0_MAXF,
+            delta=self.REL_TOL * self.EXPECTED_STEP0_MAXF,
+            msg=(f"Step-0 max|F| {f0:.4e} drifted from expected "
+                 f"{self.EXPECTED_STEP0_MAXF:.4e} by >{self.REL_TOL*100:.1f}% "
+                 "(A.5.a curvature-stencil floor on the frozen spherical mesh).")
+        )
+
+        c_s = float(np.sqrt(K_d / rho_d))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:3] - nb.x_a[:3]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:3] - nb.x_a[:3]) > 1e-15
+        )
+        dt_acoustic = 0.25 * dx_min / c_s
+        dt_capillary = 0.5 * np.sqrt(rho_d * dx_min ** 3 / gamma)
+        dt = min(dt_acoustic, dt_capillary)
+
+        f_history = []
+        vol_history = []
+
+        def zero_u_callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
+            f_history.append(max_iface_F(HC_cb))
+            vol_history.append(compute_conservation(HC_cb, dim=3)['volume_total'])
+            for v in HC_cb.V:
+                v.u[:] = 0.0
+
+        euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS, dim=3,
+            bc_set=bc_set, callback=zero_u_callback,
+            retopologize_fn=retopo_fn,
+            remesh_mode=params['remesh_mode'],
+            remesh_kwargs=params['remesh_kwargs'],
+        )
+
+        self.assertEqual(len(f_history), self.N_STEPS)
+
+        # f_history[k] is the state after step (k+1); the plateau starts at
+        # step SETTLE_STEPS, i.e. history index SETTLE_STEPS - 1.
+        plateau = np.asarray(f_history[self.SETTLE_STEPS - 1:])
+
+        self.assertAlmostEqual(
+            float(plateau[0]), self.EXPECTED_PLATEAU_MAXF,
+            delta=self.REL_TOL * self.EXPECTED_PLATEAU_MAXF,
+            msg=(f"Plateau max|F| {plateau[0]:.4e} drifted from expected "
+                 f"{self.EXPECTED_PLATEAU_MAXF:.4e} by >{self.REL_TOL*100:.1f}% "
+                 "(post-retopo steady state under u=0).")
+        )
+
+        rel_spread = float((plateau.max() - plateau.min()) / plateau[-1])
+        self.assertLess(
+            rel_spread, 1e-10,
+            msg=(f"Post-retopo max|F| spread {rel_spread:.3e} over the "
+                 f"plateau window (steps {self.SETTLE_STEPS}..{self.N_STEPS}); "
+                 "expected bit-stable (2000-step long-run had std=0.0, "
+                 "single unique value).")
+        )
+
+        cons1 = compute_conservation(HC, dim=3)
+        mass_drift = abs(cons1['mass_total'] - cons0['mass_total']) / abs(cons0['mass_total'])
+        self.assertLess(
+            mass_drift, 1e-10,
+            msg=(f"Mass drift {mass_drift:.3e} step0->final; expected "
+                 "machine-precision Lagrangian conservation (long-run 8.78e-15).")
+        )
+
+        # Volume: the step0->step1 jump is the documented boundary dual-cell
+        # zeroing artefact (|dV/V0| ~ 0.305).  Volume is bit-stable from the
+        # plateau onward, so check drift across the plateau window only.
+        vol_plateau = np.asarray(vol_history[self.SETTLE_STEPS - 1:])
+        vol_spread = float(
+            (vol_plateau.max() - vol_plateau.min()) / abs(vol_plateau[-1])
+        )
+        self.assertLess(
+            vol_spread, 1e-10,
+            msg=(f"Volume spread {vol_spread:.3e} across the plateau window; "
+                 "expected bit-stable from step 2 (long-run had spread 0.0).")
+        )
+
+        n_verts1 = sum(1 for _ in HC.V)
+        n_iface1 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        self.assertEqual(n_verts1, n_verts0)
+        self.assertEqual(n_iface1, n_iface0)
+
+
 if __name__ == '__main__':
     unittest.main()

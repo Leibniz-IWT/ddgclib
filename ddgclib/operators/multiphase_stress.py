@@ -110,6 +110,7 @@ def multiphase_stress_force(
     mps=None,
     HC=None,
     pressure_model=None,
+    curvature_path: str = 'integrated',
 ) -> np.ndarray:
     """Integrated force on a dual cell with per-phase summed stress.
 
@@ -185,12 +186,16 @@ def multiphase_stress_force(
 
     # --- Surface tension on sharp interface vertices only ---
     if is_interface_i:
-        F += _interface_surface_tension(v, dim, mps)
+        F += _interface_surface_tension(
+            v, dim, mps, HC=HC, curvature_path=curvature_path,
+        )
 
     return F
 
 
-def _interface_surface_tension(v, dim: int, mps) -> np.ndarray:
+def _interface_surface_tension(
+    v, dim: int, mps, HC=None, curvature_path: str = 'integrated',
+) -> np.ndarray:
     """Compute surface tension force on a sharp interface vertex.
 
     In both 2D and 3D the surface tension force is already integrated
@@ -198,12 +203,33 @@ def _interface_surface_tension(v, dim: int, mps) -> np.ndarray:
 
         F_st_i = integral_{Gamma_i} gamma * kappa * N dS
 
-    - **3D**: cotangent-weight Heron curvature restricted to the
-      interface sub-mesh (``hndA_i_interface``).  ``F_st = -gamma * HNdA_i``.
-    - **2D**: integrated dual curvature from the Fundamental Theorem of
-      Calculus applied to the tangent vector of the interface curve
-      (``surface_tension_force_2d``).  ``F_st = gamma * (t_next - t_prev)``,
-      which reconstructs a constant-curvature arc to machine precision.
+    Parameters
+    ----------
+    curvature_path : {'integrated', 'csf_dual'}
+        Discrete curvature stencil:
+
+        - ``'integrated'`` (default): the FTC / cotangent-Heron form.
+          3D — cotangent-weight Heron curvature restricted to the
+          interface sub-mesh (``hndA_i_interface``).
+          2D — Fundamental Theorem of Calculus on the tangent vector of
+          the piecewise-linear interface (``surface_tension_force_2d``,
+          ``F_st = gamma * (t_next - t_prev)``).  Exact for piecewise
+          linear curves; on a polygon approximating a smooth interface
+          the static-droplet residual converges first-order in mesh
+          spacing — see plan note 2026-05-06.
+        - ``'csf_dual'``: an experimental Continuum-Surface-Force form
+          that aligns the curvature stencil with the dual face-area
+          vector S_inner used by the per-phase pressure flux::
+
+              F_st_csf = gamma * |Δt| / |S_inner| * S_inner
+
+          Same magnitude as the FTC form, but the force direction is
+          the dual-chord outward-normal direction rather than the
+          tangent-difference direction.  Used as an A/B probe to
+          quantify how much of the residual is direction-mismatch vs.
+          magnitude-mismatch on irregular meshes.  Not a replacement for
+          ``'integrated'`` — does not converge to ``γ κ N`` at the same
+          order on smooth interfaces.
     """
     interface_nbs = {nb for nb in v.nn if getattr(nb, 'is_interface', False)}
     if len(interface_nbs) < 2:
@@ -218,14 +244,102 @@ def _interface_surface_tension(v, dim: int, mps) -> np.ndarray:
     if gamma == 0.0:
         return np.zeros(dim)
 
+    if curvature_path == 'csf_dual':
+        return _csf_dual_surface_tension(v, dim, gamma, HC, interface_nbs)
+
+    if curvature_path == 'stokes':
+        # Stokes-theorem boundary integral on the barycentric dual cell
+        # of v_i restricted to interface triangles.  3D only; 2D delegates
+        # to the existing FTC form which is already an exact Stokes
+        # discretisation on piecewise-linear curves.
+        if dim == 3:
+            from ddgclib._curvatures_heron import integrated_hndA_i_interface
+            F3 = integrated_hndA_i_interface(
+                v, interface_nbs | {v}, HC=HC, gamma=gamma,
+            )
+            return F3[:dim]
+        F = np.zeros(dim)
+        F[:2] = surface_tension_force_2d(v, gamma, interface_nbs)
+        return F
+
+    if curvature_path != 'integrated':
+        raise ValueError(
+            f"Unknown curvature_path={curvature_path!r}; "
+            f"expected 'integrated', 'stokes', or 'csf_dual'."
+        )
+
     if dim == 3:
         from ddgclib._curvatures_heron import hndA_i_interface
-        HNdA, _C_i = hndA_i_interface(v, interface_nbs | {v})
+        HNdA, _C_i = hndA_i_interface(v, interface_nbs | {v}, HC=HC)
         return -gamma * HNdA[:dim]
     else:
         F = np.zeros(dim)
         F[:2] = surface_tension_force_2d(v, gamma, interface_nbs)
         return F
+
+
+def _csf_dual_surface_tension(
+    v, dim: int, gamma: float, HC, interface_nbs,
+) -> np.ndarray:
+    """Continuum-Surface-Force surface tension aligned with the dual
+    face-area vector ``S_inner``.
+
+    Constructs the same |F_st| as the ``'integrated'`` path but in the
+    dual-chord outward-normal direction.  Used as an A/B diagnostic to
+    quantify how much of the static-droplet residual is direction
+    mismatch (S_inner not anti-parallel to t_next - t_prev on irregular
+    polygons) vs magnitude mismatch (chord length ≠ R·Δθ).
+
+    For ``γ = 0`` this returns zero exactly.  For a flat interface with
+    ``γ > 0`` and ``κ = 0``, ``Δt = 0`` so this returns zero — passes
+    the 2A regression guard.
+    """
+    if gamma == 0.0:
+        return np.zeros(dim)
+
+    if dim == 3:
+        # Magnitude: |HNdA| from the cotangent-Heron stencil; direction:
+        # S_inner unit vector from the dual face-area accumulation.
+        from ddgclib._curvatures_heron import hndA_i_interface
+        HNdA, _C_i = hndA_i_interface(v, interface_nbs | {v}, HC=HC)
+        delta_t_mag = float(np.linalg.norm(HNdA[:dim]))
+    else:
+        from ddgclib.operators.curvature_2d import (
+            integrated_curvature_normal_2d,
+        )
+        delta_t = integrated_curvature_normal_2d(v, interface_nbs)
+        delta_t_mag = float(np.linalg.norm(delta_t))
+
+    if delta_t_mag < 1e-30:
+        return np.zeros(dim)
+
+    # S_inner = sum over neighbours j of frac_inner(i,j) * A_ij — the
+    # sum of dual-face area vectors weighted by each face's interior-side
+    # phase fraction.  For a 2-phase interface vertex with phase set
+    # {0, 1}, "interior side" is the higher-phase index by convention.
+    from ddgclib.operators.stress import dual_area_vector
+    from ddgclib.geometry._dual_split_2d import edge_phase_area_fractions
+    phases = sorted(int(k) for k in getattr(v, 'interface_phases', set()))
+    if len(phases) < 2:
+        return np.zeros(dim)
+    inner_phase = phases[-1]
+
+    S_inner = np.zeros(dim)
+    for v_j in v.nn:
+        A_ij = dual_area_vector(v, v_j, HC, dim)
+        fractions = edge_phase_area_fractions(v, v_j, dim=dim, interface=HC)
+        if inner_phase in fractions:
+            S_inner += fractions[inner_phase] * A_ij[:dim]
+
+    s_mag = float(np.linalg.norm(S_inner))
+    if s_mag < 1e-30:
+        return np.zeros(dim)
+
+    # F_st_csf = gamma * |Δt| / |S_inner| * S_inner.  This is the
+    # FTC magnitude redirected along S_inner — same direction as the
+    # outward normal of the dual chord (= the area vector the per-phase
+    # pressure flux integrates against).
+    return gamma * delta_t_mag / s_mag * S_inner
 
 
 def multiphase_stress_acceleration(
@@ -234,10 +348,12 @@ def multiphase_stress_acceleration(
     mps=None,
     HC=None,
     pressure_model=None,
+    curvature_path: str = 'integrated',
 ) -> np.ndarray:
     """Acceleration from multiphase stress: a_i = F_i / m_i."""
     F = multiphase_stress_force(v, dim=dim, mps=mps, HC=HC,
-                                pressure_model=pressure_model)
+                                pressure_model=pressure_model,
+                                curvature_path=curvature_path)
     if v.m < 1e-30:
         return np.zeros(dim)
     return F / v.m

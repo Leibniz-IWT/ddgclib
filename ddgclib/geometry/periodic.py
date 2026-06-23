@@ -294,8 +294,25 @@ def _fixup_periodic_duals(HC, dim, periodic_axes, domain_bounds):
             # Find shared dual vertices
             shared_duals = v1.vd.intersection(v2.vd)
 
-            # Find the triangles sharing this edge
-            common_nbs = v1.nn.intersection(v2.nn)
+            # Find the triangles sharing this edge.  Prefer the
+            # explicit simplex cache (triangles only — 2D path) so
+            # ghost K_3 cliques near the periodic seam don't produce
+            # spurious dual fix-ups.
+            common_nbs = None
+            simplices = getattr(HC, '_simplices', None)
+            if simplices and len(simplices[0]) == 3:
+                try:
+                    from hyperct.ddg import get_edge_apex_map
+                    apex_map = get_edge_apex_map(HC)
+                    if apex_map is not None:
+                        apex = apex_map.get(
+                            frozenset((id(v1), id(v2))), [],
+                        )
+                        common_nbs = list(dict.fromkeys(apex))
+                except ImportError:
+                    pass
+            if common_nbs is None:
+                common_nbs = v1.nn.intersection(v2.nn)
             for v3 in common_nbs:
                 x3 = v3.x_a[:dim]
                 x3_mi = min_image(x1, x3)
@@ -455,8 +472,13 @@ def retopologize_periodic(
             HC, real_verts, dim, simplices=simplices,
         )
 
-    # 7. Topological boundary detection
-    dV = HC.boundary()
+    # 7. Topological boundary detection — prefer the exact simplex-aware
+    #    path when the cache was just populated.
+    if getattr(HC, '_simplices', None) is not None:
+        from hyperct.ddg import boundary_from_simplices
+        dV = boundary_from_simplices(HC, dim)
+    else:
+        dV = HC.boundary()
 
     # 8-9. Tag boundaries: periodic faces are interior, UNLESS vertex
     #      is also on a non-periodic boundary (e.g. wall at y=0).
