@@ -138,7 +138,7 @@ from ddgclib.operators.gradient import acceleration
 - Advance velocity and position with any integrator from `ddgclib/dynamic_integrators.py` (Euler, symplectic Euler, RK45, adaptive CFL, …).
 - Update pressure from the chosen EOS using the new dual volume ($\mathrm{Vol}_i$).
 - Retopologize and rebuild duals for the next step.
-- 
+
 ## Notes
 
 - The formulation uses a compact two-point stencil (only the two vertices sharing each primal edge) and never divides by volume inside the force loop.

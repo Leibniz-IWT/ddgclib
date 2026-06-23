@@ -3,6 +3,79 @@
 # ddgclib
 Experimental library for discrete differential geometry curvature in fluid simulations, especially useful for problems with complex and changing topologies.
 
+ddgclib is a **Lagrangian** fluid simulator built on **discrete differential geometry (DDG)**: the mesh *is* the fluid. Every vertex carries velocity, pressure and mass and is advected by the flow, and the physics is expressed as *integrated* operators over the dual cells of a simplicial complex (the `Complex` data structure from the [`hyperct`](https://github.com/stefan-endres/hyperct) package). At equilibrium the integrated DDG stress operators reproduce analytical solutions (Hagen-Poiseuille flow, hydrostatic column) to machine precision; active work extends this to dynamic multiphase flows.
+
+> Status: Alpha (v0.4.3), under active refactoring. The **dynamic continuum (Cauchy stress)** pipeline is the active core; the older **mean curvature flow** pipeline (`mean_flow_integrators/`, `cases_mean_flow/`) is legacy.
+
+## Core capabilities
+
+- **Cauchy stress tensor operators** (`ddgclib.operators.stress`) — the integrated momentum
+  equation on Lagrangian parcels: `F_stress_i = Σ_j σ_f · A_ij` with `σ = −pI + 2με`.
+  Validated against Hagen-Poiseuille and hydrostatic equilibrium.
+- **Dynamic integrators** (`ddgclib.dynamic_integrators`) — `euler`, `symplectic_euler`,
+  `rk45`, `euler_adaptive`, `euler_velocity_only`, plus a `DynamicSimulation` runner. All
+  retopologize the moving mesh each step and apply boundary conditions automatically.
+- **Initial & boundary conditions** — composable `InitialCondition` / `BoundaryCondition`
+  classes (`CompositeIC`, `HydrostaticPressure`, `NoSlipWallBC`, `PeriodicInletBC`,
+  `OutletDeleteBC`, …) managed via `BoundaryConditionSet`.
+- **Domain builders** (`ddgclib.geometry.domains`) — one-liners for standard CFD meshes:
+  `rectangle`, `disk`, `annulus`, `l_shape`, `box`, `ball`, `cylinder_volume`, `pipe`,
+  plus periodic and multiphase-droplet variants. Each returns a `DomainResult` with the
+  mesh, boundary vertices, named boundary groups, and metadata.
+- **Parametric surfaces** (`ddgclib.geometry`) — `sphere`, `catenoid`, `cylinder`,
+  `hyperboloid`, `torus`, `plane` with translate/scale/rotate transforms.
+- **Multiphase framework** — sharp-interface model (`multiphase.py`), phase-aware stress and
+  surface tension (`operators.multiphase_stress`, `operators.surface_tension`,
+  `operators.curvature_2d`), exact dual-volume splitting, and pressure-preserving mass
+  redistribution.
+- **Equation of state** (`ddgclib.eos`) — `TaitMurnaghan` (weakly compressible liquid),
+  `IdealGas`, and a `MultiphaseEOS` dispatcher.
+- **DEM submodule** (`ddgclib.dem`) — self-contained Discrete Element Method: particles,
+  contact detection, Hertz / linear-spring-dashpot force models, sintered bonds, capillary
+  liquid bridges, and two-way fluid-particle coupling.
+- **Periodic boundary conditions** (`ddgclib.geometry.periodic`) — ghost-cell merge with
+  minimum-image duals, wired through all integrators.
+- **Backends** — dual-mesh computation runs on NumPy (default), multiprocessing, PyTorch
+  CPU, or CUDA via `compute_vd(HC, method="barycentric", backend="gpu")`.
+- **Validation & data** — analytical integrated comparisons (`ddgclib.analytical`),
+  conservation diagnostics (`ddgclib.data`), JSON state I/O, `StateHistory` recording, and
+  matplotlib/Polyscope visualization and animation (`ddgclib.visualization`).
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) and [FEATURES.md](FEATURES.md) for the full module
+map and feature roadmap, and the Sphinx docs (below) for the API reference and user guides.
+
+## Quick start: a dynamic simulation
+
+The canonical workflow is **domain → dual mesh → physics → integrate**. Physics parameters
+are bound to the acceleration function `dudt_i` with `functools.partial` (this avoids an
+`HC` keyword clash with the integrator's first positional argument):
+
+```python
+from functools import partial
+from hyperct.ddg import compute_vd
+from ddgclib.geometry.domains import rectangle
+from ddgclib.operators.stress import dudt_i
+from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.initial_conditions import CompositeIC, ZeroVelocity, UniformMass
+from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
+
+# 1. Domain (mesh + boundary groups)
+result = rectangle(L=10.0, h=1.0, refinement=3)
+HC, bV = result.HC, result.bV
+
+# 2. Dual mesh
+compute_vd(HC, method="barycentric")
+
+# 3. Initial & boundary conditions
+CompositeIC(ZeroVelocity(dim=2), UniformMass(total_volume=result.metadata['volume'], rho=1.0)).apply(HC, bV)
+bc_set = BoundaryConditionSet()
+bc_set.add(NoSlipWallBC(dim=2), result.boundary_groups['walls'])
+
+# 4. Integrate (mesh moves with the fluid)
+dudt_fn = partial(dudt_i, dim=2, mu=0.1, HC=HC)
+t = symplectic_euler(HC, bV, dudt_fn, dt=1e-4, n_steps=1000, dim=2, bc_set=bc_set)
+```
+
 # Installation
 
 ## Conda (recommended)
