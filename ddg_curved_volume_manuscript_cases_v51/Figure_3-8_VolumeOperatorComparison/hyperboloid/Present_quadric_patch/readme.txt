@@ -1,0 +1,9 @@
+Present_quadric_patch
+
+Run the present quadric-patch recomputation for this geometry.
+
+Run from this folder:
+
+python Present_quadric_patch.py
+
+The script reruns ../hyperboloid_all_methods.py from source geometry/mesh data, then extracts this method's error column into a method-specific result CSV and TXT file.

@@ -1,0 +1,32 @@
+paraboloid: computing level 1/4
+
+
+paraboloid: computing level 2/4
+
+paraboloid: computing level 3/4
+
+paraboloid: computing level 4/4
+
+Paraboloid cap volume test: Table 3-1 mesh with projected subdivisions
+V_exact = 2*pi = 6.2831853071795862
+level curved_faces total_faces h_mean      PL_err_%       IRL_Evrard_err_% THINCQQ_err_%  sphere_err_%    present_err_%
+ 0    117        174 5.115942e-01 4.4534763476535950e+00 1.3711724626753828e-12 2.3794700562375626e+00 9.7437213987809130e+00 3.7583091692213050e-03 (Table 3-1 mesh)
+ 1    468        696 2.584928e-01 1.2411784351055410e+00 1.9790118017995216e-12 5.9643242758040926e-01 1.3645785824097647e+01 5.2385976947656047e-05 (projected subdivision level 1)
+ 2   1872       2784 1.296711e-01 3.3932257071367222e-01 5.3588812433014192e-11 1.4866745730868841e-01 1.4733299178474146e+01 4.8027263785780958e-05 (projected subdivision level 2)
+ 3   7488      11136 6.490370e-02 9.1900214558138918e-02 4.3750296618353710e-11 3.7025726214332498e-02 1.5011705873965496e+01 1.5937240710869843e-05 (projected subdivision level 3)
+
+Observed PL order:      1.880
+Observed Evrard forward-operator order: round-off
+Observed THINC/QQ order:2.016
+Observed sphere order:  -0.199
+Observed present order: 2.390
+
+Timing summary for paraboloid:
+  PLIC / PL                    118.5 ms
+  Evrard-type paraboloid       5.220 s
+  THINC/QQ                     1.113 s
+  Strobl sphere overlap        3.2 ms
+  Present quadric patch        12.621 s
+  case total                   19.764 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/paraboloid/paraboloid.png

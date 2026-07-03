@@ -1,0 +1,19 @@
+#Stylesheet for presentation plots
+
+# Set figure
+figure.figsize : 4, 3					#figure size in inches
+figure.dpi: 300							#dots per inch
+
+# Set line widths
+axes.linewidth : 1						#line width of the axes (a.k.a. the bounding rectangle of the graph)
+grid.linewidth : 1						#line width of the grid (if shown)
+lines.linewidth : 1.5					#width of the individual data lines 
+lines.markersize: 3.5					#size of markers (a.k.a. data points)
+
+# Font sizes
+axes.labelsize: 14						#font size of axis labels/titles
+xtick.labelsize: 13						#font size of x-tick labels (i.e. numbers)
+ytick.labelsize: 13						#font size of y-tick labels (i.e. numbers)
+legend.fontsize: 12						#font size of the legend labels
+font.size: 14							#general font size if not otherwise specified
+

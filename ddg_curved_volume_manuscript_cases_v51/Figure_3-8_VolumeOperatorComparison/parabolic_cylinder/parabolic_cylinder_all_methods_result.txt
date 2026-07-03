@@ -1,0 +1,32 @@
+
+
+
+
+parabolic_cylinder: computing mesh 1/4 (Table 3-1 exterior mesh)
+
+parabolic_cylinder: computing mesh 2/4 (midpoint subdivision level 1)
+parabolic_cylinder: computing mesh 3/4 (midpoint subdivision level 2)
+parabolic_cylinder: computing mesh 4/4 (midpoint subdivision level 3)
+Parabolic-cylinder volume test: y=x^2, x in [-sqrt(2), sqrt(2)], z in [-1, 1], y <= 2
+V_exact = Table 3-1 reference 5.65685425*(4/3) = 7.5424723333333334
+level curved_faces total_faces h_mean      PL_err_%       PPIC_err_%     THINCQQ_err_%  sphere_err_%    present_err_%
+ 1    104        224 4.939818e-01 1.2308382036669359e+00 5.2754947218014880e-01 6.1081348172988703e-01 2.7385144185122321e+01 9.4739842636032838e-05 (Table 3-1 exterior mesh)
+ 2    416        896 2.477698e-01 3.0770955764709329e-01 1.3061569888635299e-01 1.5270395556221869e-01 2.1984289451971463e+01 7.1549488038364376e-05 (midpoint subdivision level 1)
+ 3   1664       3584 1.239816e-01 7.6927396141682217e-02 3.2577064797489542e-02 3.8177165842125091e-02 2.0611399174672666e+01 4.5717619073484253e-06 (midpoint subdivision level 2)
+ 4   6656      14336 6.200288e-02 1.9231855765959448e-02 8.1394747790434537e-03 9.5443843848833400e-03 2.0266070783804771e+01 7.2611786061251939e-07 (midpoint subdivision level 3)
+
+Observed PL order:      2.004
+Observed Evrard paraboloid Vpatch surrogate order: p=2.01
+Observed THINC/QQ order:2.004
+Observed sphere order:  0.140
+Observed present order: 2.510
+
+Timing summary for parabolic_cylinder:
+  PLIC / PL                    161.3 ms
+  Evrard-type paraboloid       616.3 ms
+  THINC/QQ                     1.026 s
+  Strobl sphere overlap        2.6 ms
+  Present quadric patch        10.717 s
+  case total                   13.603 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/parabolic_cylinder/parabolic_cylinder.png

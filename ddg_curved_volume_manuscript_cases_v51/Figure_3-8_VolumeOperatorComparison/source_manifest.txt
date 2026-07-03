@@ -1,0 +1,80 @@
+Figure 3-8 reproducibility source manifest
+
+Press/run entry points:
+- RUN_RECOMPUTE_FIGURE_3_8.py
+- RUN_RECOMPUTE_FIGURE_3_8.command
+- recompute_all_cases.py
+
+Top-level method wrappers called by the CSV generators. These files also keep
+the corresponding equations and literature references:
+- plic_pl_1998_1999.py
+- evrard_2023.py
+- xie_xiao_2017.py
+- strobl_2016.py
+- present_quadric_patch_2026.py
+
+Local manuscript/helper libraries bundled in this figure folder:
+- _curved_volume.py
+- curved_volume/
+- ddgclib/
+- neatplot-main/
+- install_needed_libs_figure_3_8.py
+
+Top-level static geometry generators called by the CSV generators:
+- sphere_mesh.py
+- cylinder_mesh.py
+- paraboloid_mesh.py
+- hyperboloid_mesh.py
+- parabolic_cylinder_mesh.py
+- hyperbolic_cylinder_mesh.py
+- mesh_geometry_common.py
+- table31_reference.py
+
+Static panels 3-8a--3-8f
+Source scripts:
+- sphere/sphere_all_methods.py
+- cylinder/cylinder_all_methods.py
+- paraboloid/paraboloid_all_methods.py
+- hyperboloid/hyperboloid_all_methods.py
+- parabolic_cylinder/parabolic_cylinder_all_methods.py
+- hyperbolic_cylinder/hyperbolic_cylinder_all_methods.py
+
+Static mesh inputs:
+- msh/cylinder.msh and its generated sidecar CSV files
+- msh/snapped_paraboloid_ascii.msh and its generated sidecar CSV files
+- msh/coarse_hyperboloid.msh and its generated sidecar CSV files
+- msh/snapped_y_eq_x2_ascii.msh and its generated sidecar CSV files
+- msh/snapped_x2_minus_y2_ascii.msh and its generated sidecar CSV files
+
+Table 3-1 anchor data for the shared static level-0 rows:
+- source_data/table_3_1/cylinder_COEFFS_Transformed_Volume.csv
+- source_data/table_3_1/snapped_paraboloid_ascii_COEFFS_Transformed_Volume.csv
+- source_data/table_3_1/coarse_hyperboloid_COEFFS_Transformed_Volume.csv
+- source_data/table_3_1/snapped_y_eq_x2_ascii_COEFFS_Transformed_Volume.csv
+- source_data/table_3_1/snapped_x2_minus_y2_ascii_COEFFS_Transformed_Volume.csv
+
+Dynamic panel 3-8g: cube-to-sphere
+Source script:
+- cube2sphere/cube2sphere_all_methods.py
+
+Raw simulation artifacts used:
+- source_data/figure_3_3/_summary_PL.csv
+- source_data/figure_3_3/_summary_CurvedVolume.csv
+- source_data/figure_3_3/cube_present_surface_states/surface_iter_*.msh
+
+Dynamic panel 3-8h: oscillating droplet
+Source script:
+- droplet_oscillation/droplet_oscillation_all_methods.py
+
+Raw simulation artifacts used:
+- source_data/figure_3_7/_summary_PL.csv
+- source_data/figure_3_7/_summary_CurvedVolume.csv
+- source_data/figure_3_7/droplet_present_surface_states/surface_iter_*.msh
+
+Generated outputs in this folder:
+- */*_all_methods_result.csv
+- */*/*_result.csv
+- Figure_3-8a.png ... Figure_3-8h.png
+- Figure_3-8.pdf
+
+The generated result CSV files are overwritten by recompute_all_cases.py.

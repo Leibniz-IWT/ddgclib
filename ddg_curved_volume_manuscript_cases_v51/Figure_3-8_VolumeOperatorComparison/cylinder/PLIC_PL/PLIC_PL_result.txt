@@ -1,0 +1,4 @@
+Method: PLIC / PL baseline
+Rows: 4
+CSV: PLIC_PL_result.csv
+Finest-grid error percent: 1.6774501596921017e-02

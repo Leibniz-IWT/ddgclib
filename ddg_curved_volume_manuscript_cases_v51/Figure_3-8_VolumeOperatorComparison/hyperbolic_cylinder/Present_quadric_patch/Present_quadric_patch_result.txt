@@ -1,0 +1,4 @@
+Method: Present class-aware quadric-patch Vpatch
+Rows: 4
+CSV: Present_quadric_patch_result.csv
+Finest-grid error percent: 7.9508543621446511e-09

@@ -1,0 +1,32 @@
+cylinder: computing level 1/4
+
+
+cylinder: computing level 2/4
+
+cylinder: computing level 3/4
+
+cylinder: computing level 4/4
+
+Cylinder volume test: x^2+y^2=1, z in [-0.5, 0.5]
+V_exact = pi = 3.1415926535897931
+level curved_faces total_faces h_mean      PL_err_%       PPIC_err_%     THINCQQ_err_%  sphere_err_%    present_err_%
+ 0    180        374 2.783453e-01 1.0693774682556905e+00 6.1542719040437155e-01 4.8573651373171800e-01 4.4355121871385833e-01 4.0663892575212887e-06 (Table 3-1 mesh)
+ 1    720       1496 1.396002e-01 2.6814219966624525e-01 1.5408188900475592e-01 1.2167581043647960e-01 1.1378098788808224e+01 2.5450387209332257e-07 (subdivision level 1)
+ 2   2880       5984 6.985336e-02 6.7085510311979707e-02 3.8534524467365411e-02 3.0434117587533189e-02 1.4735637111855372e+01 1.5896652606530589e-08 (subdivision level 2)
+ 3  11520      23936 3.493333e-02 1.6774501596921017e-02 9.6345091243020455e-03 7.6094781390072218e-03 1.5622553730052029e+01 9.9794497265457725e-10 (subdivision level 3)
+
+Observed PL order:      2.002
+Observed Evrard paraboloid Vpatch surrogate order: 2.003
+Observed THINC/QQ order:2.003
+Observed sphere order:  -1.581
+Observed present order: 4.005
+
+Timing summary for cylinder:
+  PLIC / PL                    254.3 ms
+  Evrard-type paraboloid       1.311 s
+  THINC/QQ                     2.034 s
+  Strobl sphere overlap        4.2 ms
+  Present quadric patch        15.934 s
+  case total                   21.261 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/cylinder/cylinder.png

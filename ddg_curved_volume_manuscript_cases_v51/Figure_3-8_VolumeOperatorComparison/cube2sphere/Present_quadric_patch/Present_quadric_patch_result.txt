@@ -1,0 +1,4 @@
+Method: Present class-aware quadric-patch Vpatch
+Rows: 1000
+CSV: Present_quadric_patch_result.csv
+Final error percent: 4.4261070000000000e-02

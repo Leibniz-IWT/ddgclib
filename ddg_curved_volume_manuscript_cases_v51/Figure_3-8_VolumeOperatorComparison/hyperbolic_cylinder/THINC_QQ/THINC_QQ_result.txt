@@ -1,0 +1,4 @@
+Method: THINC/QQ quadratic Gaussian-quadrature Vpatch
+Rows: 4
+CSV: THINC_QQ_result.csv
+Finest-grid error percent: 3.7141531115483543e-03

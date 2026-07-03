@@ -1,0 +1,8 @@
+numpy
+pandas
+matplotlib
+meshio
+overlap
+pypdf
+reportlab
+Pillow

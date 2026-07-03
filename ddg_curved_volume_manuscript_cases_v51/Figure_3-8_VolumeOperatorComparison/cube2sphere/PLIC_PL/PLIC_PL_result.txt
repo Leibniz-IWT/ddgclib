@@ -1,0 +1,4 @@
+Method: PLIC / PL baseline
+Rows: 1000
+CSV: PLIC_PL_result.csv
+Final error percent: 7.1423030000000001e+00

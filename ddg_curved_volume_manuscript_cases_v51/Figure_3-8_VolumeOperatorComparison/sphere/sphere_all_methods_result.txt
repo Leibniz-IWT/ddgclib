@@ -1,0 +1,28 @@
+sphere: computing level 1/4
+sphere: computing level 2/4
+sphere: computing level 3/4
+sphere: computing level 4/4
+Unit sphere volume test using the manuscript curved-volume pipeline
+V_exact = 4.1887902047863905
+level faces h_mean      PL_err_%       PPIC_err_%     THINCQQ_err_%  Strobl_err_%    present_err_%
+ 0     20 1.051462e+00 3.9453861708747439e+01 2.0298405566182129e+01 1.9847189153241168e+01 1.2722218725854070e-12 0.0000000000000000e+00
+ 1     80 5.822835e-01 1.2654679999693599e+01 5.8740341976836090e+00 5.7606409181393978e+00 2.1203697876423447e-14 2.3324067664065788e-13
+ 2    320 2.993321e-01 3.3839251401412280e+00 1.5211698601903503e+00 1.4991859175841442e+00 4.6648135328131575e-13 1.1449996853268662e-12
+ 3   1280 1.507297e-01 8.6061573702501637e-01 3.8359785122874118e-01 3.7865099613137532e-01 5.5129614478700962e-13 1.9083328088781102e-13
+
+Observed order:
+  PL enclosed volume:            1.971
+  Evrard paraboloid Vpatch surrogate: 2.041
+  THINC/QQ quadratic Vpatch approx:  2.036
+  sphere/hex overlap Vpatch:       0.476 (not meaningful when error is round-off)
+  Curved (Quadric Patch) Volume: 0.161 (not meaningful when error is round-off)
+
+Timing summary for sphere:
+  PLIC / PL                    13.9 ms
+  Evrard-type paraboloid       94.7 ms
+  THINC/QQ                     169.8 ms
+  Strobl sphere overlap        2.2 ms
+  Present quadric patch        1.633 s
+  case total                   1.943 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/sphere/sphere.png

@@ -1,0 +1,33 @@
+hyperboloid: computing level 1/4
+
+
+hyperboloid: computing level 2/4
+
+hyperboloid: computing level 3/4
+
+hyperboloid: computing level 4/4
+
+Hyperboloid volume test: x^2+y^2-z^2=1, z in [-1, 1]
+V_exact = 8*pi/3 = 8.3775804095727811
+level curved_faces total_faces h_mean      PL_err_%       PPIC_err_%     THINCQQ_err_%  sphere_err_%    present_err_%
+ 0    124        238 5.296519e-01 9.0840658490656501e-01 1.3921963607085177e+00 5.4732614783473765e-01 2.5209439446445796e+01 5.8744598071197160e-03 (Table 3-1 mesh)
+ 1    496        952 2.660821e-01 2.2683784020506281e-01 3.5089731200034607e-01 1.4559198341262639e-01 2.6659847757596498e+01 6.0027672635223133e-03 (subdivision level 1)
+ 2   1984       3808 1.331980e-01 5.6707022032892969e-02 8.7856949857111816e-02 3.6925060939738664e-02 2.7006854297794387e+01 1.7973226697044836e-03 (subdivision level 2)
+ 3   7936      15232 6.661863e-02 1.4176819639316360e-02 2.1972812448285254e-02 9.2638167263828404e-03 2.7090294907342955e+01 4.6460385105202032e-04 (subdivision level 3)
+
+Observed PL order:      2.006
+Observed Evrard paraboloid Vpatch surrogate order: 2.001
+Observed THINC/QQ Appendix A/B order:1.969
+Observed sphere order:  -0.033
+Observed present order: 1.276
+Observed present tail order: p=1.95
+
+Timing summary for hyperboloid:
+  PLIC / PL                    160.7 ms
+  Evrard-type paraboloid       880.1 ms
+  THINC/QQ                     1.300 s
+  Strobl sphere overlap        2.6 ms
+  Present quadric patch        47.564 s
+  case total                   51.089 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/hyperboloid/hyperboloid.png

@@ -1,0 +1,14 @@
+Case: droplet_oscillation
+Mesh directory: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_7/droplet_present_surface_states
+PL summary: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_7/_summary_PL.csv
+Present-method summary: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_7/_summary_CurvedVolume.csv
+Workers: 8
+Rows: 2000
+CSV: droplet_oscillation_all_methods_result.csv
+Timing note: dynamic method times are aggregate worker times; case total is wall-clock. PL and present dynamic values are loaded from saved full-solver summaries.
+plic_pl_seconds: 0.009040
+evrard_type_paraboloid_seconds: 1149.672125
+thinc_qq_seconds: 322.106231
+strobl_sphere_overlap_seconds: 1.509905
+present_quadric_patch_seconds: 0.008767
+case_total_seconds: 186.153689

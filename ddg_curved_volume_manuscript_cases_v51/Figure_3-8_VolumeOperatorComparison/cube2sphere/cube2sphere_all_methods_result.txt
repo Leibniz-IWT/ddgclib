@@ -1,0 +1,14 @@
+Case: cube2sphere
+Mesh directory: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_3/cube_present_surface_states
+PL summary: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_3/_summary_PL.csv
+Present-method summary: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/source_data/figure_3_3/_summary_CurvedVolume.csv
+Workers: 8
+Rows: 1000
+CSV: cube2sphere_all_methods_result.csv
+Timing note: dynamic method times are aggregate worker times; case total is wall-clock. PL and present dynamic values are loaded from saved full-solver summaries.
+plic_pl_seconds: 0.003151
+evrard_type_paraboloid_seconds: 80.023842
+thinc_qq_seconds: 20.660173
+strobl_sphere_overlap_seconds: 0.727802
+present_quadric_patch_seconds: 0.003526
+case_total_seconds: 13.461585

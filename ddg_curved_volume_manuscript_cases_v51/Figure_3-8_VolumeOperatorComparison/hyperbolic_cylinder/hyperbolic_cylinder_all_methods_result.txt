@@ -1,0 +1,32 @@
+hyperbolic_cylinder: computing level 1/4
+
+
+hyperbolic_cylinder: computing level 2/4
+
+hyperbolic_cylinder: computing level 3/4
+
+hyperbolic_cylinder: computing level 4/4
+
+Hyperbolic-cylinder volume test: x^2-y^2=1, x in [sqrt(1+y^2), 3], y in [-2, 2], z in [0, 2]
+V_exact = 12.1684571396432197
+level curved_faces total_faces h_mean      PL_err_%       PPIC_err_%     THINCQQ_err_%  sphere_err_%    present_err_%
+ 0     72        294 5.085456e-01 5.2291159320927516e-01 1.2613039985417393e-01 2.3856438142733885e-01 7.7778068361948201e+01 3.2549028023036423e-05 (Table 3-1 mesh)
+ 1    288       1176 2.545377e-01 1.3057538634660695e-01 3.1289166280837243e-02 5.9477578679864009e-02 7.2046539788041116e+01 2.0360513813778487e-06 (subdivision level 1)
+ 2   1152       4704 1.273018e-01 3.2634933442175280e-02 7.8076042979177643e-03 1.4859157803377357e-02 7.0601998914042923e+01 1.2728274774287913e-07 (subdivision level 2)
+ 3   4608      18816 6.365504e-02 8.1581848783257582e-03 1.9509924609237613e-03 3.7141531115483543e-03 7.0240076271499532e+01 7.9508543621446511e-09 (subdivision level 3)
+
+Observed PL order:      2.002
+Observed Evrard paraboloid Vpatch surrogate order: p=2.01
+Observed THINC/QQ order:p=2.00
+Observed sphere order:  p=0.05
+Observed present order: p=4.00
+
+Timing summary for hyperbolic_cylinder:
+  PLIC / PL                    203.5 ms
+  Evrard-type paraboloid       529.1 ms
+  THINC/QQ                     832.3 ms
+  Strobl sphere overlap        3.0 ms
+  Present quadric patch        4.299 s
+  case total                   7.561 s
+
+Saved plot: /Users/songyideng/Downloads/2026_RST_Journal of Computational Physics_Deng/02_Figures/Figure_3-8_VolumeOperatorComparison/hyperbolic_cylinder/hyperbolic_cylinder.png

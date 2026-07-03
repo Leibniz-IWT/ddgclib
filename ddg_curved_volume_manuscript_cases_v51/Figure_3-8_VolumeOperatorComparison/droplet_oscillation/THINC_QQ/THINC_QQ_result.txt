@@ -1,0 +1,4 @@
+Method: THINC/QQ quadratic Gaussian-quadrature Vpatch
+Rows: 2000
+CSV: THINC_QQ_result.csv
+Final error percent: 3.3403233180192904e-01

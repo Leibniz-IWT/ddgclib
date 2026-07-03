@@ -1,0 +1,4 @@
+Method: Strobl-type sphere/hex overlap Vpatch
+Rows: 2000
+CSV: Strobl_sphere_overlap_result.csv
+Final error percent: 1.5504743444305014e-01

@@ -1,0 +1,4 @@
+Method: Evrard-type paraboloid Vpatch
+Rows: 4
+CSV: Evrard_type_paraboloid_result.csv
+Finest-grid error percent: 1.9509924609237613e-03

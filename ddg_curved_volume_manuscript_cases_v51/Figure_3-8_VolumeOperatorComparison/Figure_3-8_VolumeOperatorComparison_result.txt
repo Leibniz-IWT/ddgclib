@@ -1,0 +1,12 @@
+Figure 3-8 volume-operator comparison panels plotted from generated recomputation outputs
+
+Generated files:
+- Figure_3-8a.png: source=sphere/sphere_all_methods_result.csv, rows=4
+- Figure_3-8b.png: source=cylinder/cylinder_all_methods_result.csv, rows=4
+- Figure_3-8c.png: source=paraboloid/paraboloid_all_methods_result.csv, rows=4
+- Figure_3-8d.png: source=hyperboloid/hyperboloid_all_methods_result.csv, rows=4
+- Figure_3-8e.png: source=parabolic_cylinder/parabolic_cylinder_all_methods_result.csv, rows=4
+- Figure_3-8f.png: source=hyperbolic_cylinder/hyperbolic_cylinder_all_methods_result.csv, rows=4
+- Figure_3-8g.png: source=cube2sphere/cube2sphere_all_methods_result.csv, rows=1000
+- Figure_3-8h.png: source=droplet_oscillation/droplet_oscillation_all_methods_result.csv, rows=2000
+- Figure_3-8.pdf: pages=8

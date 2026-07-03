@@ -1,0 +1,4 @@
+Method: Strobl-type sphere/hex overlap Vpatch
+Rows: 4
+CSV: Strobl_sphere_overlap_result.csv
+Finest-grid error percent: 7.0240076271499532e+01
