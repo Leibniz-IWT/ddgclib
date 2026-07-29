@@ -276,9 +276,9 @@ def _triangle_quadrature_points(n: int) -> list[tuple[float, float, float, float
 
         x = l1*A + l2*B + l3*C
 
-    The integral is approximated as::
+    The weights sum to 1, so the integral is approximated as::
 
-        ∫_T f dA ≈ 2*Area * Σ w_i * f(x_i)
+        ∫_T f dA ≈ Area * Σ w_i * f(x_i)
 
     Parameters
     ----------

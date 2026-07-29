@@ -54,6 +54,7 @@ from typing import Callable
 import numpy as np
 
 from ddgclib.eos._base import EquationOfState
+from ddgclib.eos._multiphase_eos import interface_mean_pressure
 
 
 # Sentinel phase ID for interface vertices.  Chosen as -1 so that any
@@ -532,9 +533,11 @@ class MultiphaseSystem:
             ``rho_k = m_k / dual_vol_phase_k``
             ``p_k   = eos_k.pressure(rho_k)``
 
-        Sets ``v.p_phase[k]``, ``v.rho_phase[k]``, and ``v.p``
-        (which stores the **inner-phase** pressure for interface
-        vertices, or the single-phase pressure for bulk vertices).
+        Sets ``v.p_phase[k]``, ``v.rho_phase[k]``, and ``v.p`` (the
+        single-phase pressure for bulk vertices; for interface vertices
+        the **mean of the phase pressures actually present** at *v* —
+        the shared convention implemented by
+        :func:`ddgclib.eos._multiphase_eos.interface_mean_pressure`).
         """
         for v in HC.V:
             for k in range(self.n_phases):
@@ -553,12 +556,13 @@ class MultiphaseSystem:
             # interface vertices (v.phase == INTERFACE_PHASE) it is the
             # average of the phase pressures actually present at v.
             if getattr(v, 'is_interface', False) or v.phase < 0:
-                active = [
-                    v.p_phase[k]
-                    for k in v.interface_phases
-                    if 0 <= k < self.n_phases and v.p_phase[k] != 0.0
-                ]
-                v.p = float(np.mean(active)) if active else 0.0
+                # Shared convention (interface_mean_pressure): presence
+                # keyed on geometry/mass (mirroring the write-side gate
+                # above) — NOT on the pressure value: a phase with a
+                # legitimate 0.0 gauge pressure (P0=0, rho == rho0)
+                # must be included in the average (see
+                # docs_temp/audit/zero-gauge-pressure.md).
+                v.p = interface_mean_pressure(v, self.n_phases)
             else:
                 v.p = v.p_phase[v.phase]
 

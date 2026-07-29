@@ -18,13 +18,16 @@ class IdealGas(EquationOfState):
     Parameters
     ----------
     rho0 : float
-        Reference density [kg/m^3].
+        Reference density [kg/m^3].  Default 1.225 is the 15 degC ISA
+        sea-level air density.
     T : float
         Temperature [K].
     R_specific : float
         Specific gas constant [J/(kg·K)].  Default 287.058 (dry air).
     P0 : float or None
-        Reference pressure [Pa].  If None, computed as rho0 * R_specific * T.
+        Reference pressure [Pa].  If None, computed as rho0 * R_specific * T
+        (note: with the ISA rho0 default and T=293.15 K this is
+        103085 Pa, 1.7% above 1 atm).
     """
 
     def __init__(
@@ -44,8 +47,13 @@ class IdealGas(EquationOfState):
         return rho * self.R_specific * self.T
 
     def density(self, P: float | np.ndarray) -> float | np.ndarray:
+        """Inverse rho = P / (R_specific * T), floored at 0.
+
+        Negative pressures have no ideal-gas density; the floor
+        prevents a silent negative-density round trip.
+        """
         P = np.asarray(P, dtype=float)
-        return P / (self.R_specific * self.T)
+        return np.maximum(P, 0.0) / (self.R_specific * self.T)
 
     def sound_speed(self, rho: float | np.ndarray) -> float | np.ndarray:
         """Isothermal sound speed: c = sqrt(R_specific * T)."""

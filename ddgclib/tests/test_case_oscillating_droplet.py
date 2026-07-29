@@ -426,5 +426,207 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
         self.assertEqual(n_iface1, n_iface0)
 
 
+class TestDualOnlyRetopoPolicy2D(unittest.TestCase):
+    """Regression net for the lane-5 'dual_only' runner policy.
+
+    ``oscillating_droplet_2D.py`` (via ``retopo_policy_2d`` in
+    ``src/_params.py``) rebinds setup's retopo_fn with
+    ``skip_triangulation=True``: the interface-conforming builder
+    connectivity is kept for the whole run while duals, per-phase
+    splits, mass redistribution and EOS pressures are refreshed every
+    step.  The lane-5 sweep (2026-07-02) measured l2 0.48992 -> 0.17857
+    and tail_growth 1.72505 -> 0.99925 vs per-step Delaunay on the full
+    run; KE dropped ~5e4x to the physical overdamped envelope.
+
+    This test locks the defining invariants of that path on a fast
+    coarse fixture: frozen 1-skeleton, preserved interface, machine
+    mass conservation, and no spurious KE blow-up.
+    """
+
+    def test_dual_only_dynamic_run_healthy(self):
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+            setup_oscillating_droplet(
+                dim=2, R0=0.01, epsilon=0.05, l=2,
+                rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
+                gamma=0.05, L_domain=0.05,
+                refinement_outer=1, refinement_droplet=2,
+            )
+        # Same rebinding as oscillating_droplet_2D.py's 'dual_only' policy.
+        dual_only_fn = partial(retopo_fn, skip_triangulation=True)
+
+        diag0 = compute_diagnostics(HC, dim=2)
+        edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        n_iface0 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        n_verts0 = sum(1 for _ in HC.V)
+
+        # CFL dt as in the runner (setup fallback K_d = 800*5^2 here).
+        c_s = float(np.sqrt(params['K_d'] / 800.0))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:2] - nb.x_a[:2]) > 1e-15
+        )
+        dt = min(0.25 * dx_min / c_s,
+                 0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
+
+        symplectic_euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
+            bc_set=bc_set, retopologize_fn=dual_only_fn,
+        )
+
+        diag1 = compute_diagnostics(HC, dim=2)
+
+        # Mass conserved to machine precision (redistribution rescale
+        # is exactly mass-conserving).
+        mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
+            / diag0['total_mass']
+        self.assertLess(mass_drift, 1e-10)
+
+        # Defining property: the 1-skeleton is frozen (no rewiring).
+        edges1 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        self.assertEqual(edges1, edges0)
+
+        # Interface and vertex sets preserved.
+        n_iface1 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        n_verts1 = sum(1 for _ in HC.V)
+        self.assertEqual(n_iface1, n_iface0)
+        self.assertEqual(n_verts1, n_verts0)
+
+        # No spurious KE blow-up: the perturbed coarse droplet stays at
+        # the physical overdamped scale (~1e-7 J measured at refine 3/3;
+        # bound is deliberately loose vs the per-step Delaunay pump,
+        # which reaches ~6e-4 J within 60 steps on the fine mesh).
+        self.assertLess(diag1['KE'], 1e-5)
+        self.assertTrue(np.isfinite(diag1['KE']))
+
+
+class TestOscillationEnvelopeRegression2D(unittest.TestCase):
+    """Fast (~6 s) shortened oscillating-droplet run pinning the
+    post-lane-5 dynamic quality metrics.
+
+    Mirrors ``oscillating_droplet_2D.py`` exactly (dual_only retopo
+    policy, CFL dt formula, record cadence, ``oscillation_score``) at
+    reduced refinement 2/2, integrating the FULL production duration
+    t_end = min(t_end_2d, 5/beta) = 0.1143 s (the whole overdamped
+    decay envelope; KE peaks at t=0.0386 s, safely inside the first
+    half, so the half-split tail_growth metric is robust here — unlike
+    the refine-3/3 fragility noted in the lane-5 log).
+
+    Pinned 2026-07-02 after lanes 1-5 (zero-gauge sentinel, EOS
+    consistency, exact 2D dual volumes, remesh fixes, dual_only
+    policy).  Measured on this fixture (95 verts / 16 iface, 267
+    steps, deterministic across repeated runs):
+
+        l2_error_normalized = 0.050006441230559064
+        tail_growth         = 0.9130549583972877
+        linf                = 0.08490720480839112
+        mass_drift          = 4.6e-15
+
+    Reference full-run (refine 3/3, 1839 steps, ~2 min) scores at the
+    same code state: l2 0.1785660454150319, tail 0.9992507831101141.
+
+    A/B sensitivity: reverting just the retopo policy to per-step
+    Delaunay (pre-lane-5) scores l2 1.384569 / tail 2.110904 /
+    KE_max 9.93e-02 J (vs 1.46e-06 J) on this exact fixture, so the
+    ~10%-headroom thresholds below catch that class of regression by
+    >25x.  Update the pins ONLY if a change legitimately improves the
+    metrics (document old -> new).
+    """
+
+    # measured 0.050006441230559064 + ~10% headroom
+    L2_MAX = 0.0550
+    # measured 0.9130549583972877 + ~10% headroom
+    TAIL_MAX = 1.004
+    REFINE = 2
+
+    def test_shortened_run_metrics(self):
+        from functools import partial
+
+        from cases_dynamic.oscillating_droplet.src._params import (
+            R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
+            L_domain, t_end_2d,
+        )
+        from cases_dynamic.oscillating_droplet.src._analytical import (
+            rayleigh_frequency, lamb_damping_rate,
+        )
+        from cases_dynamic.oscillating_droplet.src._metrics import (
+            oscillation_score,
+        )
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        dim = 2
+        omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim,
+                                   rho_outer=rho_o)
+        beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+            setup_oscillating_droplet(
+                dim=dim, R0=R0, epsilon=epsilon, l=l,
+                rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
+                gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
+                refinement_outer=self.REFINE,
+                refinement_droplet=self.REFINE,
+            )
+
+        # Same rebinding as the runner's 'dual_only' policy.
+        retopo_fn = partial(retopo_fn, skip_triangulation=True)
+
+        # CFL dt — identical formula to oscillating_droplet_2D.py.
+        c_s = float(np.sqrt(K_d / rho_d))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim]) > 1e-15
+        )
+        dt = min(0.25 * dx_min / c_s,
+                 0.5 * float(np.sqrt(rho_d * dx_min ** 3 / gamma)))
+        t_end = min(t_end_2d, 5.0 / beta)
+        n_steps = int(t_end / dt) + 1
+        record_every = max(1, n_steps // 200)
+
+        diag_list: list[dict] = []
+
+        def record(t):
+            d = compute_diagnostics(HC, dim=dim)
+            d['t'] = float(t)
+            diag_list.append(d)
+
+        record(0.0)
+
+        def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
+            if step % record_every == 0:
+                record(t)
+
+        t_final = symplectic_euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
+            bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
+            remesh_mode=params['remesh_mode'],
+            remesh_kwargs=params['remesh_kwargs'],
+        )
+        record(t_final)
+
+        score = oscillation_score(
+            diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
+        )
+
+        self.assertTrue(np.isfinite(score['l2_error_normalized']))
+        self.assertLess(
+            score['l2_error_normalized'], self.L2_MAX,
+            msg=(f"Oscillation l2 {score['l2_error_normalized']:.6f} above "
+                 f"pinned {self.L2_MAX} (measured 0.0500064 post-lane-5; "
+                 "per-step-Delaunay regression scores 1.38 here)."),
+        )
+        self.assertLess(
+            score['tail_growth'], self.TAIL_MAX,
+            msg=(f"KE tail_growth {score['tail_growth']:.6f} above pinned "
+                 f"{self.TAIL_MAX} (measured 0.9130550 post-lane-5; "
+                 "per-step-Delaunay regression scores 2.11 here)."),
+        )
+        self.assertLess(score['mass_drift'], 1e-10)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -80,15 +80,37 @@ def _phases_present(v, n_phases: int) -> list[int]:
     return sorted(int(k) for k in phases if 0 <= int(k) < n_phases)
 
 
-def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
-    """Return v.p_phase[k] if populated, else ``fallback``."""
+def _phase_present_at(v, k: int) -> bool:
+    """True if phase *k* is geometrically present at ``v``.
+
+    Presence is keyed on the per-phase dual sub-volume, never on the
+    stored pressure value: a gauge pressure of exactly ``0.0`` is a
+    legitimate physical value (e.g. ``TaitMurnaghan`` at ``P0=0`` with
+    ``rho == rho0``), so ``p_phase[k] == 0.0`` must NOT be read as
+    "phase absent" — that sentinel misread broke gauge invariance and
+    pairwise momentum conservation at the case-default ``P0=0`` (see
+    ``docs_temp/audit/zero-gauge-pressure.md``).  Falls back to
+    "stores a phase-k entry" when no per-phase dual volume is cached.
+    """
     p_phase = getattr(v, 'p_phase', None)
     if p_phase is None or k >= len(p_phase):
+        return False
+    dvp = getattr(v, 'dual_vol_phase', None)
+    if dvp is not None and k < len(dvp):
+        return float(dvp[k]) > 1e-30
+    return True
+
+
+def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
+    """Return ``v.p_phase[k]`` if phase *k* is present at v, else fallback.
+
+    Presence is geometric (:func:`_phase_present_at`); the stored value
+    is returned even when it is exactly ``0.0`` (legitimate at gauge
+    ``P0=0``).
+    """
+    if not _phase_present_at(v, k):
         return fallback
-    val = float(p_phase[k])
-    if val == 0.0:
-        return fallback
-    return val
+    return float(v.p_phase[k])
 
 
 def _face_viscosity_for_phase(
@@ -169,16 +191,34 @@ def multiphase_stress_force(
         )
 
         for k, frac in fractions.items():
-            if k not in phases_present:
-                # Sub-face lies in a phase not present at v.  Skip the
-                # contribution rather than add spurious flux — this
-                # happens only for bulk-bulk cross-phase edges (a mesh
-                # artefact) where v has no mass/pressure in phase k.
+            # Presence at both ends is keyed on geometry (per-phase
+            # dual sub-volume), never on the stored pressure value or
+            # on possibly-stale interface tags, so that both endpoints
+            # of a face book the SAME face pressure (F_ij = -F_ji;
+            # see docs_temp/audit/multiphase-momentum.md).
+            present_i = (_phase_present_at(v, k) if has_p_phase
+                         else k in p_i_by_phase)
+            present_j = _phase_present_at(v_j, k)
+            if not present_i and not present_j:
+                # No phase-k material at either end of this sub-face:
+                # skip it from BOTH sides (symmetric, no spurious flux).
+                # On consistently-tagged meshes this can only fire for
+                # a fraction phase produced by stale interface tags.
                 continue
 
             A_k = frac * A_ij
-            p_i_k = p_i_by_phase[k]
-            p_j_k = _phase_pressure(v_j, k, fallback=p_i_k)
+            if present_i:
+                p_i_k = (p_i_by_phase[k] if k in p_i_by_phase
+                         else float(v.p_phase[k]))
+                p_j_k = _phase_pressure(v_j, k, fallback=p_i_k)
+            else:
+                # Phase k absent at v but present at the neighbour:
+                # mirror the one-sided extrapolation the neighbour
+                # books on this face (face pressure = p_j at both
+                # ends), the exact counterpart of the fallback branch
+                # above.  The previous code skipped this sub-face
+                # one-sidedly, breaking pairwise antisymmetry.
+                p_i_k = p_j_k = float(v_j.p_phase[k])
             mu_k = _face_viscosity_for_phase(mps, v, v_j, k)
 
             F += pressure_flux(p_i_k, p_j_k, A_k)

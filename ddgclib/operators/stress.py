@@ -308,6 +308,22 @@ def _dual_area_vector_3d_e_star(v_i, v_j, HC) -> np.ndarray:
     return A_ij
 
 
+def _use_exact_barycentric_volume(HC) -> bool:
+    """True when the exact simplex-based barycentric dual volume applies.
+
+    Requires (a) the explicit top-simplex cache ``HC._simplices`` and
+    (b) barycentric duals — the closed form
+    ``Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|`` holds only for the
+    barycentric dual partition.  ``HC._vd_method`` is recorded by
+    ``hyperct.ddg.compute_vd``; when absent, the pipeline default
+    (barycentric) is assumed.
+    """
+    return (
+        getattr(HC, '_simplices', None) is not None
+        and getattr(HC, '_vd_method', 'barycentric') == 'barycentric'
+    )
+
+
 def dual_volume(v, HC, dim: int = 3) -> float:
     """Volume (area in 2D) of the dual cell around vertex v.
 
@@ -334,7 +350,18 @@ def dual_volume(v, HC, dim: int = 3) -> float:
 
     Notes
     -----
-    # TODO: move to hyperct.ddg._operators (pure geometry, no physics)
+    For barycentric duals with an explicit simplex cache
+    (``HC._simplices``), dim 2 uses the exact closed form
+    ``Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|`` from
+    ``hyperct.ddg.vertex_dual_volume`` — exact to machine precision,
+    tiles the domain including boundary/corner cells, and has no
+    degenerate/exception paths.  The legacy geometric reconstruction
+    (``dual_cell_area_2d`` / ``v_star`` fan walk) is kept for
+    circumcentric duals and as fallback when no simplex cache exists.
+    dim 3 intentionally stays on the legacy fan walk (which undercounts
+    1–4 % interior, ~20 % boundary on unstructured meshes — see
+    docs_temp/audit/dual-volume-3d.md) pending a re-pin of the 3D
+    droplet retopology floor; see the NOTE(lane3-dual-volume) below.
     """
     if dim == 1:
         # 1D dual cell = interval between the two dual vertices
@@ -349,10 +376,25 @@ def dual_volume(v, HC, dim: int = 3) -> float:
         return max(positions) - min(positions)
 
     elif dim == 2:
+        if _use_exact_barycentric_volume(HC):
+            from hyperct.ddg import vertex_dual_volume
+            return vertex_dual_volume(HC, v, dim=2)
         from hyperct.ddg import dual_cell_area_2d
         return dual_cell_area_2d(v, include_edge_midpoints=True)
 
     elif dim == 3:
+        # NOTE(lane3-dual-volume): the exact simplex path (as in the
+        # dim==2 branch) applies in 3D too but is intentionally NOT
+        # enabled: switching the 3D droplet pipeline (setup
+        # cache_dual_volumes + retopo refresh) to exact volumes moves
+        # the pinned 3D static-droplet retopology floor UP
+        # 7.3768e-5 -> 7.6169e-5 (+3.3%) via the settle-step
+        # volume-jump/redistribution-rescale interaction.  Use
+        # hyperct.ddg.vertex_dual_volume / simplex_dual_volumes
+        # directly for exact 3D dual volumes.  See
+        # docs_temp/debug_session/lane3-exact-dual-volumes.md.
+        # Legacy fan walk: known to undercount 1-4% interior / ~20%
+        # boundary on unstructured meshes (audit/dual-volume-3d.md).
         from hyperct.ddg import v_star as _v_star
         total_vol = 0.0
         for v_j in v.nn:
@@ -391,6 +433,17 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
     dim : int
         Spatial dimension.
     """
+    if dim == 2 and _use_exact_barycentric_volume(HC):
+        # Exact barycentric dual volumes in one vectorized pass over the
+        # simplex cache (Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|).
+        # dim==3 intentionally stays on the legacy path — see the
+        # NOTE(lane3-dual-volume) in dual_volume above.
+        from hyperct.ddg import simplex_dual_volumes
+        vols = simplex_dual_volumes(HC, dim)
+        for v in HC.V:
+            v.dual_vol = vols.get(v, 0.0)
+        return
+
     for v in HC.V:
         try:
             v.dual_vol = dual_volume(v, HC, dim)

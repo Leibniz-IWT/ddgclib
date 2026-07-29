@@ -161,15 +161,31 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             # propagate so the user sees a clear error rather than a
             # silent fallback to Delaunay.
             from hyperct.remesh import adaptive_remesh
-            from hyperct.ddg import invalidate_simplex_cache
+            from hyperct.ddg import (
+                invalidate_simplex_cache,
+                rebuild_simplex_cache_2d,
+            )
             adaptive_remesh(HC, dim=dim, **(remesh_kwargs or {}))
             # Adaptive remesh mutates connectivity locally without going
             # through connect_and_cache_simplices, so the simplex cache
-            # (if any) is stale.  Drop it so subsequent boundary +
-            # compute_vd calls fall back cleanly to the 1-skeleton path.
-            invalidate_simplex_cache(HC)
-            # Recompute boundary from the updated connectivity.
-            dV = HC.boundary()
+            # (if any) is stale.  In 2D, REBUILD it from the updated
+            # 1-skeleton (ghost-K3 filtered) instead of dropping it:
+            # losing the cache silently downgrades compute_vd, boundary
+            # tagging and the exact dual volumes to the 1-skeleton
+            # fallbacks, which pumps kinetic energy into dynamic runs
+            # (adaptive KE tail 4.4x -> ~1x on the oscillating droplet,
+            # lane4-remesh-upstream 2026-07-02).
+            if dim == 2:
+                rebuild_simplex_cache_2d(HC)
+            else:
+                invalidate_simplex_cache(HC)
+            # Recompute boundary — prefer the exact simplex-aware path
+            # (parity with the Delaunay branch below).
+            if getattr(HC, '_simplices', None) is not None:
+                from hyperct.ddg import boundary_from_simplices
+                dV = boundary_from_simplices(HC, dim)
+            else:
+                dV = HC.boundary()
         else:
             # 1. Disconnect ALL existing edges
             for v in verts:
@@ -221,6 +237,17 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         for v in failed:
             v.boundary = True
             dV.add(v)
+        # NOTE(lane3-dual-volume): batch_e_star's fan-walk volumes
+        # undercount 1-4% interior on unstructured 3D meshes
+        # (docs_temp/audit/dual-volume-3d.md).  The exact replacement
+        # (hyperct.ddg.simplex_dual_volumes over HC._simplices) is
+        # available but intentionally NOT wired in here: enabling it
+        # (together with the matching cache_dual_volumes/dual_volume 3D
+        # branches) moves the pinned 3D static-droplet retopology floor
+        # UP 7.3768e-5 -> 7.6169e-5 (+3.3%) because the exact measure
+        # honestly reports the larger settle-step volume jump that the
+        # redistribution rescale converts into a uniform pressure
+        # offset.  See docs_temp/debug_session/lane3-exact-dual-volumes.md.
         for v in HC.V:
             v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
         HC._edge_area_cache = edge_areas

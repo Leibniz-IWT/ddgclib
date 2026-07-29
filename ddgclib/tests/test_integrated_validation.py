@@ -978,3 +978,110 @@ class TestIntegratedCurvature:
             assert errors[-1] < errors[0] * 1.5, (
                 f"Sphere curvature did not converge: {errors}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Regression: 2D dual-cell quadrature factor-2 bug
+# (docs_temp/audit/gravity-bodyforce.md §3e, fixed 2026-07-02)
+# ---------------------------------------------------------------------------
+
+class TestDualCellVolumeAverage2D:
+    """Regressions for the 2D dual-cell quadrature factor-2 bug.
+
+    ``_dual_cell_pressure_integral_2d_simple`` multiplied by
+    ``2.0 * tri_area`` with Dunavant weights that already sum to 1, so
+    every 2D volume-averaged scalar (``volume_averaged_scalar``, hence
+    the ``HydrostaticPressure``/``LinearPressureGradient`` ICs on meshes
+    WITH duals) came out exactly doubled, and the sanctioned
+    ``integrated_pressure_error`` metric compared against a doubled
+    ``∫P dV``.  The Duffy-map variant additionally skipped valid
+    quadrature points with ``if ti + tj > 1.0: continue``.
+    """
+
+    def test_volume_averaged_constant_is_one(self):
+        """volume_averaged_scalar(f≡1) == 1 on a mesh WITH duals (was 2.0)."""
+        from ddgclib.analytical import volume_averaged_scalar
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, bV, interior = _make_mesh_2d(n_refine=2)
+        cache_dual_volumes(HC, dim=2)
+        vals = [volume_averaged_scalar(lambda x: 1.0, v, dim=2)
+                for v in interior]
+        npt.assert_allclose(vals, 1.0, atol=1e-12)
+
+    def test_volume_averaged_constant_is_one_jittered(self):
+        """Same on a jittered re-Delaunay mesh (no symmetry cancellation)."""
+        from ddgclib.analytical import volume_averaged_scalar
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, bV, interior = _make_mesh_2d(n_refine=2, seed=42)
+        cache_dual_volumes(HC, dim=2)
+        vals = [volume_averaged_scalar(lambda x: 1.0, v, dim=2)
+                for v in interior]
+        npt.assert_allclose(vals, 1.0, atol=1e-12)
+
+    def test_duffy_variant_matches_shoelace_area(self):
+        """∫1 dA over the dual cell equals the shoelace polygon area.
+
+        Covers the Duffy-map variant's erroneous ``ti + tj > 1`` skip
+        (under-integrated by ~1/3) on top of the factor 2.
+        """
+        from ddgclib.analytical._integrated_comparison import (
+            _dual_cell_pressure_integral_2d,
+            _dual_cell_pressure_integral_2d_simple,
+        )
+
+        HC, bV, interior = _make_mesh_2d(n_refine=2, seed=7)
+        for v in interior:
+            polygon = dual_cell_polygon_2d(v, include_edge_midpoints=True)
+            area = abs(_shoelace_area(polygon))
+            I_duffy = _dual_cell_pressure_integral_2d(lambda x: 1.0, v)
+            I_simple = _dual_cell_pressure_integral_2d_simple(lambda x: 1.0, v)
+            npt.assert_allclose(I_duffy, area, rtol=1e-12)
+            npt.assert_allclose(I_simple, area, rtol=1e-12)
+
+    def test_hydrostatic_ic_after_duals_not_doubled(self):
+        """HydrostaticPressure after compute_vd assigns <P>, not 2<P>.
+
+        This is the production-reachable path (setup_hydrostatic_column
+        computes duals before applying the IC) that produced mean
+        a_y = +g spurious accelerations.  For a linear field the dual
+        cells of the symmetric mesh average to the vertex value exactly.
+        """
+        from ddgclib.initial_conditions import HydrostaticPressure
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, bV, interior = _make_mesh_2d(n_refine=2)
+        cache_dual_volumes(HC, dim=2)
+        rho, g, h_ref = 1000.0, 9.81, 1.0
+        HydrostaticPressure(rho=rho, g=g, axis=1, h_ref=h_ref).apply(HC, bV)
+        for v in interior:
+            P_point = rho * g * (h_ref - v.x_a[1])
+            npt.assert_allclose(
+                v.p, P_point, rtol=1e-10,
+                err_msg=f"vol-avg IC doubled at {v.x}",
+            )
+
+    def test_integrated_pressure_error_zero_for_consistent_field(self):
+        """integrated_pressure_error ~ 0 when v.p is the true vol-average.
+
+        Pre-fix this metric inverted good and bad fields (audit skeptic
+        review): a correct field scored O(∫P dV) while the doubled IC
+        scored ~0.
+        """
+        from ddgclib.analytical import (
+            integrated_pressure_error,
+            volume_averaged_scalar,
+        )
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, bV, interior = _make_mesh_2d(n_refine=2, seed=42)
+        cache_dual_volumes(HC, dim=2)
+        P = lambda x: 5.0 + 3.0 * x[0] - 2.0 * x[1]
+        for v in HC.V:
+            v.p = volume_averaged_scalar(P, v, dim=2)
+        errs = integrated_pressure_error(HC, interior, P, dim=2)
+        # errors are |p_i*Vol_i - ∫P dV| — absolute, scale ~1e-16 * |P|*Vol
+        assert max(errs) < 1e-12, (
+            f"integrated_pressure_error not self-consistent: {max(errs):.3e}"
+        )

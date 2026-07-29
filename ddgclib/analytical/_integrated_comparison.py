@@ -98,12 +98,19 @@ def _dual_cell_pressure_integral_2d(
         )
         if tri_area < 1e-30:
             continue
-        # Gauss quadrature on triangle using barycentric coords
-        # Use midpoint rule (sufficient for low-degree P)
+        # Duffy (collapsed-square) map from the unit square onto the
+        # triangle: l1 = ti, l2 = tj*(1-ti), Jacobian dl1 dl2 =
+        # (1-ti) dti dtj.  With Gauss-Legendre weights summing to 1 on
+        # [0,1] this gives ∫_T P dA = 2*Area * Σ wi*wj*(1-ti)*P(x)
+        # (2*Area is the reference-triangle -> physical-triangle
+        # Jacobian; here the factor 2 IS correct, unlike the
+        # weights-sum-to-1 rule in ``_triangle_quadrature_points``).
+        # NOTE(2026-07-02): the old ``if ti + tj > 1.0: continue``
+        # erroneously skipped valid quadrature points — the Duffy map
+        # already keeps every (ti, tj) in the unit square inside the
+        # triangle — under-integrating by ~1/3.
         for ti, wi in zip(nodes, weights):
             for tj, wj in zip(nodes, weights):
-                if ti + tj > 1.0:
-                    continue
                 l1 = ti
                 l2 = tj * (1.0 - ti)
                 l3 = 1.0 - l1 - l2
@@ -156,9 +163,16 @@ def _dual_cell_pressure_integral_2d_simple(
         )
         if tri_area < 1e-30:
             continue
+        # The Dunavant weights from ``_triangle_quadrature_points`` sum
+        # to 1, so ∫_T P dA ≈ Area * Σ w_i P(x_i).
+        # NOTE(2026-07-02): the old ``2.0 * tri_area`` factor doubled
+        # every 2D dual-cell integral (audit
+        # docs_temp/audit/gravity-bodyforce.md §3e: this made
+        # ``volume_averaged_scalar(1) == 2`` and every vol-avg pressure
+        # IC assign 2x the pressure whenever duals were present).
         for l1, l2, l3, w in quad:
             x = l1 * A + l2 * B + l3 * C
-            result += w * P_analytical(x) * 2.0 * tri_area
+            result += w * P_analytical(x) * tri_area
 
     return result
 
