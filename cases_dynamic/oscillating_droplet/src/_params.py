@@ -67,6 +67,30 @@ c_s = max(10.0 * u_scale, 1.0)   # floor at 1 m/s
 K_d = rho_d * c_s**2             # bulk modulus (droplet)
 K_o = rho_o * c_s**2             # bulk modulus (outer)
 
+# Retopology policy for the 2D dynamic oscillation runner
+# (oscillating_droplet_2D.py).  Lane-5 dynamic configuration sweep
+# (2026-07-02, docs_temp/debug_session/lane5-dynamic-config-sweep.md)
+# on the full 1839-step run at identical parameters:
+#
+#   policy                     l2_error  tail_growth  KE_max [J]
+#   per-step Delaunay (old)    0.48992   1.72505      4.07e-02 (still growing)
+#   dual_only (new default)    0.17857   0.99925      8.32e-07 (physical decay)
+#
+# 'dual_only' keeps the interface-conforming builder connectivity for
+# the whole run (skip_triangulation=True in _retopologize_multiphase)
+# while still refreshing duals, per-phase splits, mass redistribution
+# and EOS pressures every step.  Per-step global Delaunay reconnection
+# on the moving mesh injects spurious KE ~5e4x the physical level and
+# is the dominant l2/tail error source; with dual_only the KE(t)
+# envelope quantitatively matches the analytical overdamped decay
+# (peak t 0.055 vs 0.060 s; tail decay rate 6.79 vs 7.18 1/s).
+# Displacement-gated Delaunay (eps in {0.01,0.05,0.2}*h_min) and
+# hybrid gate+dual-refresh policies were all worse than either
+# extreme; see the lane log for the full sweep table.
+# The pinned floor tests (test_case_oscillating_droplet.py) keep
+# exercising the per-step Delaunay path via setup's default retopo_fn.
+retopo_policy_2d = 'dual_only'
+
 # Domain size (outer box should be ≥ 5× droplet radius)
 L_domain = 5.0 * R0
 

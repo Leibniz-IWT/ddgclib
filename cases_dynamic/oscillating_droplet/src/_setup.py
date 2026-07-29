@@ -205,15 +205,18 @@ def setup_oscillating_droplet(
     )
 
     # -- Retopologize function --
-    # Stays on global Delaunay for now.  hyperct.remesh.adaptive_remesh
-    # is interface-preserving but has upstream issues that blow up this
-    # case:
-    #   1. edge_split_2d inserts a midpoint vertex with mass ~= mean of
-    #      its endpoints, silently inflating total mass on every split.
-    #      (hyperct/remesh/_operations_2d.py:198)
-    #   2. The driver uses a single global h_local, so a mixed
-    #      fine-droplet / coarse-outer mesh triggers unbounded splits
-    #      in the outer region when L_max is sized to the droplet.
+    # Stays on global Delaunay by default.  The two upstream
+    # hyperct.remesh issues that used to blow up this case were fixed
+    # 2026-07-02 (lane4-remesh-upstream):
+    #   1. edge_split_2d now transfers a conservative mass share FROM
+    #      the endpoints (sum(m) and sum(m_phase) invariant) instead of
+    #      assigning the midpoint the arithmetic mean of its endpoints.
+    #   2. adaptive_remesh defaults to a per-edge local length scale
+    #      (length_scale='local'), so a mixed fine-droplet /
+    #      coarse-outer mesh no longer triggers unbounded splits.
+    # remesh_mode='adaptive' is exercised by
+    # oscillating_droplet_2D_adaptive.py; the pinned floor tests keep
+    # using 'delaunay'.
     adaptive_kwargs = None
     retopo_fn = partial(_retopologize_multiphase, mps=mps,
                         split_method=split_method,

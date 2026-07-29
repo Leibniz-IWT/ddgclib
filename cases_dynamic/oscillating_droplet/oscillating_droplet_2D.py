@@ -20,9 +20,12 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from functools import partial
+
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
     L_domain, n_refine_outer, n_refine_droplet, beta_2d, t_end_2d,
+    retopo_policy_2d,
 )
 from cases_dynamic.oscillating_droplet.src._analytical import (
     rayleigh_frequency, lamb_damping_rate, damped_frequency,
@@ -75,6 +78,17 @@ def main():
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
     print(f"Mesh: {n_verts} vertices, {n_iface} interface")
+
+    # -- Retopology policy (lane-5 sweep, see src/_params.py) --
+    # 'dual_only': keep the interface-conforming builder connectivity
+    # for the whole run; refresh duals / per-phase split / mass
+    # redistribution / EOS pressures every step.  Per-step global
+    # Delaunay reconnection pumps spurious KE (~5e4x physical) and was
+    # the dominant l2/tail error source (l2 0.490 -> 0.179,
+    # tail_growth 1.725 -> 0.999 on this run).
+    if retopo_policy_2d == 'dual_only':
+        retopo_fn = partial(retopo_fn, skip_triangulation=True)
+    print(f"Retopo policy: {retopo_policy_2d}")
 
     # -- CFL timestep --
     c_s = np.sqrt(K_d / rho_d)

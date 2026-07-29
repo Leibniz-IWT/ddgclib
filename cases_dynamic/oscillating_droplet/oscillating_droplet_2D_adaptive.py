@@ -219,27 +219,26 @@ def main():
     est_per_step = 0.05 if refine_outer <= 2 else 0.3
     print(f"Estimated wall time: ~{2 * n_steps * est_per_step / 60:.0f} min total")
 
-    # Adaptive remesh kwargs: conservative thresholds sized to the
-    # mesh's edge-length distribution.
-    edge_lens = [
-        np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim])
-        for v in setup_oscillating_droplet(
-            dim=dim, R0=R0, epsilon=epsilon, l=l,
-            rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
-            gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
-            refinement_outer=refine_outer, refinement_droplet=refine_droplet,
-        )[0].V
-        for nb in v.nn
-    ]
-    h_mean = float(np.mean(edge_lens)) if edge_lens else R0 * 0.1
-
+    # Adaptive remesh kwargs: per-edge LOCAL length scale (the hyperct
+    # default, length_scale='local') so the fine droplet region and the
+    # coarse outer region each adapt against their own neighbourhood
+    # spacing.  Absolute L_min/L_max derived from a single global mean
+    # cross-contaminate the two regions and caused unbounded splits in
+    # the coarse outer mesh (docs_temp 06 open problem #5, fixed
+    # upstream 2026-07-02 together with the mass-conservative split).
+    #
+    # smooth_iterations=0: Laplacian smoothing teleports Lagrangian
+    # parcels without remapping their mass, and the per-step position
+    # churn drives the majority-vote simplex retagging in mps.refresh
+    # to erode the droplet phase entirely (probe 2026-07-02: phase-1
+    # bulk 25 -> 2 vertices in 45 steps with smoothing on; perfectly
+    # stable with it off).  Splits/collapses remain active.
     adaptive_kwargs = {
-        'L_min': 0.3 * h_mean,
-        'L_max': 2.5 * h_mean,
+        'alpha_min': 0.3,
+        'alpha_max': 2.5,
         'quality_target_deg': 20.0,
         'max_iterations': 1,
-        'smooth_iterations': 1,
-        'smooth_relax': 0.2,
+        'smooth_iterations': 0,
     }
 
     # --- Run both modes ---
