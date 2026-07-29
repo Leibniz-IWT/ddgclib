@@ -5,12 +5,18 @@ Produces:
   fig/oscillating_droplet_3D_radius.png   — R_max(t)
   fig/oscillating_droplet_3D_energy.png   — KE(t)
   fig/oscillating_droplet_3D.mp4          — 3D animation (pressure + velocity)
-  results/oscillating_droplet_3D/snapshots/ — JSON snapshots for polyscope
+  results_3d/snapshots/                   — JSON snapshots for polyscope
+  results_3d/score.json                   — Tier 3B oscillation score
 
 Usage
 -----
     python cases_dynamic/oscillating_droplet/oscillating_droplet_3D.py
+    python cases_dynamic/oscillating_droplet/oscillating_droplet_3D.py \
+        --retopo delaunay    # A/B: per-step Delaunay retriangulation
+                             # (non-default policies write suffixed
+                             # artifacts, e.g. score_delaunay.json)
 """
+import argparse
 import os
 import sys
 
@@ -18,9 +24,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from functools import partial
+
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
-    L_domain, beta_3d, t_end_3d,
+    L_domain, beta_3d, t_end_3d, retopo_policy_3d,
 )
 from cases_dynamic.oscillating_droplet.src._analytical import (
     rayleigh_frequency, lamb_damping_rate, damped_frequency,
@@ -32,18 +40,23 @@ from cases_dynamic.oscillating_droplet.src._setup import (
 from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     plot_radius_envelope, plot_energy_history, compute_diagnostics,
 )
+from cases_dynamic.oscillating_droplet.src._metrics import (
+    oscillation_score_3d, save_score,
+)
 from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
 from ddgclib.visualization import dynamic_plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_CASE_DIR, 'fig')
-_RESULTS = os.path.join(_CASE_DIR, 'results')
+_RESULTS = os.path.join(_CASE_DIR, 'results_3d')
 _SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 
 
-def main():
+def main(retopo_policy: str | None = None):
     dim = 3
+    if retopo_policy is None:
+        retopo_policy = retopo_policy_3d
     print("=" * 60)
     print("3D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
@@ -69,6 +82,22 @@ def main():
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
     print(f"Mesh: {n_verts} vertices, {n_iface} interface")
 
+    # -- Retopology policy (A/B via --retopo; default from _params) --
+    # 'dual_only' freezes the builder connectivity (skip_triangulation)
+    # while refreshing duals / per-phase splits / mass redistribution /
+    # EOS pressures every step.  NOTE lane-5 caveat: the 3D
+    # skip-triangulation path has different boundary-volume bookkeeping
+    # (batch_e_star zeroing) — trust its score only after checking
+    # mass_drift, n_interface_* and the dual_vol_* fields in the score.
+    if retopo_policy == 'dual_only':
+        retopo_fn = partial(retopo_fn, skip_triangulation=True)
+    print(f"Retopo policy: {retopo_policy}")
+
+    # Non-default policies write suffixed artifacts (snapshots, figures,
+    # score) so an A/B run never clobbers the default baseline outputs.
+    suffix = '' if retopo_policy == retopo_policy_3d else f'_{retopo_policy}'
+    snapshots_dir = _SNAPSHOTS + suffix
+
     # -- CFL timestep --
     c_s = np.sqrt(K_d / rho_d)
     dx_min = min(
@@ -84,32 +113,41 @@ def main():
     print(f"dt={dt:.2e}, n_steps={n_steps}, t_end={t_end:.4f}")
 
     # -- Recording --
-    os.makedirs(_SNAPSHOTS, exist_ok=True)
+    os.makedirs(snapshots_dir, exist_ok=True)
     os.makedirs(_FIG, exist_ok=True)
 
     history = StateHistory(
         fields=['u', 'p', 'phase', 'is_interface'],
         record_every=record_every,
-        save_dir=_SNAPSHOTS,
+        save_dir=snapshots_dir,
     )
 
-    t_arr, R_max_arr, KE_arr, mass_arr = [0.0], [], [], []
-    diag0 = compute_diagnostics(HC, dim=dim)
-    R_max_arr.append(diag0['R_max'])
-    KE_arr.append(diag0['KE'])
-    mass_arr.append(diag0['total_mass'])
+    diag_list: list[dict] = []
+
+    def record(t):
+        # polar_axis='z': theta_apex measured from the perturbation
+        # axis so the apex score in oscillation_score_3d is consistent
+        # with _setup._apply_perturbation.
+        d = compute_diagnostics(HC, dim=dim, polar_axis='z')
+        d['t'] = float(t)
+        # Total dual volume for the dual_only A/B bookkeeping check
+        # (boundary cells are zeroed by _retopologize step 5b — the
+        # frame-0 -> 1 jump is the known transition artefact).
+        d['total_dual_vol'] = float(sum(
+            float(getattr(v, 'dual_vol', 0.0) or 0.0) for v in HC.V
+        ))
+        diag_list.append(d)
+
+    record(0.0)
 
     def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
         history.callback(step, t, HC_cb, bV_cb, diagnostics)
         if step % record_every == 0:
-            diag = compute_diagnostics(HC_cb, dim=dim)
-            t_arr.append(t)
-            R_max_arr.append(diag['R_max'])
-            KE_arr.append(diag['KE'])
-            mass_arr.append(diag['total_mass'])
+            record(t)
             if step % (record_every * 10) == 0:
-                print(f"  t={t:.4e} | R_max={diag['R_max']:.6f} | "
-                      f"KE={diag['KE']:.4e}")
+                d = diag_list[-1]
+                print(f"  t={t:.4e} | R_max={d['R_max']:.6f} | "
+                      f"KE={d['KE']:.4e} | mass={d['total_mass']:.6e}")
 
     # -- Run --
     print("\nRunning simulation...")
@@ -120,20 +158,41 @@ def main():
         remesh_kwargs=params['remesh_kwargs'],
     )
 
-    diag_final = compute_diagnostics(HC, dim=dim)
-    t_arr.append(t_final)
-    R_max_arr.append(diag_final['R_max'])
-    KE_arr.append(diag_final['KE'])
-    mass_arr.append(diag_final['total_mass'])
+    record(t_final)
 
-    t_arr = np.array(t_arr)
-    R_max_arr = np.array(R_max_arr)
+    t_arr = np.array([d['t'] for d in diag_list])
+    R_max_arr = np.array([d['R_max'] for d in diag_list])
+    KE_arr = np.array([d['KE'] for d in diag_list])
+    mass_arr = np.array([d['total_mass'] for d in diag_list])
     R_max_analytical = max_radius_envelope(t_arr, R0, epsilon, omega, beta, l=l)
 
     print(f"\nMass conservation: |dM/M0| = "
           f"{abs(mass_arr[-1] - mass_arr[0]) / mass_arr[0]:.4e}")
     print(f"Final R_max: {R_max_arr[-1]:.6f} (R0 = {R0})")
     print(f"StateHistory: {history.n_snapshots} snapshots")
+
+    # -- Score (Tier 3B harness) --
+    score = oscillation_score_3d(
+        diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
+        r_boundary=L_domain,
+    )
+    score_path = os.path.join(_RESULTS, f'score{suffix}.json')
+    save_score(score_path, score)
+    print(f"\n3D oscillation score saved to {score_path}")
+    print(f"  summary                  = {score['summary']:.4e}")
+    print(f"  l2_error_normalized      = {score['l2_error_normalized']:.4e}")
+    print(f"  linf_error_normalized    = {score['linf_error_normalized']:.4e}")
+    if score['apex_l2_error_normalized'] is not None:
+        print(f"  apex_l2_error_normalized = "
+              f"{score['apex_l2_error_normalized']:.4e}")
+    print(f"  tail_growth              = {score['tail_growth']:.4e}")
+    print(f"  mass_drift               = {score['mass_drift']:.4e}")
+    print(f"  R_max_peak               = {score['R_max_peak']:.6f}")
+    print(f"  boundary_saturation      = {score['boundary_saturation']}")
+    if score['boundary_saturation']:
+        print("  WARNING: R_max reached the outer mesh boundary — the "
+              "trajectory is non-physical; do NOT read the errors above "
+              "as a physics comparison.")
 
     # -- Static plots --
     try:
@@ -144,13 +203,15 @@ def main():
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_radius_envelope(t_arr, R_max_arr, R_max_analytical, R0=R0, ax=ax,
                               title="3D Oscillating Droplet: R_max(t)")
-        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_3D_radius.png'), dpi=150)
+        fig.savefig(os.path.join(
+            _FIG, f'oscillating_droplet_3D_radius{suffix}.png'), dpi=150)
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_energy_history(t_arr, np.array(KE_arr), ax=ax,
                              title="3D Oscillating Droplet: KE(t)")
-        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_3D_energy.png'), dpi=150)
+        fig.savefig(os.path.join(
+            _FIG, f'oscillating_droplet_3D_energy{suffix}.png'), dpi=150)
         plt.close(fig)
         print("Static plots saved to fig/")
     except ImportError:
@@ -161,20 +222,30 @@ def main():
         try:
             anim = dynamic_plot_fluid(
                 history, HC, bV=bV,
-                save_path=os.path.join(_FIG, 'oscillating_droplet_3D.mp4'),
+                save_path=os.path.join(
+                    _FIG, f'oscillating_droplet_3D{suffix}.mp4'),
                 fps=15, dpi=100,
                 phase_field='phase',
                 interface_field='is_interface',
             )
-            print(f"Animation saved to fig/oscillating_droplet_3D.mp4")
+            print(f"Animation saved to fig/oscillating_droplet_3D{suffix}.mp4")
         except Exception as e:
             print(f"Animation failed: {e}")
 
     print(f"\nTo view in polyscope:")
     print(f"  python -m ddgclib.scripts.view_polyscope "
-          f"--snapshots {os.path.relpath(_SNAPSHOTS)}")
+          f"--snapshots {os.path.relpath(snapshots_dir)}")
     print("Done.")
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--retopo', choices=('delaunay', 'dual_only'),
+        default=retopo_policy_3d,
+        help="Retopology policy (default: retopo_policy_3d from "
+             "src/_params.py). 'dual_only' skips per-step Delaunay "
+             "retriangulation (frozen connectivity, duals refreshed).",
+    )
+    args = parser.parse_args()
+    main(retopo_policy=args.retopo)

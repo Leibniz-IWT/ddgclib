@@ -91,6 +91,26 @@ K_o = rho_o * c_s**2             # bulk modulus (outer)
 # exercising the per-step Delaunay path via setup's default retopo_fn.
 retopo_policy_2d = 'dual_only'
 
+# Retopology policy for the 3D dynamic oscillation runner
+# (oscillating_droplet_3D.py).  First 3D A/B with the Tier 3B score
+# harness (2026-07-29, docs_temp/debug_session/laneB-3d-score-harness.md)
+# on the full 872-step run at identical parameters (refine 2/2):
+#
+#   policy                     l2_error  tail_growth  mass_drift
+#   per-step Delaunay (old)    1.52446   0.47067      3.87e-14
+#   dual_only (new default)    0.24811   0.08410      1.91e-14
+#
+# Lane-5's caveat (3D skip-triangulation has different boundary-volume
+# bookkeeping, batch_e_star zeroing) was verified BEFORE trusting the
+# score: step-granular probe shows identical boundary count (96),
+# identical |dV/V0| step-0 boundary-zeroing artefact (0.357050), exact
+# simplex volumes engaged in both paths, machine-precision mass; the
+# harness's dual_vol_*/n_interface_* fields confirm it on the full run
+# (interface 98 constant, no boundary saturation in either policy).
+# The pinned 3D floor tests keep exercising the per-step Delaunay path
+# via setup's default retopo_fn.
+retopo_policy_3d = 'dual_only'
+
 # Domain size (outer box should be ≥ 5× droplet radius)
 L_domain = 5.0 * R0
 

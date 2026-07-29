@@ -29,7 +29,8 @@ from cases_dynamic.oscillating_droplet.src._params import (
 )
 from cases_dynamic.oscillating_droplet.src._analytical import (
     rayleigh_frequency, lamb_damping_rate, damped_frequency,
-    max_radius_envelope,
+    max_radius_envelope, lamb_damping_rate_two_fluid,
+    two_fluid_omega_beta_2d,
 )
 from cases_dynamic.oscillating_droplet.src._setup import (
     setup_oscillating_droplet,
@@ -40,7 +41,7 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
 from cases_dynamic.oscillating_droplet.src._metrics import (
-    oscillation_score, save_score,
+    oscillation_score, save_score, add_two_fluid_reference,
 )
 from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
@@ -166,14 +167,44 @@ def main():
     score = oscillation_score(
         diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
     )
+    # Secondary two-fluid reference (lane C): exact 2D two-fluid
+    # normal-mode dispersion (outer bath rho_o/mu_o included; no-slip
+    # wall at 5*R0 still NOT modelled).  The pinned metric above stays
+    # the single-fluid Lamb one for regression continuity.
+    omega_tf, beta_tf = two_fluid_omega_beta_2d(
+        l, gamma, mu_d, rho_d, R0, mu_outer=mu_o, rho_outer=rho_o,
+    )
+    beta_tf_energy = lamb_damping_rate_two_fluid(
+        l, mu_d, rho_d, R0, mu_outer=mu_o, rho_outer=rho_o,
+    )
+    score = add_two_fluid_reference(
+        score, diag_list, R0=R0, epsilon=epsilon, l=l,
+        omega_two_fluid=omega_tf, beta_two_fluid=beta_tf,
+        beta_energy=beta_tf_energy,
+    )
     score_path = os.path.join(_RESULTS, 'score.json')
     save_score(score_path, score)
+    # Raw diagnostic series alongside (scalar fields only — 'com' is an
+    # ndarray), so future reference changes can re-score without
+    # re-running the case.
+    diag_scalars = [
+        {k: float(v) for k, v in dd.items() if np.ndim(v) == 0}
+        for dd in diag_list
+    ]
+    save_score(os.path.join(_RESULTS, 'diag_series.json'),
+               {'kind': 'diag_series', 'diags': diag_scalars})
     print(f"\nOscillation score saved to {score_path}")
     print(f"  summary                  = {score['summary']:.4e}")
     print(f"  l2_error_normalized      = {score['l2_error_normalized']:.4e}")
     print(f"  linf_error_normalized    = {score['linf_error_normalized']:.4e}")
     print(f"  tail_growth              = {score['tail_growth']:.4e}")
     print(f"  mass_drift               = {score['mass_drift']:.4e}")
+    print(f"  -- two-fluid reference (omega={omega_tf:.4f}, "
+          f"beta={beta_tf:.4f}; energy-method beta={beta_tf_energy:.4f}) --")
+    print(f"  l2_error_norm_two_fluid  = "
+          f"{score['l2_error_normalized_two_fluid']:.4e}")
+    print(f"  linf_error_norm_two_fluid= "
+          f"{score['linf_error_normalized_two_fluid']:.4e}")
 
     # -- Static plots --
     try:
