@@ -274,22 +274,28 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
     ``TestStaticDroplet2DRetopologyFloor``.
 
     Long-run probe (``diagnose_a5_bisection.py --n-steps 2000
-    --redistribute-mass``, refine 2/2) confirmed over 2000 steps:
+    --redistribute-mass``, refine 2/2) confirmed over 2000 steps
+    (HISTORICAL, 2026-06-02, pre-2026-07-29 fan-walk volumes — see the
+    RE-PIN block below for the current values):
       - step 0   max|F| = 6.0153e-5  (frozen mesh, A.5.a curvature floor)
       - step 1   max|F| = 7.0325e-5  (one-step retopo transient)
       - step 2.. max|F| = 7.3768e-5  (post-retopo steady state; bit-identical
         across steps 2-2000, std 0.0, |dM/M0| = 8.78e-15, 472->472 verts,
         98->98 interface)
 
-    Two 3D-specific differences from the 2D floor:
-      1. The plateau is reached at step 2, not step 1 (one extra retopo
-         settle step on the near-cospherical interface cloud), so the
-         bit-stability window starts after ``SETTLE_STEPS``.
+    Two 3D-specific differences from the 2D floor (as of 2026-07-29):
+      1. Historically the plateau was reached at step 2, not step 1 (one
+         extra retopo settle step caused by order-dependent qhull
+         tie-breaking on the near-cospherical interface cloud).  Since
+         the canonical qhull input order in hyperct
+         ``connect_and_cache_simplices`` (NOTE(laneA-canonical-order)),
+         3D retopo of a static cloud is idempotent and the plateau is
+         reached at step 1, like 2D — ``SETTLE_STEPS`` = 1.
       2. The one-shot ``|dV/V0|`` = 0.305 at step 0->1 is the documented
          boundary dual-cell zeroing artefact (outer-box boundary vertices
          lose their 'shell' dual volume on the first retopo —
          ``_integrators_dynamic.py`` boundary handling); total volume is
-         bit-stable from step 2 onward, so volume drift is checked across
+         bit-stable from step 1 onward, so volume drift is checked across
          the plateau window, not from step 0.
 
     Locks the post-Phase-2c (2026-04-29) ``dual_vol_phase``-gated
@@ -298,14 +304,46 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
     caught at the regression layer.  See
     ``.claude/plans/please-do-some-deep-vectorized-tarjan.md`` (status
     log 2026-06-02, Probe 6).
+
+    RE-PIN 2026-07-29 (lane A, 3D exact-dual-volume switch + canonical
+    qhull input order): ``EXPECTED_PLATEAU_MAXF`` 7.3768e-05 ->
+    7.274172e-05 (-1.4%), ``SETTLE_STEPS`` 2 -> 1.  Two composed
+    changes:
+      (a) The 3D production path now uses the exact simplex-container
+          dual volumes (``NOTE(lane3-dual-volume)`` in ``stress.py`` /
+          ``_integrators_dynamic.py``).  Alone, this moved the plateau
+          UP to 7.616853911101026e-05 (+3.26%): the exact measure
+          honestly reports the larger real settle-step volume jump
+          (order-dependent qhull tie-breaking at retopo #1-2) that the
+          redistribution rescale converts into a uniform droplet
+          pressure offset — NOT a volume bug
+          (docs_temp/debug_session/lane3-exact-dual-volumes.md).
+      (b) hyperct ``connect_and_cache_simplices`` now canonicalizes
+          the 3D qhull input order (NOTE(laneA-canonical-order)),
+          which makes retopo of the static cloud idempotent, kills
+          the settle-step artifact entirely (no step-1->2 jump), and
+          lands the plateau BELOW the old fan-walk floor.
+    Verified via ``diagnose_a5_bisection.py --redistribute-mass
+    --n-steps 100``: step0 6.0153201139652905e-05 (bit-unchanged,
+    pinned below), plateau 7.274172178727318e-05 from step 1, rel
+    spread 6.05e-12 over steps 1..100 (inside the 1e-10 assertion;
+    the old fan plateau was exactly bit-stable), volume rel spread
+    0.0 from step 1.  The 2D floors are bit-identical (both changes
+    are 3D-only).
     """
 
     EXPECTED_STEP0_MAXF = 6.0153e-05
-    EXPECTED_PLATEAU_MAXF = 7.3768e-05
+    # 7.3768e-05 (fan-walk volumes, order-dependent settle, pre
+    # 2026-07-29) -> 7.274172e-05 (exact simplex-container volumes +
+    # canonical 3D qhull input order, lane A re-pin — see class
+    # docstring; the switch WITHOUT canonical order measures
+    # 7.616854e-05).
+    EXPECTED_PLATEAU_MAXF = 7.274172e-05
     REL_TOL = 0.01
     REFINE_OUTER = 2
     REFINE_DROPLET = 2
-    SETTLE_STEPS = 2       # plateau reached at step 2 (history idx 1)
+    SETTLE_STEPS = 1       # plateau reached at step 1 (canonical order
+                           # killed the step-2 settle; was 2 pre-2026-07-29)
     N_STEPS = 10           # >> settle; ~0.34 s/step in 3D
 
     def test_retopology_neutrality_floor(self):
@@ -626,6 +664,110 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
                  "per-step-Delaunay regression scores 2.11 here)."),
         )
         self.assertLess(score['mass_drift'], 1e-10)
+
+
+class TestConservativeRetopoRemap2D(unittest.TestCase):
+    """Regression net for ``retopo_remap='conservative'`` (lane D).
+
+    The opt-in conservative remap makes per-step FULL Delaunay
+    retopology thermodynamically neutral: pressure structure is
+    restored across each rebuild and the per-phase pressure LEVEL is
+    anchored to volume strain relative to connectivity-artifact-
+    corrected volume targets (p_ref pattern).  On the full 1839-step
+    oscillating-droplet run this collapses the Delaunay KE pump
+    4.07e-2 J -> 8.3e-7 J (~4.9e4x, onto the physical overdamped
+    envelope; l2 0.48992 -> 0.17860 == dual_only to 4 digits) while
+    connectivity reconnects every step.  See
+    docs_temp/debug_session/laneD-conservative-retopo-remap.md.
+    """
+
+    @staticmethod
+    def _build():
+        return setup_oscillating_droplet(
+            dim=2, R0=0.01, epsilon=0.05, l=2,
+            rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
+            gamma=0.05, L_domain=0.05,
+            refinement_outer=1, refinement_droplet=2,
+        )
+
+    def test_remap_pressure_neutral_across_rebuild(self):
+        """One full-Delaunay retopo at frozen positions must not change
+        the pressure field (measured 3.8e-13 Pa; without the remap the
+        same rebuild jolts p_phase by ~1.7e2 Pa on this fixture)."""
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        before = {
+            id(v): (np.array(v.p_phase, dtype=float),
+                    np.array(v.dual_vol_phase, dtype=float),
+                    np.array(v.m_phase, dtype=float))
+            for v in HC.V
+        }
+        retopo_fn(HC, bV, 2, retopo_remap='conservative')
+        dp_max = 0.0
+        n_persistent = 0
+        for v in HC.V:
+            p_b, dvp_b, m_b = before[id(v)]
+            for k in range(mps.n_phases):
+                if (v.dual_vol_phase[k] > 1e-30 and v.m_phase[k] > 1e-30
+                        and dvp_b[k] > 1e-30 and m_b[k] > 1e-30):
+                    n_persistent += 1
+                    dp_max = max(dp_max, abs(float(v.p_phase[k]) - p_b[k]))
+        self.assertGreater(n_persistent, 0)
+        self.assertLess(dp_max, 1e-9)
+
+    def test_remap_full_delaunay_ke_bounded(self):
+        """40-step run with per-step FULL Delaunay + remap stays at the
+        physical KE scale (measured 1.3e-7 J; remap OFF measures
+        4.5e-5 J on this fixture) with machine-precision mass."""
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        remap_fn = partial(retopo_fn, retopo_remap='conservative')
+
+        diag0 = compute_diagnostics(HC, dim=2)
+        edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+
+        c_s = float(np.sqrt(params['K_d'] / 800.0))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:2] - nb.x_a[:2]) > 1e-15
+        )
+        dt = min(0.25 * dx_min / c_s,
+                 0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
+
+        symplectic_euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
+            bc_set=bc_set, retopologize_fn=remap_fn,
+        )
+
+        diag1 = compute_diagnostics(HC, dim=2)
+        mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
+            / diag0['total_mass']
+        self.assertLess(mass_drift, 1e-10)
+        # The point of the remap: Delaunay stays ACTIVE (unlike
+        # dual_only, connectivity is allowed to rewire) ...
+        edges1 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        self.assertNotEqual(edges1, edges0)
+        # ... yet KE stays at the physical scale.
+        self.assertTrue(np.isfinite(diag1['KE']))
+        self.assertLess(diag1['KE'], 1e-5)
+
+    def test_remap_arg_validation(self):
+        """Invalid retopo_remap and remap-without-redistribution raise."""
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
+        )
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        with self.assertRaises(ValueError):
+            _retopologize_multiphase(
+                HC, bV, 2, mps=mps, retopo_remap='bogus',
+            )
+        with self.assertRaises(ValueError):
+            _retopologize_multiphase(
+                HC, bV, 2, mps=mps, redistribute_mass=False,
+                retopo_remap='conservative',
+            )
 
 
 if __name__ == '__main__':

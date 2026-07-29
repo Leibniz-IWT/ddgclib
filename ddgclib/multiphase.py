@@ -164,6 +164,16 @@ class MultiphaseSystem:
         # ``assign_simplex_phases``; reused by ``refresh`` when no
         # explicit ``criterion_fn`` is passed.
         self._simplex_criterion_fn: Callable[[np.ndarray], int] | None = None
+        # Per-phase volume-gauge factor for the EOS density read
+        # (``rho_k = m_k / (vol_corr[k] * dual_vol_phase[k])``).
+        # Stays exactly 1.0 (bit-identical behaviour) unless the
+        # conservative retopology remap is active
+        # (``retopo_remap='conservative'`` in
+        # ``_retopologize_multiphase``), which sets it to the
+        # measurement-gauge ratio of the latest connectivity rebuild so
+        # that reconnection-induced dual-volume jumps at frozen vertex
+        # positions are not read as physical compression.
+        self.vol_corr = np.ones(self.n_phases)
 
     # -- Phase assignment ----------------------------------------------------
 
@@ -530,8 +540,12 @@ class MultiphaseSystem:
         """Compute per-phase pressures from per-phase density.
 
         For each phase *k* present at vertex *v*:
-            ``rho_k = m_k / dual_vol_phase_k``
+            ``rho_k = m_k / (vol_corr_k * dual_vol_phase_k)``
             ``p_k   = eos_k.pressure(rho_k)``
+
+        ``vol_corr_k`` is the per-phase volume-gauge factor (exactly
+        1.0 unless the conservative retopology remap is active — see
+        :attr:`vol_corr`).
 
         Sets ``v.p_phase[k]``, ``v.rho_phase[k]``, and ``v.p`` (the
         single-phase pressure for bulk vertices; for interface vertices
@@ -544,7 +558,7 @@ class MultiphaseSystem:
                 vol_k = v.dual_vol_phase[k]
                 m_k = v.m_phase[k]
                 if vol_k > 1e-30 and m_k > 1e-30:
-                    rho_k = m_k / vol_k
+                    rho_k = m_k / (self.vol_corr[k] * vol_k)
                     v.rho_phase[k] = rho_k
                     v.p_phase[k] = float(self.phases[k].eos.pressure(rho_k))
                 else:

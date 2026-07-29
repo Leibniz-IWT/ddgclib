@@ -754,12 +754,13 @@ class TestDualVolumeExactSimplex:
     box corners by O(h^2) and 1-4 % interior / ~20 % boundary in 3D
     (partition-of-unity deficit 6-14 %,
     docs_temp/audit/dual-volume-3d.md).  With ``HC._simplices`` cached
-    and barycentric duals, dim==2 now uses the exact identity
-    Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|.  The dim==3 production path
-    intentionally stays on the fan walk pending a re-pin of the 3D
-    droplet retopology floor (NOTE(lane3-dual-volume) in stress.py);
-    the exact 3D values are available via
-    ``hyperct.ddg.simplex_dual_volumes`` and pinned here.
+    and barycentric duals, dim==2 AND dim==3 now use the exact identity
+    Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|.  The dim==3 production
+    switch was enabled 2026-07-29 (lane A) together with the canonical
+    3D qhull input order and the 3D droplet retopology floor re-pin
+    7.3768e-5 -> 7.274172e-5 (NOTE(lane3-dual-volume) in stress.py);
+    the fan walk remains as the circumcentric / no-simplex-cache
+    fallback.
     """
 
     def test_partition_of_unity_2d_jittered(self):
@@ -783,18 +784,15 @@ class TestDualVolumeExactSimplex:
         vols = simplex_dual_volumes(HC, 3)
         npt.assert_allclose(sum(vols.values()), 1.0, rtol=1e-12)
 
-    @pytest.mark.xfail(
-        reason="Known 3D fan-walk undercount (audit/dual-volume-3d.md): "
-        "the production dual_volume(dim=3) path is intentionally NOT "
-        "switched to the exact simplex rule because that moves the "
-        "pinned 3D droplet retopology floor UP 7.3768e-5 -> 7.6169e-5 "
-        "(+3.3%) — see NOTE(lane3-dual-volume) in stress.py and "
-        "docs_temp/debug_session/lane3-exact-dual-volumes.md.",
-        strict=True,
-    )
     def test_partition_of_unity_3d_jittered_production(self):
-        """Documents the open gap: production 3D dual_volume does NOT
-        tile the domain (sums to 0.86-0.94 on unstructured meshes)."""
+        """Production 3D dual_volume tiles the unit cube to 1e-12.
+
+        Was a strict xfail (fan-walk undercount, sums 0.86-0.94 on
+        unstructured meshes, audit/dual-volume-3d.md) until the 3D
+        exact-simplex switch was enabled 2026-07-29, together with the
+        3D droplet retopology floor re-pin 7.3768e-5 -> 7.274172e-5 —
+        see NOTE(lane3-dual-volume) in stress.py.
+        """
         from ddgclib.operators.stress import dual_volume
 
         HC, _ = _build_jittered_delaunay_mesh(3, n_refine=2)

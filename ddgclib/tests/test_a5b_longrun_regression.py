@@ -59,8 +59,18 @@ from cases_dynamic.oscillating_droplet.diagnose_a5_bisection import (  # noqa: E
 # 3D: post-Probe-2c (2026-04-29 redistribute_mass guard fix),
 # confirmed flat at 7.3768e-05 over n_steps=2000 by Probe 6
 # (2026-05-27).  Refinement 2/2, 472 vertices / 98 interface.
-A5B_3D_PEAK = 7.3768e-05
-A5B_3D_END = 7.3768e-05
+# RE-PIN 2026-07-29 (lane A): 7.3768e-05 -> 7.274172e-05 for BOTH peak
+# and end — the 3D production path switched to exact simplex-container
+# dual volumes (NOTE(lane3-dual-volume) in stress.py) AND hyperct
+# connect_and_cache_simplices canonicalizes the 3D qhull input order
+# (NOTE(laneA-canonical-order)), which makes static-cloud retopo
+# idempotent: plateau 7.274172178727318e-05 from step 1, rel spread
+# 6.05e-12 over 100 steps (diagnose_a5_bisection.py
+# --redistribute-mass --n-steps 100; the exact switch WITHOUT
+# canonical order measures 7.616854e-05).  Peak == end because the
+# step-1 transient IS the plateau now.  2D pins below are bit-unchanged.
+A5B_3D_PEAK = 7.274172e-05
+A5B_3D_END = 7.274172e-05
 
 # 2D: post-Phase-2c, curvature-stencil bound on the polygon-vs-circle
 # truncation.  Refinement 3/3, 311 vertices / 32 interface.  Peak is

@@ -237,19 +237,41 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         for v in failed:
             v.boundary = True
             dV.add(v)
-        # NOTE(lane3-dual-volume): batch_e_star's fan-walk volumes
-        # undercount 1-4% interior on unstructured 3D meshes
-        # (docs_temp/audit/dual-volume-3d.md).  The exact replacement
-        # (hyperct.ddg.simplex_dual_volumes over HC._simplices) is
-        # available but intentionally NOT wired in here: enabling it
-        # (together with the matching cache_dual_volumes/dual_volume 3D
-        # branches) moves the pinned 3D static-droplet retopology floor
-        # UP 7.3768e-5 -> 7.6169e-5 (+3.3%) because the exact measure
-        # honestly reports the larger settle-step volume jump that the
-        # redistribution rescale converts into a uniform pressure
-        # offset.  See docs_temp/debug_session/lane3-exact-dual-volumes.md.
-        for v in HC.V:
-            v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
+        # NOTE(lane3-dual-volume): in 3D, prefer the exact
+        # simplex-container volumes (hyperct.ddg.simplex_dual_volumes,
+        # Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|) over batch_e_star's
+        # fan-walk volumes, which undercount 1-4% interior on
+        # unstructured 3D meshes (docs_temp/audit/dual-volume-3d.md).
+        # Enabled 2026-07-29 together with the matching
+        # cache_dual_volumes/dual_volume dim==3 branches in stress.py
+        # (mixed volume sources across setup/retopo create a
+        # first-retopo pressure jump) and the canonical 3D qhull input
+        # order in hyperct connect_and_cache_simplices
+        # (NOTE(laneA-canonical-order), kills the order-dependent
+        # settle-step artifact); the pinned 3D static-droplet
+        # retopology floor was re-pinned 7.3768e-5 -> 7.274172e-5
+        # accordingly (the switch alone measures 7.616854e-5: the
+        # exact measure honestly reports the larger settle-step volume
+        # jump that the redistribution rescale converts into a uniform
+        # pressure offset).  2D keeps
+        # batch_e_star's volumes here (bit-identical to the validated
+        # 2D baseline; the 2D fan walk is exact on interior vertices).
+        # Boundary zeroing convention preserved in both paths.  See
+        # docs_temp/debug_session/lane3-exact-dual-volumes.md.
+        exact_vols = None
+        if dim == 3:
+            from ddgclib.operators.stress import (
+                _use_exact_barycentric_volume,
+            )
+            if _use_exact_barycentric_volume(HC):
+                from hyperct.ddg import simplex_dual_volumes
+                exact_vols = simplex_dual_volumes(HC, dim)
+        if exact_vols is not None:
+            for v in HC.V:
+                v.dual_vol = exact_vols.get(v, 0.0) if v not in dV else 0.0
+        else:
+            for v in HC.V:
+                v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
         HC._edge_area_cache = edge_areas
     except (ImportError, NotImplementedError):
         from ddgclib.operators.stress import cache_dual_volumes
@@ -420,7 +442,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              skip_triangulation=False,
                              redistribute_mass=False,
                              remesh_mode='delaunay', remesh_kwargs=None,
-                             split_method='neighbour_count'):
+                             split_method='neighbour_count',
+                             retopo_remap=None):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -458,7 +481,44 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         adaptive driver.
     remesh_kwargs : dict or None
         Extra keyword arguments forwarded to the adaptive driver.
+    retopo_remap : {None, 'conservative'}
+        Opt-in conservative remap of the thermodynamic state across the
+        connectivity rebuild (default ``None`` — previous behaviour,
+        bit-identical).  ``'conservative'`` makes the pressure field
+        exactly invariant across the rebuild: since vertex positions
+        are frozen inside this call, any change the reconnection makes
+        to measured dual volumes is a measurement artifact, not a
+        physical compression, and must not enter the EOS.  Two stages:
+
+        1. Physical update on the OLD connectivity — the validated
+           dual-only per-step sequence (dual refresh at the current
+           positions, per-phase split, pressure-preserving mass
+           redistribution, EOS pressures).
+        2. Connectivity rebuild forced pressure-neutral — full
+           retriangulation + refresh + redistribution against the
+           stage-1 snapshot (per-vertex inertia consistent with the
+           new dual cells, exact per-phase mass conservation), then
+           :func:`restore_pressure_multiphase` cancels the residual
+           uniform per-phase offset ``~K_k*(scale_k - 1)`` that the
+           global mass-conservation rescale would otherwise inject as
+           a per-step interface jolt (see
+           docs_temp/debug_session/laneD-conservative-retopo-remap.md).
+
+        Requires *mps* and ``redistribute_mass=True``; no-op when
+        *skip_triangulation* is True (nothing to remap).
     """
+    if retopo_remap not in (None, 'conservative'):
+        raise ValueError(
+            f"retopo_remap must be None or 'conservative', "
+            f"got {retopo_remap!r}"
+        )
+    remap_active = (retopo_remap == 'conservative'
+                    and not skip_triangulation and mps is not None)
+    if remap_active and not redistribute_mass:
+        raise ValueError(
+            "retopo_remap='conservative' requires redistribute_mass=True"
+        )
+
     # Snapshot per-phase pressure AND sub-volume before topology change.
     # The pre-retopo dual_vol_phase is needed by
     # redistribute_mass_multiphase to gate phase-presence at *v* —
@@ -470,6 +530,24 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
             snapshot_geometry_multiphase,
         )
         _p_snap = snapshot_geometry_multiphase(HC, mps.n_phases)
+
+    _vol_mid = None
+    if remap_active:
+        from ddgclib.operators.mass_redistribution import (
+            phase_volume_totals,
+        )
+        # Stage 1 — measurement pass on the OLD connectivity at the
+        # CURRENT (frozen) positions: refresh duals + per-phase split
+        # without touching masses or pressures, and record the total
+        # per-phase volumes.  Together with the same totals measured
+        # after the rebuild, this isolates the pure connectivity
+        # measurement artifact ratio (no physics can hide in it —
+        # positions do not move inside this call), which the level
+        # anchor below folds into the per-phase volume targets.
+        _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
+                      backend=backend, skip_triangulation=True)
+        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+        _vol_mid = phase_volume_totals(HC, mps.n_phases)
 
     # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
     _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
@@ -493,13 +571,51 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
             from ddgclib.operators.mass_redistribution import (
                 redistribute_mass_multiphase,
             )
-            redistribute_mass_multiphase(
+            _redist_diag = redistribute_mass_multiphase(
                 HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
             )
+            if remap_active:
+                # Stage 2 closure, part 1 — volume-gauge update: the
+                # redistribution scale factor is exactly the ratio of
+                # conserved phase mass to the phase volume measured on
+                # the NEW connectivity at the (frozen) stage-1
+                # positions and pressures, i.e. the pure connectivity
+                # measurement artifact of this rebuild (times the
+                # previous gauge).  Storing it as the per-phase EOS
+                # volume gauge makes the mass ledger and the pressure
+                # field self-consistent, so the NEXT redistribution
+                # does not bounce the artifact back in as a uniform
+                # pressure offset (K*(scale-1) jolt).
+                for _rec in _redist_diag['per_phase_diagnostics']:
+                    mps.vol_corr[_rec['phase']] = _rec['scale_factor']
             # Recompute pressures from the redistributed masses so that
             # v.p_phase (read by multiphase_stress_force) reflects the
             # adjusted densities, not the stale pre-redistribution values.
             mps.compute_phase_pressures(HC)
+            if remap_active:
+                # Stage 2 closure, part 2 — structure restore: the
+                # pre-call pressure STRUCTURE must survive the rebuild
+                # bit-exactly wherever phase presence persists (the
+                # global rescale reproduces it only up to a uniform
+                # per-phase offset).
+                from ddgclib.operators.mass_redistribution import (
+                    anchor_phase_pressure_levels,
+                    phase_volume_totals,
+                    restore_pressure_multiphase,
+                )
+                restore_pressure_multiphase(HC, mps, _p_snap)
+                # Stage 2 closure, part 3 — level anchor: pin each
+                # phase's pressure LEVEL to the volume strain relative
+                # to the artifact-corrected per-phase volume targets
+                # (p_ref pattern: rebuild targets after every retopo so
+                # connectivity changes are not read as compression).
+                # Without this the level is an integral of noisy
+                # per-step scale factors and reconnection noise
+                # rectifies into a runaway phase tension.
+                _vol_new = phase_volume_totals(HC, mps.n_phases)
+                anchor_phase_pressure_levels(
+                    HC, mps, _vol_mid, _vol_new,
+                )
 
 
 def _recompute_duals(HC):

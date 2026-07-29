@@ -351,17 +351,18 @@ def dual_volume(v, HC, dim: int = 3) -> float:
     Notes
     -----
     For barycentric duals with an explicit simplex cache
-    (``HC._simplices``), dim 2 uses the exact closed form
+    (``HC._simplices``), dim 2 AND dim 3 use the exact closed form
     ``Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|`` from
     ``hyperct.ddg.vertex_dual_volume`` — exact to machine precision,
     tiles the domain including boundary/corner cells, and has no
     degenerate/exception paths.  The legacy geometric reconstruction
     (``dual_cell_area_2d`` / ``v_star`` fan walk) is kept for
     circumcentric duals and as fallback when no simplex cache exists.
-    dim 3 intentionally stays on the legacy fan walk (which undercounts
-    1–4 % interior, ~20 % boundary on unstructured meshes — see
-    docs_temp/audit/dual-volume-3d.md) pending a re-pin of the 3D
-    droplet retopology floor; see the NOTE(lane3-dual-volume) below.
+    The 3D exact path was enabled 2026-07-29 (lane A), together with a
+    canonical 3D qhull input order in hyperct
+    ``connect_and_cache_simplices``; the 3D droplet retopology floor
+    was re-pinned 7.3768e-5 -> 7.274172e-5 accordingly — see the
+    NOTE(lane3-dual-volume) below.
     """
     if dim == 1:
         # 1D dual cell = interval between the two dual vertices
@@ -383,18 +384,29 @@ def dual_volume(v, HC, dim: int = 3) -> float:
         return dual_cell_area_2d(v, include_edge_midpoints=True)
 
     elif dim == 3:
-        # NOTE(lane3-dual-volume): the exact simplex path (as in the
-        # dim==2 branch) applies in 3D too but is intentionally NOT
-        # enabled: switching the 3D droplet pipeline (setup
-        # cache_dual_volumes + retopo refresh) to exact volumes moves
-        # the pinned 3D static-droplet retopology floor UP
-        # 7.3768e-5 -> 7.6169e-5 (+3.3%) via the settle-step
-        # volume-jump/redistribution-rescale interaction.  Use
-        # hyperct.ddg.vertex_dual_volume / simplex_dual_volumes
-        # directly for exact 3D dual volumes.  See
+        # NOTE(lane3-dual-volume): exact simplex path ENABLED 2026-07-29
+        # (lane A), mirroring the dim==2 branch.  All three switch
+        # points (this branch, cache_dual_volumes dim in (2, 3), and
+        # the _integrators_dynamic.py step-5b batch_e_star preference)
+        # flipped TOGETHER — mixed volume sources across setup/retopo
+        # create a first-retopo pressure jump much larger than either
+        # consistent choice.  Alone, the switch moves the pinned 3D
+        # static-droplet retopology floor 7.3768e-5 -> 7.616854e-5
+        # (+3.3%): the exact measure honestly reports the larger real
+        # settle-step volume jump that the redistribution rescale
+        # converts into a uniform pressure offset (order-dependent
+        # qhull tie-breaking at retopo #1-2, NOT a volume bug).  The
+        # companion canonical 3D qhull input order in hyperct
+        # connect_and_cache_simplices (NOTE(laneA-canonical-order))
+        # kills that settle artifact; the floor is pinned at
+        # 7.274172e-5 (below the old fan floor).  See
         # docs_temp/debug_session/lane3-exact-dual-volumes.md.
-        # Legacy fan walk: known to undercount 1-4% interior / ~20%
-        # boundary on unstructured meshes (audit/dual-volume-3d.md).
+        if _use_exact_barycentric_volume(HC):
+            from hyperct.ddg import vertex_dual_volume
+            return vertex_dual_volume(HC, v, dim=3)
+        # Legacy fan walk (circumcentric / no simplex cache): known to
+        # undercount 1-4% interior / ~20% boundary on unstructured
+        # meshes (audit/dual-volume-3d.md).
         from hyperct.ddg import v_star as _v_star
         total_vol = 0.0
         for v_j in v.nn:
@@ -433,11 +445,13 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
     dim : int
         Spatial dimension.
     """
-    if dim == 2 and _use_exact_barycentric_volume(HC):
+    if dim in (2, 3) and _use_exact_barycentric_volume(HC):
         # Exact barycentric dual volumes in one vectorized pass over the
         # simplex cache (Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|).
-        # dim==3 intentionally stays on the legacy path — see the
-        # NOTE(lane3-dual-volume) in dual_volume above.
+        # dim==3 enabled 2026-07-29 together with the dual_volume
+        # dim==3 branch and the _integrators_dynamic.py step-5b
+        # preference — see the NOTE(lane3-dual-volume) in dual_volume
+        # above.
         from hyperct.ddg import simplex_dual_volumes
         vols = simplex_dual_volumes(HC, dim)
         for v in HC.V:

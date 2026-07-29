@@ -242,6 +242,182 @@ def _extract_snapshot_views(snapshot, n_phases: int):
     return pressure_view, dual_vol_view
 
 
+def restore_pressure_multiphase(
+    HC,
+    mps,
+    snapshot: dict,
+) -> int:
+    """Overwrite ``v.p_phase`` with snapshot pressures after a rebuild.
+
+    Conservative-remap closure (``retopo_remap='conservative'``): a
+    connectivity rebuild at frozen vertex positions is a measurement
+    change, not a physical compression, so the pressure field that the
+    force assembly reads must be exactly invariant across it.
+
+    :func:`redistribute_mass_multiphase` reproduces the snapshot
+    pressure field only up to a uniform per-phase offset
+    ``~K_k * (scale_k - 1)`` (the global mass-conservation rescale).
+    Under per-step Delaunay the measured total phase volume jumps with
+    every reconnection, so that offset becomes a per-step pressure jolt
+    at the interface.  This helper cancels it by restoring the snapshot
+    ``p_phase[k]`` wherever phase *k* persists across the rebuild
+    (present in both the snapshot and the new ``dual_vol_phase``),
+    then recomputing ``v.p`` under the shared interface-mean
+    convention.  Masses (already redistributed, exactly conserved) are
+    left untouched; the transient ``p != eos(m/dual_vol)`` mismatch is
+    immaterial because the next redistribution regenerates masses from
+    the pressure field anyway.
+
+    Parameters
+    ----------
+    HC : Complex
+    mps : MultiphaseSystem
+    snapshot : dict
+        Geometry-aware snapshot from
+        :func:`snapshot_geometry_multiphase` taken at the same vertex
+        positions immediately before the connectivity rebuild.
+
+    Returns
+    -------
+    int
+        Number of ``(vertex, phase)`` entries restored.
+    """
+    from ddgclib.eos._multiphase_eos import interface_mean_pressure
+
+    n_phases = mps.n_phases
+    p_snap, dvp_snap = _extract_snapshot_views(snapshot, n_phases)
+    n_restored = 0
+    for v in HC.V:
+        vid = id(v)
+        if vid not in p_snap:
+            continue  # newly injected vertex: keep EOS pressure
+        dvp = getattr(v, 'dual_vol_phase', None)
+        if dvp is None:
+            continue
+        for k in range(n_phases):
+            if dvp[k] < 1e-30 or v.m_phase[k] < 1e-30:
+                continue  # phase absent on the new duals
+            if dvp_snap is not None and dvp_snap[vid][k] < 1e-30:
+                continue  # phase newly present at v: keep EOS value
+            v.p_phase[k] = p_snap[vid][k]
+            n_restored += 1
+        # v.p convention identical to compute_phase_pressures
+        if getattr(v, 'is_interface', False) or v.phase < 0:
+            v.p = interface_mean_pressure(v, n_phases)
+        elif 0 <= v.phase < n_phases:
+            v.p = float(v.p_phase[v.phase])
+    return n_restored
+
+
+def phase_volume_totals(HC, n_phases: int) -> np.ndarray:
+    """Total measured per-phase dual volume ``sum_i dual_vol_phase[k]``."""
+    totals = np.zeros(n_phases)
+    for v in HC.V:
+        dvp = getattr(v, 'dual_vol_phase', None)
+        if dvp is not None:
+            totals += np.asarray(dvp, dtype=float)
+    return totals
+
+
+def anchor_phase_pressure_levels(
+    HC,
+    mps,
+    vol_mid: np.ndarray,
+    vol_new: np.ndarray,
+) -> dict:
+    """p_ref-style per-phase pressure-level anchor (conservative remap).
+
+    Under redistribution the per-phase pressure LEVEL is the integral of
+    per-step global scale factors; per-step Delaunay reconnection makes
+    those increments noisy and the noise rectifies into a runaway level
+    drift (measured: the oscillating-droplet outer phase ratchets to a
+    spurious ~-5 Pa tension in 200 steps, pumping far-field KE).  The
+    p_ref benchmark closure fixes the same defect on tet meshes by
+    rebuilding volume TARGETS after every retopology and deriving the
+    pressure from volume strain relative to the rebuilt targets — a
+    state function instead of a noisy integral.
+
+    This is the dual-cell analogue.  Maintained on *mps*:
+
+    - ``_remap_vol_tar[k]``: target phase volume expressed in the
+      CURRENT connectivity's measurement gauge.  Initialised to
+      *vol_mid* on the first call (the setup-state volume), then
+      multiplied by the pure connectivity artifact ratio
+      ``vol_new[k]/vol_mid[k]`` at every rebuild (both measured at the
+      same frozen vertex positions, so the ratio contains no physics).
+    - ``_remap_rho_ref[k]``: reference density consistent with the
+      INITIAL pressure level, ``eos_k.density(L_k(0))`` where ``L_k``
+      is the volume-weighted mean of ``p_phase[k]``.  Deliberately NOT
+      the mass-ledger density ``M_k/V_k`` — setup mass bookkeeping
+      (e.g. Young-Laplace mass loading against pre-perturbation
+      volumes) may not be volume-consistent, and the anchor must
+      reproduce the setup pressure level exactly at t=0.
+
+    The anchored level is ``p_lvl_k = eos_k.pressure(rho_ref_k *
+    vol_tar_k / vol_new_k)`` — real global compression moves it with
+    the correct EOS stiffness, pure reconnection cancels exactly — and
+    the current volume-weighted mean of ``p_phase[k]`` is shifted
+    uniformly onto it (structure untouched).  Returns per-phase
+    diagnostics.
+    """
+    n_phases = mps.n_phases
+    vol_mid = np.asarray(vol_mid, dtype=float)
+    vol_new = np.asarray(vol_new, dtype=float)
+
+    first_call = getattr(mps, '_remap_vol_tar', None) is None
+    if first_call:
+        mps._remap_vol_tar = vol_mid.copy()
+        mps._remap_rho_ref = np.zeros(n_phases)
+
+    diag = {'p_level': [], 'shift': []}
+    for k in range(n_phases):
+        if vol_mid[k] < 1e-30 or vol_new[k] < 1e-30:
+            diag['p_level'].append(0.0)
+            diag['shift'].append(0.0)
+            continue
+        # Rebuild the target in the new measurement gauge (pure
+        # connectivity artifact ratio — positions are frozen).
+        mps._remap_vol_tar[k] *= vol_new[k] / vol_mid[k]
+
+        # Current volume-weighted mean level of phase k
+        num = 0.0
+        den = 0.0
+        for v in HC.V:
+            dvp = getattr(v, 'dual_vol_phase', None)
+            if dvp is None or dvp[k] < 1e-30 or v.m_phase[k] < 1e-30:
+                continue
+            num += float(v.p_phase[k]) * float(dvp[k])
+            den += float(dvp[k])
+        if den < 1e-30:
+            diag['p_level'].append(0.0)
+            diag['shift'].append(0.0)
+            continue
+        L_k = num / den
+
+        if first_call:
+            mps._remap_rho_ref[k] = float(mps.phases[k].eos.density(L_k))
+        rho_lvl = mps._remap_rho_ref[k] * mps._remap_vol_tar[k] / vol_new[k]
+        p_lvl = float(mps.phases[k].eos.pressure(rho_lvl))
+        shift = p_lvl - L_k
+        for v in HC.V:
+            dvp = getattr(v, 'dual_vol_phase', None)
+            if dvp is None or dvp[k] < 1e-30 or v.m_phase[k] < 1e-30:
+                continue
+            v.p_phase[k] = float(v.p_phase[k]) + shift
+        diag['p_level'].append(p_lvl)
+        diag['shift'].append(shift)
+
+    # Refresh the representative vertex pressure under the shared
+    # convention (identical to compute_phase_pressures's tail).
+    from ddgclib.eos._multiphase_eos import interface_mean_pressure
+    for v in HC.V:
+        if getattr(v, 'is_interface', False) or v.phase < 0:
+            v.p = interface_mean_pressure(v, n_phases)
+        elif 0 <= v.phase < n_phases:
+            v.p = float(v.p_phase[v.phase])
+    return diag
+
+
 def redistribute_mass_multiphase(
     HC,
     dim: int,
