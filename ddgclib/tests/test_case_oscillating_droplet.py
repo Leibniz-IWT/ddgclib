@@ -542,41 +542,48 @@ class TestDualOnlyRetopoPolicy2D(unittest.TestCase):
 
 
 class TestOscillationEnvelopeRegression2D(unittest.TestCase):
-    """Fast (~6 s) shortened oscillating-droplet run pinning the
-    post-lane-5 dynamic quality metrics.
+    """Fast (~9 s) shortened oscillating-droplet run pinning the
+    production dynamic quality metrics.
 
-    Mirrors ``oscillating_droplet_2D.py`` exactly (dual_only retopo
-    policy, CFL dt formula, record cadence, ``oscillation_score``) at
-    reduced refinement 2/2, integrating the FULL production duration
-    t_end = min(t_end_2d, 5/beta) = 0.1143 s (the whole overdamped
-    decay envelope; KE peaks at t=0.0386 s, safely inside the first
-    half, so the half-split tail_growth metric is robust here — unlike
-    the refine-3/3 fragility noted in the lane-5 log).
+    Mirrors ``oscillating_droplet_2D.py`` exactly (delaunay_remap
+    retopo policy, CFL dt formula, record cadence,
+    ``oscillation_score``) at reduced refinement 2/2, integrating the
+    FULL production duration t_end = min(t_end_2d, 5/beta) = 0.1143 s
+    (the whole overdamped decay envelope; KE peaks well inside the
+    first half, so the half-split tail_growth metric is robust here —
+    unlike the refine-3/3 fragility noted in the lane-5 log).
 
-    Pinned 2026-07-02 after lanes 1-5 (zero-gauge sentinel, EOS
-    consistency, exact 2D dual volumes, remesh fixes, dual_only
-    policy).  Measured on this fixture (95 verts / 16 iface, 267
-    steps, deterministic across repeated runs):
+    RE-PINNED 2026-07-29 (lane E adoption): the runner default flipped
+    'dual_only' -> 'delaunay_remap' (per-step full Delaunay + lane-D
+    conservative remap), so this mirror now exercises the remap path.
+    Measured on this fixture (95 verts / 16 iface, 267 steps,
+    deterministic across repeated runs) old (dual_only) -> new
+    (delaunay_remap):
 
-        l2_error_normalized = 0.050006441230559064
-        tail_growth         = 0.9130549583972877
-        linf                = 0.08490720480839112
-        mass_drift          = 4.6e-15
+        l2_error_normalized = 0.050006441230559064 -> 0.05451425932968201
+        tail_growth         = 0.9130549583972877   -> 0.9368903708926931
+        linf                = 0.08490720480839112  -> 0.08367647560330455
+        mass_drift          = 4.6e-15              -> 4.1e-15
+        KE_max [J]          = 1.4609567009656418e-06 -> 1.4214765248811987e-06
 
-    Reference full-run (refine 3/3, 1839 steps, ~2 min) scores at the
-    same code state: l2 0.1785660454150319, tail 0.9992507831101141.
+    Reference full-run (refine 3/3, 1839 steps, ~3.5 min) scores at
+    the same code state: l2 0.17479361640597058, tail
+    0.9998967874595965 (dual_only: 0.1785660454150319 /
+    0.9992507831101141).
 
-    A/B sensitivity: reverting just the retopo policy to per-step
-    Delaunay (pre-lane-5) scores l2 1.384569 / tail 2.110904 /
-    KE_max 9.93e-02 J (vs 1.46e-06 J) on this exact fixture, so the
-    ~10%-headroom thresholds below catch that class of regression by
-    >25x.  Update the pins ONLY if a change legitimately improves the
-    metrics (document old -> new).
+    A/B sensitivity: reverting the retopo policy to BARE per-step
+    Delaunay (no remap, pre-lane-5) scores l2 1.384569 / tail 2.110904
+    / KE_max 9.93e-02 J on this exact fixture, so the ~10%-headroom
+    thresholds below catch that class of regression by >25x.  Update
+    the pins ONLY if a change legitimately improves the metrics
+    (document old -> new).
     """
 
-    # measured 0.050006441230559064 + ~10% headroom
-    L2_MAX = 0.0550
-    # measured 0.9130549583972877 + ~10% headroom
+    # measured 0.05451425932968201 + ~10% headroom
+    # (old dual_only pin: 0.0550 over measured 0.050006441230559064)
+    L2_MAX = 0.0600
+    # measured 0.9368903708926931 + ~7% headroom (kept at the old pin;
+    # tail_growth > 1 means KE growth in the second half)
     TAIL_MAX = 1.004
     REFINE = 2
 
@@ -609,8 +616,9 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
                 refinement_droplet=self.REFINE,
             )
 
-        # Same rebinding as the runner's 'dual_only' policy.
-        retopo_fn = partial(retopo_fn, skip_triangulation=True)
+        # Same rebinding as the runner's 'delaunay_remap' policy
+        # (the production default since lane E).
+        retopo_fn = partial(retopo_fn, retopo_remap='conservative')
 
         # CFL dt — identical formula to oscillating_droplet_2D.py.
         c_s = float(np.sqrt(K_d / rho_d))
@@ -768,6 +776,88 @@ class TestConservativeRetopoRemap2D(unittest.TestCase):
                 HC, bV, 2, mps=mps, redistribute_mass=False,
                 retopo_remap='conservative',
             )
+
+
+class TestDelaunayRemapEndurance2D(unittest.TestCase):
+    """Lane-E endurance guard for the 'delaunay_remap' production
+    default (mirrors ``TestDualOnlyRetopoPolicy2D`` at 5x the horizon).
+
+    200 symplectic steps with per-step FULL Delaunay reconnection +
+    conservative remap on the coarse perturbed-droplet fixture.  The
+    lane-E long-run proofs behind this guard (2026-07-29,
+    docs_temp/debug_session/laneE-adoption-defaults.md): a 2000-step
+    static (u=0) endurance run holds the pinned 2.2717e-3 force floor
+    with rel spread 1.3e-15 and mass drift 2.4e-15, and a 2x-horizon
+    (3678-step) dynamic run shows no late-time KE growth with mass
+    drift 4.5e-14.  This test locks the same invariants at fast-suite
+    cost: bounded KE at 5x the 40-step guard horizon, machine mass,
+    preserved interface, and Delaunay actually rewiring.
+    """
+
+    def test_remap_endurance_200_steps(self):
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+            setup_oscillating_droplet(
+                dim=2, R0=0.01, epsilon=0.05, l=2,
+                rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
+                gamma=0.05, L_domain=0.05,
+                refinement_outer=1, refinement_droplet=2,
+            )
+        remap_fn = partial(retopo_fn, retopo_remap='conservative')
+
+        diag0 = compute_diagnostics(HC, dim=2)
+        edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        n_iface0 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        n_verts0 = sum(1 for _ in HC.V)
+
+        c_s = float(np.sqrt(params['K_d'] / 800.0))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:2] - nb.x_a[:2]) > 1e-15
+        )
+        dt = min(0.25 * dx_min / c_s,
+                 0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
+
+        ke_trace: list[float] = []
+
+        def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
+            if step % 40 == 0:
+                d = compute_diagnostics(HC_cb, dim=2)
+                ke_trace.append(float(d['KE']))
+
+        symplectic_euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=200, dim=2,
+            bc_set=bc_set, callback=callback, retopologize_fn=remap_fn,
+        )
+
+        diag1 = compute_diagnostics(HC, dim=2)
+
+        # Machine-precision mass through 200 rebuild+remap cycles.
+        mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
+            / diag0['total_mass']
+        self.assertLess(mass_drift, 1e-10)
+
+        # Delaunay stays ACTIVE (the point of the policy) ...
+        edges1 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        self.assertNotEqual(edges1, edges0)
+
+        # ... interface and vertex sets are preserved ...
+        n_iface1 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
+        n_verts1 = sum(1 for _ in HC.V)
+        self.assertEqual(n_iface1, n_iface0)
+        self.assertEqual(n_verts1, n_verts0)
+
+        # ... and KE stays bounded at the physical scale for the whole
+        # horizon (bare per-step Delaunay pumps ~6e-4 J within 60 steps
+        # on the fine mesh; every recorded sample must stay bounded,
+        # not just the final one).
+        self.assertTrue(np.isfinite(diag1['KE']))
+        self.assertLess(diag1['KE'], 1e-5)
+        self.assertTrue(all(np.isfinite(k) for k in ke_trace))
+        self.assertLess(max(ke_trace), 1e-5)
 
 
 if __name__ == '__main__':

@@ -80,15 +80,23 @@ def main():
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
     print(f"Mesh: {n_verts} vertices, {n_iface} interface")
 
-    # -- Retopology policy (lane-5 sweep, see src/_params.py) --
-    # 'dual_only': keep the interface-conforming builder connectivity
-    # for the whole run; refresh duals / per-phase split / mass
-    # redistribution / EOS pressures every step.  Per-step global
-    # Delaunay reconnection pumps spurious KE (~5e4x physical) and was
-    # the dominant l2/tail error source (l2 0.490 -> 0.179,
-    # tail_growth 1.725 -> 0.999 on this run).
+    # -- Retopology policy (lane-5 sweep + lane-E adoption, see
+    # src/_params.py) --
+    # 'delaunay_remap' (default): per-step FULL Delaunay reconnection
+    # kept thermodynamically neutral by the lane-D conservative remap
+    # (pressure structure restored bit-exactly across each rebuild,
+    # per-phase EOS volume gauge, p_ref-style level anchor).  Scores
+    # l2 0.17479 / tail 0.99990 on this run while retopology stays
+    # honestly active.
+    # 'dual_only' (opt-in): keep the interface-conforming builder
+    # connectivity for the whole run; refresh duals / per-phase split /
+    # mass redistribution / EOS pressures every step (l2 0.17857 /
+    # tail 0.99925).  Bare per-step Delaunay without the remap pumps
+    # spurious KE (~5e4x physical; l2 0.490, tail 1.725).
     if retopo_policy_2d == 'dual_only':
         retopo_fn = partial(retopo_fn, skip_triangulation=True)
+    elif retopo_policy_2d == 'delaunay_remap':
+        retopo_fn = partial(retopo_fn, retopo_remap='conservative')
     print(f"Retopo policy: {retopo_policy_2d}")
 
     # -- CFL timestep --

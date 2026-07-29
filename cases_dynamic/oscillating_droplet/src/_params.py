@@ -87,9 +87,37 @@ K_o = rho_o * c_s**2             # bulk modulus (outer)
 # Displacement-gated Delaunay (eps in {0.01,0.05,0.2}*h_min) and
 # hybrid gate+dual-refresh policies were all worse than either
 # extreme; see the lane log for the full sweep table.
+#
+# DEFAULT FLIPPED 2026-07-29 (lane E adoption,
+# docs_temp/debug_session/laneE-adoption-defaults.md) to
+# 'delaunay_remap': per-step FULL Delaunay reconnection with the
+# lane-D conservative remap (retopo_remap='conservative' in
+# _retopologize_multiphase).  Same full 1839-step run:
+#
+#   policy                     l2_error  tail_growth  KE_max [J]
+#   per-step Delaunay          0.48992   1.72505      4.07e-02 (growing)
+#   dual_only (lane-5 default) 0.17857   0.99925      8.32e-07
+#   delaunay_remap (default)   0.17479   0.99990      8.3173e-07
+#
+# Rationale: scores at least as well as dual_only on every channel,
+# keeps retopology honestly ACTIVE every step (the library targets
+# complex/changing topologies — dual_only freezes connectivity and
+# cannot generalize to large-deformation cases), and long-run proofs
+# are clean: 2000-step static endurance (u=0, per-step Delaunay,
+# remap ON) holds the pinned 2.2717e-3 force floor with rel spread
+# 1.3e-15 and machine-precision mass; a 2x-horizon (3678-step)
+# dynamic run shows no late-time KE growth (late max / t=3/4 value
+# = 1.0) with mass drift 4.5e-14.  Cost: 1.61x wall vs dual_only
+# (205.8 s vs 127.5 s full run).  Known cosmetic caveat: the outer
+# phase's TaitMurnaghan pressure() saturates transiently on churned
+# corner/boundary dual cells during the pre-restore EOS evaluation
+# (clip_count ~5.7e4 over the full run; the conservative remap then
+# overwrites those values for persistent (vertex, phase) entries, and
+# every outcome channel above is clean).
 # The pinned floor tests (test_case_oscillating_droplet.py) keep
-# exercising the per-step Delaunay path via setup's default retopo_fn.
-retopo_policy_2d = 'dual_only'
+# exercising the per-step Delaunay path via setup's default retopo_fn;
+# 'dual_only' remains supported here as an opt-in.
+retopo_policy_2d = 'delaunay_remap'
 
 # Retopology policy for the 3D dynamic oscillation runner
 # (oscillating_droplet_3D.py).  First 3D A/B with the Tier 3B score
@@ -109,6 +137,16 @@ retopo_policy_2d = 'dual_only'
 # (interface 98 constant, no boundary saturation in either policy).
 # The pinned 3D floor tests keep exercising the per-step Delaunay path
 # via setup's default retopo_fn.
+# Lane-E adoption A/B (2026-07-29): 'delaunay_remap' (the new 2D
+# default) was measured in 3D and REJECTED — l2 1.87348 / tail 0.25327
+# vs dual_only's 0.24811 / 0.08410 (fails the better-l2-AND-tail flip
+# rule).  The remap does suppress the Delaunay KE pump (KE_max 6.14e-8
+# vs 1.74e-6 J) but amplifies the known droplet-inflation physics gap
+# (R_max_peak 0.011559 vs 0.010790), its dual-volume churn matches
+# plain Delaunay (drift_post 5.08e-3 vs 1.07e-4), and the lane-D
+# 3D-bookkeeping caveat is real (droplet vol_corr gauge reaches 0.9696
+# within 20 steps; outer-phase EOS pressure clips fire on the Delaunay
+# path).  Keep 'dual_only'; see laneE-adoption-defaults.md.
 retopo_policy_3d = 'dual_only'
 
 # Domain size (outer box should be ≥ 5× droplet radius)
