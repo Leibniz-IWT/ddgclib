@@ -309,6 +309,74 @@ def restore_pressure_multiphase(
     return n_restored
 
 
+def evolve_snapshot_local_strain(HC, mps, snapshot: dict) -> dict:
+    """Advance a geometry snapshot by the local Lagrangian strain.
+
+    laneH (2026-07-30) helper for ``projection_every > 1`` under the
+    conservative remap: on off-cadence calls the field that
+    redistribution/restore must reproduce across the connectivity
+    rebuild is the pre-call pressure field ADVANCED by this step's
+    local EOS compression response — not the raw
+    ``eos(m / dual_vol)`` recompute, which loses the restore/anchor
+    level corrections that live in ``p_phase`` but not in the mass
+    ledger (measured: an off-cadence call at frozen positions jolts
+    the field by ~8.8 Pa on the coarse fixture if the raw recompute
+    is used; exactly 0 with this construction).
+
+    For each vertex present in *snapshot* and each phase *k* present
+    in both the snapshot and the current (refreshed, old-connectivity)
+    ``dual_vol_phase``::
+
+        rho_k   = eos_k.density(p_snap_k)
+        p_new_k = eos_k.pressure(rho_k * dvp_snap_k / dvp_now_k)
+
+    i.e. mass-conserving compression of the parcel from its snapshot
+    sub-volume to its current sub-volume.  At frozen positions
+    ``dvp_now == dvp_snap`` and the snapshot is returned unchanged
+    (exact neutrality).  The returned snapshot's ``dual_vol_phase`` is
+    the CURRENT one (the geometry the pressures now describe), which
+    is also what the redistribution/restore presence gates should use.
+
+    Parameters
+    ----------
+    HC : Complex
+    mps : MultiphaseSystem
+    snapshot : dict
+        Geometry-aware snapshot from
+        :func:`snapshot_geometry_multiphase` taken before the call.
+
+    Returns
+    -------
+    dict
+        New snapshot in the same format; vertices absent from
+        *snapshot* stay absent (newly injected vertices keep their
+        EOS pressure downstream).
+    """
+    n_phases = mps.n_phases
+    out: dict[int, dict] = {}
+    for v in HC.V:
+        vid = id(v)
+        rec = snapshot.get(vid)
+        if rec is None:
+            continue
+        dvp_now = getattr(v, 'dual_vol_phase', None)
+        if dvp_now is None:
+            dvp_now = np.zeros(n_phases)
+        dvp_now = np.asarray(dvp_now, dtype=float)
+        p_old = np.asarray(rec['p_phase'], dtype=float)
+        dvp_old = np.asarray(rec['dual_vol_phase'], dtype=float)
+        p_new = p_old.copy()
+        for k in range(n_phases):
+            if dvp_old[k] > 1e-30 and dvp_now[k] > 1e-30:
+                eos_k = mps.phases[k].eos
+                rho_k = float(eos_k.density(p_old[k]))
+                p_new[k] = float(
+                    eos_k.pressure(rho_k * dvp_old[k] / dvp_now[k])
+                )
+        out[vid] = {'p_phase': p_new, 'dual_vol_phase': dvp_now.copy()}
+    return out
+
+
 def phase_volume_totals(HC, n_phases: int) -> np.ndarray:
     """Total measured per-phase dual volume ``sum_i dual_vol_phase[k]``."""
     totals = np.zeros(n_phases)

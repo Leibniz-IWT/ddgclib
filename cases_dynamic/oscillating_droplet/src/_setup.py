@@ -175,6 +175,15 @@ def setup_oscillating_droplet(
     # 4. Apply Young-Laplace equilibrium: set inner-phase mass so that
     #    the EOS pressure at the equilibrium density equals the Laplace
     #    jump.  P_d(rho_d_eq) = P_o(rho_o) + gamma * kappa.
+    #    NOTE(laneG 2026-07-30): the ANALYTIC jump is kept on purpose.
+    #    A discrete-consistent scalar preload (3D refine 2/2: LSQ jump
+    #    9.1313 Pa / net-radial-neutral 9.7574 Pa vs analytic 10.0) was
+    #    measured to have NO effect on the 3D droplet-shape drift: the
+    #    l=0 preload mismatch self-corrects through the EOS +
+    #    redistribution volume constraint, and the drift is a
+    #    volume-neutral O(h^2) SHAPE mode at the cube-sphere special
+    #    vertices (see docs_temp/debug_session/laneG-3d-inflation-gap.md
+    #    par 1.2).  Do not re-try a scalar preload for that symptom.
     curvature = (dim - 1) / R0  # kappa = 1/R (2D), 2/R (3D)
     gamma_val = mps.get_gamma_pair(0, 1)
     delta_p = gamma_val * curvature

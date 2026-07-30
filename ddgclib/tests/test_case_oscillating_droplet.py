@@ -860,5 +860,178 @@ class TestDelaunayRemapEndurance2D(unittest.TestCase):
         self.assertLess(max(ke_trace), 1e-5)
 
 
+class TestProjectionCadence2D(unittest.TestCase):
+    """Regression net for ``projection_every`` (lane H, 2026-07-30).
+
+    Applied every call, the pressure-preserving mass redistribution
+    erases each step's local EOS compression response (the pressure
+    STRUCTURE can never evolve, laneD §1.1), which laneH measured as
+    the dominant driver of the 2D droplet l=2 over-decay: full-horizon
+    benchmark l2 0.17857 (dual_only) / 0.17479 (delaunay_remap) drops
+    to 0.0363 with ``projection_every`` in {5, 20} (saturated
+    dose-response), landing on the exact two-fluid reference to ~2%
+    (l2_two_fluid 0.0203, KE-shape correlation 0.997).  Opt-in;
+    default 1 is the previous behaviour.  See
+    docs_temp/debug_session/laneH-2d-over-decay.md.
+    """
+
+    @staticmethod
+    def _build():
+        return setup_oscillating_droplet(
+            dim=2, R0=0.01, epsilon=0.05, l=2,
+            rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
+            gamma=0.05, L_domain=0.05,
+            refinement_outer=1, refinement_droplet=2,
+        )
+
+    @staticmethod
+    def _dt(HC, params):
+        c_s = float(np.sqrt(params['K_d'] / 800.0))
+        dx_min = min(
+            float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
+            for v in HC.V for nb in v.nn
+            if np.linalg.norm(v.x_a[:2] - nb.x_a[:2]) > 1e-15
+        )
+        return min(0.25 * dx_min / c_s,
+                   0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
+
+    def test_projection_every_validation(self):
+        """Invalid cadence values and incoherent combinations raise."""
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
+        )
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        for bad in (0, -1, 2.5, '5'):
+            with self.assertRaises(ValueError):
+                _retopologize_multiphase(
+                    HC, bV, 2, mps=mps, redistribute_mass=True,
+                    projection_every=bad,
+                )
+        # > 1 requires redistribute_mass=True + mps
+        with self.assertRaises(ValueError):
+            _retopologize_multiphase(
+                HC, bV, 2, mps=mps, redistribute_mass=False,
+                skip_triangulation=True, projection_every=5,
+            )
+        # > 1 under bare per-step Delaunay (no remap) re-opens the
+        # lane-5 KE pump — structurally forbidden.
+        with self.assertRaises(ValueError):
+            _retopologize_multiphase(
+                HC, bV, 2, mps=mps, redistribute_mass=True,
+                projection_every=5,
+            )
+
+    def test_projection_every_default_bit_identical(self):
+        """Explicit ``projection_every=1`` is bit-identical to the
+        default (the knob is a pure opt-in)."""
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        states = []
+        for extra in ({}, {'projection_every': 1}):
+            HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+            remap_fn = partial(retopo_fn, retopo_remap='conservative',
+                               **extra)
+            dt = self._dt(HC, params)
+            symplectic_euler(
+                HC, bV, dudt_fn, dt=dt, n_steps=8, dim=2,
+                bc_set=bc_set, retopologize_fn=remap_fn,
+            )
+            states.append(sorted(
+                (tuple(v.x_a[:2]), tuple(v.u[:2]), float(v.m),
+                 tuple(float(p) for p in v.p_phase))
+                for v in HC.V
+            ))
+        self.assertEqual(states[0], states[1])
+
+    def test_projection_cadence_off_call_is_neutral_at_frozen_positions(self):
+        """An off-cadence remap call at frozen positions must leave the
+        pressure field unchanged (the evolved-snapshot branch preserves
+        the same conservative-neutrality invariant as the pre-call
+        branch — only the reference field differs)."""
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        # Call 1 projects (counter 0), call 2 is off-cadence (evolved
+        # snapshot); positions frozen between the calls.
+        retopo_fn(HC, bV, 2, retopo_remap='conservative',
+                  projection_every=2)
+        before = {
+            id(v): (np.array(v.p_phase, dtype=float),
+                    np.array(v.dual_vol_phase, dtype=float),
+                    np.array(v.m_phase, dtype=float))
+            for v in HC.V
+        }
+        retopo_fn(HC, bV, 2, retopo_remap='conservative',
+                  projection_every=2)
+        self.assertEqual(mps._projection_call_idx, 2)
+        dp_max = 0.0
+        n_persistent = 0
+        for v in HC.V:
+            p_b, dvp_b, m_b = before[id(v)]
+            for k in range(mps.n_phases):
+                if (v.dual_vol_phase[k] > 1e-30 and v.m_phase[k] > 1e-30
+                        and dvp_b[k] > 1e-30 and m_b[k] > 1e-30):
+                    n_persistent += 1
+                    dp_max = max(dp_max, abs(float(v.p_phase[k]) - p_b[k]))
+        self.assertGreater(n_persistent, 0)
+        self.assertLess(dp_max, 1e-9)
+
+    def test_projection_cadence_dual_only(self):
+        """dual_only with cadence 4: off-cadence calls skip the
+        redistribution (mass stays Lagrangian), mass is machine-
+        conserved, and the trajectory differs from every-call
+        projection (the knob takes effect)."""
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        finals = []
+        for extra in ({}, {'projection_every': 4}):
+            HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+            fn = partial(retopo_fn, skip_triangulation=True, **extra)
+            dt = self._dt(HC, params)
+            diag0 = compute_diagnostics(HC, dim=2)
+            symplectic_euler(
+                HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
+                bc_set=bc_set, retopologize_fn=fn,
+            )
+            diag1 = compute_diagnostics(HC, dim=2)
+            mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
+                / diag0['total_mass']
+            self.assertLess(mass_drift, 1e-10)
+            self.assertTrue(np.isfinite(diag1['KE']))
+            self.assertLess(diag1['KE'], 1e-5)
+            if extra:
+                self.assertEqual(mps._projection_call_idx, 40)
+            finals.append(float(diag1['R_max']))
+        self.assertNotEqual(finals[0], finals[1])
+
+    def test_projection_cadence_remap_full_delaunay(self):
+        """Per-step FULL Delaunay + remap + cadence 5: reconnection
+        neutrality holds every call (KE stays at the physical scale,
+        machine mass) while the compression response evolves between
+        projections."""
+        from functools import partial
+        from ddgclib.dynamic_integrators import symplectic_euler
+
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
+        fn = partial(retopo_fn, retopo_remap='conservative',
+                     projection_every=5)
+        dt = self._dt(HC, params)
+        diag0 = compute_diagnostics(HC, dim=2)
+        edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        symplectic_euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
+            bc_set=bc_set, retopologize_fn=fn,
+        )
+        diag1 = compute_diagnostics(HC, dim=2)
+        mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
+            / diag0['total_mass']
+        self.assertLess(mass_drift, 1e-10)
+        edges1 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
+        self.assertNotEqual(edges1, edges0)
+        self.assertTrue(np.isfinite(diag1['KE']))
+        self.assertLess(diag1['KE'], 1e-5)
+        self.assertEqual(mps._projection_call_idx, 40)
+
+
 if __name__ == '__main__':
     unittest.main()

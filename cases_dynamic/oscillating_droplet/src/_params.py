@@ -117,6 +117,25 @@ K_o = rho_o * c_s**2             # bulk modulus (outer)
 # The pinned floor tests (test_case_oscillating_droplet.py) keep
 # exercising the per-step Delaunay path via setup's default retopo_fn;
 # 'dual_only' remains supported here as an opt-in.
+#
+# laneH (2026-07-30, docs_temp/debug_session/laneH-2d-over-decay.md):
+# the residual l2 0.17479 is ATTRIBUTED — the every-call
+# pressure-preserving mass redistribution erases each step's local EOS
+# compression response (pressure STRUCTURE frozen, laneD §1.1), which
+# makes the l=2 amplitude decay 3-4x the analytical rate.  The opt-in
+# fix is `projection_every=N` in `_retopologize_multiphase` (bind via
+# partial into retopo_fn, exactly like retopo_remap): with
+# delaunay_remap + projection_every in {2,3,5,20} the same full run
+# scores l2 0.0380-0.0419 (vs 0.17479) and lands on the exact
+# two-fluid reference (laneC) to ~2% (l2_two_fluid 0.0219-0.0261,
+# KE-shape corr 0.994) with reconnection still active every step.
+# NOT adopted as default: tail_growth then reads 1.38-1.40 because the
+# genuine two-fluid KE peaks at t=0.1234 s, beyond t_end=0.1143 (the
+# analytic two-fluid tail on this horizon is 1.66) — the tail<=1.0
+# gate is calibrated on the single-fluid overdamped envelope and is
+# unattainable for a faithful run; the current default passes it only
+# because the every-call projection reshapes KE onto that envelope.
+# Recalibrate the score references before revisiting adoption.
 retopo_policy_2d = 'delaunay_remap'
 
 # Retopology policy for the 3D dynamic oscillation runner

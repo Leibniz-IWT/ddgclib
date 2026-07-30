@@ -69,6 +69,20 @@ def main(retopo_policy: str | None = None):
           f"omega_d={omega_d:.2f} ({regime})")
 
     # -- Setup (lower refinement for 3D) --
+    # NOTE(laneG 2026-07-30, docs_temp/debug_session/
+    # laneG-3d-inflation-gap.md): keep refine 2/2.  The droplet
+    # "inflation" behind summary 0.24811 is the relaxation of the
+    # coarse polyhedral interface toward its DISCRETE equilibrium
+    # shape (cube-symmetry mode: the 6 valence-8 face-center vertices
+    # ARE R_max), and it does NOT converge under droplet refinement
+    # on this cube-sphere mesh family (eps=0 bump at matched t=0.056:
+    # +9.1% of R0 at droplet refine 1, +2.0% at 2, +4.1% at 3 with a
+    # monotone energy-pumping face-scale mode; outer refinement is a
+    # no-op at the interface).  Do NOT flip refinement_droplet to 3
+    # expecting an O(h^2) shrink: measured worse (see the lane log
+    # scored table).  Also measured no-ops for this symptom: a
+    # discrete-consistent scalar YL preload (see _setup.py step 4
+    # note) and stencil variants ('stokes' == 'integrated' to 1e-14).
     print("\nBuilding mesh...")
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
         setup_oscillating_droplet(
@@ -176,6 +190,11 @@ def main(retopo_policy: str | None = None):
         diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
         r_boundary=L_domain,
     )
+    # Record the runner configuration in the score so score.json is
+    # self-describing (laneG; baseline diffs ignore extra keys).
+    score['refinement_outer'] = 2
+    score['refinement_droplet'] = 2
+    score['retopo_policy'] = retopo_policy
     score_path = os.path.join(_RESULTS, f'score{suffix}.json')
     save_score(score_path, score)
     print(f"\n3D oscillation score saved to {score_path}")
