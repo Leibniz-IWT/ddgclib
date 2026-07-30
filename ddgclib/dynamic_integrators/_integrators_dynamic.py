@@ -36,6 +36,7 @@ Usage
               bc_set=bc_set, mu=8.9e-4, HC=HC)
 """
 
+import functools
 import inspect
 import os
 
@@ -353,8 +354,14 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
           default.  ``remesh_mode`` and ``remesh_kwargs`` are forwarded
           as keyword arguments when the callable accepts them (detected
           via :mod:`inspect`), so existing 3-arg closures remain
-          backward-compatible.  Useful for surface meshes where
-          Delaunay/compute_vd don't apply, or for
+          backward-compatible.  The remaining retopology kwargs of this
+          function (``skip_triangulation``, ``boundary_filter``,
+          ``merge_cdist``, ``backend``, ``periodic_axes``,
+          ``domain_bounds``, ``pressure_model``, ``redistribute_mass``)
+          are forwarded only when the callable declares them by name
+          and a :func:`functools.partial` chain does not already bind
+          them (explicit partial bindings win).  Useful for surface
+          meshes where Delaunay/compute_vd don't apply, or for
           :func:`_retopologize_multiphase` wrappers.
     merge_cdist : float or None
         Forwarded to :func:`_retopologize`.  See its docstring.
@@ -364,8 +371,11 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
         Forwarded to :func:`_retopologize`.
     skip_triangulation : bool
         If True, skip Delaunay retriangulation but still recompute duals
-        and dual volumes.  Forwarded to :func:`_retopologize`.
-        Ignored when *retopologize_fn* is a callable or False.
+        and dual volumes.  Forwarded to :func:`_retopologize`, and to a
+        callable *retopologize_fn* that declares the parameter by name
+        (unless the callable is a :func:`functools.partial` that already
+        binds it — explicit partial bindings always win).  Ignored when
+        *retopologize_fn* is False.
     pressure_model : EquationOfState or None
         Forwarded to :func:`_retopologize` for mass redistribution.
     redistribute_mass : bool
@@ -418,6 +428,37 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                 extra['remesh_mode'] = remesh_mode
             if accepts_var_kw or 'remesh_kwargs' in params:
                 extra['remesh_kwargs'] = remesh_kwargs
+            # NOTE(laneF-forward): keywords already bound in a
+            # functools.partial chain are the case's explicit retopo
+            # configuration (e.g. dual_only wrappers bind
+            # skip_triangulation=True in the partial) and must never be
+            # overridden by the integrator-level values.
+            bound_kw = set()
+            fn = retopologize_fn
+            while isinstance(fn, functools.partial):
+                bound_kw.update((fn.keywords or {}).keys())
+                fn = fn.func
+            # NOTE(laneF-forward): these integrator kwargs used to be
+            # silently DROPPED for callable retopo_fns — the shipped dam
+            # break ran per-step full Delaunay despite passing
+            # skip_triangulation=True (laneD §2.3).  Forward them when
+            # the callable declares them BY NAME (not into **kwargs
+            # sinks, which legacy dual-only closures use to ignore
+            # unknown keys) and the name is not partial-bound.
+            for name, value in (
+                ('skip_triangulation', skip_triangulation),
+                ('boundary_filter', boundary_filter),
+                ('merge_cdist', merge_cdist),
+                ('backend', backend),
+                ('periodic_axes', periodic_axes),
+                ('domain_bounds', domain_bounds),
+                ('pressure_model', pressure_model),
+                ('redistribute_mass', redistribute_mass),
+            ):
+                if (name in params and name not in bound_kw
+                        and params[name].kind is not
+                        inspect.Parameter.VAR_KEYWORD):
+                    extra[name] = value
         except (ValueError, TypeError):
             pass  # C-builtins, partials without __signature__, etc.
         retopologize_fn(HC, bV, dim, **extra)
@@ -443,7 +484,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              redistribute_mass=False,
                              remesh_mode='delaunay', remesh_kwargs=None,
                              split_method='neighbour_count',
-                             retopo_remap=None):
+                             retopo_remap=None,
+                             projection_every=1):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -506,6 +548,46 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
 
         Requires *mps* and ``redistribute_mass=True``; no-op when
         *skip_triangulation* is True (nothing to remap).
+    projection_every : int
+        Cadence of the pressure-structure PROJECTION — the step where
+        per-phase masses are re-targeted to reproduce the *pre-call*
+        pressure snapshot (``redistribute_mass_multiphase`` against the
+        field of the previous step).  Default 1 preserves the previous
+        every-call behaviour bit-exactly.
+
+        NOTE(laneH 2026-07-30): applied every call, the projection
+        erases each step's local EOS compression response, so the
+        pressure STRUCTURE can never evolve and the interface relaxes
+        far too fast (2D droplet l=2 amplitude decay 3-4x the
+        analytical rate; l2 0.17479 on the pinned benchmark).  With
+        ``projection_every=N`` (N in 5..20, saturated dose-response)
+        the local compression response accumulates between projection
+        calls while the occasional projection still damps the spurious
+        acoustic launch transient (the ``redistribute_mass=False``
+        end-member rings at KE ~1000x the mode level): benchmark l2
+        drops to 0.0363 and the trajectory lands on the exact two-fluid
+        reference to ~2% (l2_two_fluid 0.0203, KE-shape correlation
+        0.997).  See docs_temp/debug_session/laneH-2d-over-decay.md.
+
+        Cadence semantics per path:
+
+        - ``skip_triangulation=True`` (dual_only): the redistribution
+          block simply does not run on off-cadence calls (mass stays
+          Lagrangian; duals/splits/EOS pressures still refresh).
+        - ``retopo_remap='conservative'``: the remap machinery runs on
+          EVERY call (reconnection neutrality is not optional), but on
+          off-cadence calls the snapshot that redistribution/restore
+          reproduce is taken AFTER the stage-1 dual refresh at the new
+          positions — the physically EVOLVED field — instead of before
+          the call, so only the connectivity-rebuild artifact is
+          projected out, not the step's compression response.
+        - plain Delaunay without the remap: ``projection_every > 1``
+          raises — skipping redistribution while reconnection fires
+          re-opens the KE pump (lane-5 measured mechanism).
+
+        Requires *mps* and ``redistribute_mass=True`` when > 1.  The
+        call counter lives on ``mps._projection_call_idx`` (the first
+        call always projects).
     """
     if retopo_remap not in (None, 'conservative'):
         raise ValueError(
@@ -518,6 +600,27 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         raise ValueError(
             "retopo_remap='conservative' requires redistribute_mass=True"
         )
+    if not (isinstance(projection_every, int) and projection_every >= 1):
+        raise ValueError(
+            f"projection_every must be an int >= 1, got {projection_every!r}"
+        )
+    project_now = True
+    if projection_every > 1:
+        if mps is None or not redistribute_mass:
+            raise ValueError(
+                "projection_every > 1 requires mps and "
+                "redistribute_mass=True"
+            )
+        if not (skip_triangulation or remap_active):
+            raise ValueError(
+                "projection_every > 1 under active Delaunay reconnection "
+                "requires retopo_remap='conservative': skipping the "
+                "redistribution while connectivity reconnects re-opens "
+                "the per-rewire KE pump (lane-5 measured mechanism)"
+            )
+        _idx = getattr(mps, '_projection_call_idx', 0)
+        project_now = (_idx % projection_every == 0)
+        mps._projection_call_idx = _idx + 1
 
     # Snapshot per-phase pressure AND sub-volume before topology change.
     # The pre-retopo dual_vol_phase is needed by
@@ -525,7 +628,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
     # otherwise a phase at reference pressure P0=0 looks identical to
     # an absent phase and is silently skipped.
     _p_snap = None
-    if redistribute_mass and mps is not None:
+    if redistribute_mass and mps is not None and (project_now
+                                                  or remap_active):
         from ddgclib.operators.mass_redistribution import (
             snapshot_geometry_multiphase,
         )
@@ -534,6 +638,7 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
     _vol_mid = None
     if remap_active:
         from ddgclib.operators.mass_redistribution import (
+            evolve_snapshot_local_strain,
             phase_volume_totals,
         )
         # Stage 1 — measurement pass on the OLD connectivity at the
@@ -548,6 +653,20 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                       backend=backend, skip_triangulation=True)
         mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
         _vol_mid = phase_volume_totals(HC, mps.n_phases)
+        if not project_now:
+            # NOTE(laneH): off-cadence remap call — advance the
+            # pre-call snapshot by this step's LOCAL Lagrangian strain
+            # (mass-conserving compression of each parcel from its
+            # pre-call sub-volume to the refreshed one).
+            # Redistribution/restore below then reproduce THIS field
+            # across the rebuild: the connectivity artifact is still
+            # cancelled exactly, but the step's local EOS compression
+            # response survives instead of being erased.  Do NOT use
+            # the raw eos(m/dual_vol) recompute here — it loses the
+            # restore/anchor level corrections that live in p_phase
+            # but not in the mass ledger (see
+            # evolve_snapshot_local_strain).
+            _p_snap = evolve_snapshot_local_strain(HC, mps, _p_snap)
 
     # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
     _retopologize(HC, bV, dim, boundary_filter=boundary_filter,

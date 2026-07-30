@@ -388,6 +388,104 @@ class TestDynamicSimulation:
         npt.assert_allclose(t, 0.05, atol=1e-12)
 
 
+# Retopology kwarg forwarding to callable retopologize_fn
+# (laneF regression: the shipped dam break passed skip_triangulation=True
+# to symplectic_euler but _do_retopologize silently dropped it for
+# callable retopo_fns, so the case ran per-step full Delaunay.)
+
+class TestRetopoKwargForwarding:
+    def _spy_fn(self, seen):
+        def fn(HC, bV, dim, skip_triangulation=False,
+               redistribute_mass=False, boundary_filter=None,
+               remesh_mode='delaunay', remesh_kwargs=None):
+            seen.append({
+                'skip_triangulation': skip_triangulation,
+                'redistribute_mass': redistribute_mass,
+                'boundary_filter': boundary_filter,
+                'remesh_mode': remesh_mode,
+            })
+        return fn
+
+    def test_skip_triangulation_forwarded_by_name(self, mesh_1d):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        HC, bV = mesh_1d
+        seen = []
+        _do_retopologize(HC, bV, 1, retopologize_fn=self._spy_fn(seen),
+                         skip_triangulation=True)
+        assert seen[0]['skip_triangulation'] is True
+
+    def test_partial_binding_wins_over_integrator_value(self, mesh_1d):
+        # dual_only wrappers bind skip_triangulation=True in a partial;
+        # the integrator-level default (False) must NOT clobber it.
+        import functools
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        HC, bV = mesh_1d
+        seen = []
+        fn = functools.partial(self._spy_fn(seen), skip_triangulation=True)
+        _do_retopologize(HC, bV, 1, retopologize_fn=fn,
+                         skip_triangulation=False)
+        assert seen[0]['skip_triangulation'] is True
+
+    def test_redistribute_mass_and_filter_forwarded(self, mesh_1d):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        HC, bV = mesh_1d
+        seen = []
+        filt = lambda v: True  # noqa: E731
+        _do_retopologize(HC, bV, 1, boundary_filter=filt,
+                         retopologize_fn=self._spy_fn(seen),
+                         redistribute_mass=True)
+        assert seen[0]['redistribute_mass'] is True
+        assert seen[0]['boundary_filter'] is filt
+
+    def test_var_kw_sink_gets_only_legacy_keys(self, mesh_1d):
+        # Legacy dual-only closures use **kw to ignore unknown keys;
+        # only remesh_mode/remesh_kwargs may flood into them.
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        HC, bV = mesh_1d
+        seen = []
+
+        def fn(HC, bV, dim, **kw):
+            seen.append(set(kw))
+
+        _do_retopologize(HC, bV, 1, retopologize_fn=fn,
+                         skip_triangulation=True)
+        assert seen[0] == {'remesh_mode', 'remesh_kwargs'}
+
+    def test_legacy_3arg_callable_still_works(self, mesh_1d):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        HC, bV = mesh_1d
+        seen = []
+
+        def fn(HC, bV, dim):
+            seen.append(dim)
+
+        _do_retopologize(HC, bV, 1, retopologize_fn=fn,
+                         skip_triangulation=True)
+        assert seen == [1]
+
+    def test_symplectic_euler_forwards_skip_triangulation(self, mesh_1d):
+        # End-to-end: the exact dam-break call shape (callable retopo_fn
+        # + integrator-level skip_triangulation=True).
+        from ddgclib.dynamic_integrators import symplectic_euler
+        HC, bV = mesh_1d
+        seen = []
+        symplectic_euler(HC, bV, zero_accel, dt=1e-3, n_steps=2, dim=1,
+                         retopologize_fn=self._spy_fn(seen),
+                         skip_triangulation=True)
+        assert len(seen) == 2
+        assert all(rec['skip_triangulation'] is True for rec in seen)
+
+
 # Module-level imports
 
 class TestImports:

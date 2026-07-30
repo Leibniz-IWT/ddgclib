@@ -146,27 +146,54 @@ def setup_dam_break_multiphase(
 
     # -- Initial conditions --
     #
-    # We initialise each phase with uniform density equal to its
-    # reference rho0 so that ``EOS(rho0) = P_atm`` uniformly.  The
-    # initial pressure field is therefore flat at ``P_atm`` in both
-    # phases, and the only net force at t=0 is gravity (minus the
-    # interface surface tension).  This avoids the large initial
-    # transient that a hydrostatic IC would produce at truncated-dual
-    # corner vertices.  The hydrostatic profile then develops
-    # dynamically as the simulation runs.
+    # NOTE(laneF-hydrostatic-ic): the phases are initialised in the
+    # HYDROSTATIC state via a per-phase mass preload (the oscillating-
+    # droplet Young–Laplace preload pattern), NOT with a flat pressure
+    # field.  Under ``redistribute_mass=True`` the per-vertex pressure
+    # STRUCTURE is preserved across every step (redistribution rebuilds
+    # masses from the pre-step pressure snapshot; only a uniform
+    # per-phase offset can evolve — laneD §1.1).  With the previous
+    # flat-at-P_atm IC the hydrostatic gradient could therefore NEVER
+    # develop: measured after 0.098 s under gravity the liquid column
+    # read a uniform +0.121 Pa gauge instead of the ~981 Pa hydrostatic
+    # head, the dam face saw ~0 horizontal driving force, and the
+    # collapse stalled at |u| ~ 0.02 m/s (laneF log).  The hydrostatic
+    # IC puts the collapse-driving pressure structure (liquid head vs
+    # atmospheric air across the dam face) into the state that the
+    # redistribution preserves.
     #
     # We run the Delaunay retopologisation once here and assign mass
-    # AFTER retopology so that density equals rho0 on the mesh that
-    # the integrator will actually see at step 0.  Without this the
-    # first retopologisation inside the integrator re-splits dual
-    # volumes while preserving mass, which creates large spurious
-    # density deviations at interface vertices.
+    # AFTER retopology so that density matches the target pressure on
+    # the mesh that the integrator will actually see at step 0.
     ZeroVelocity(dim=dim).apply(HC, bV_walls)
     mps.refresh(HC, dim, reset_mass=True)
 
     from ddgclib.dynamic_integrators._integrators_dynamic import _retopologize
     _retopologize(HC, bV_walls, dim)
     mps.refresh(HC, dim, reset_mass=True)
+
+    # Hydrostatic targets (linear EOS n=1 -> exact closed-form density).
+    # Gas: atmospheric column over the full tank height.  Liquid:
+    # continuous with the gas pressure at the column top y = col_h.
+    def _p_gas(y: float) -> float:
+        return P_atm + rho_g * g * (H - y)
+
+    def _p_liq(y: float) -> float:
+        return P_atm + rho_g * g * (H - col_h) + rho_l * g * (col_h - y)
+
+    _p_target = (_p_gas, _p_liq)
+    for v in HC.V:
+        y = float(v.x_a[gravity_axis])
+        for k in (0, 1):
+            vol_k = v.dual_vol_phase[k]
+            if vol_k > 1e-30:
+                rho_k = float(mps.phases[k].eos.density(_p_target[k](y)))
+                v.m_phase[k] = rho_k * vol_k
+        v.m = float(np.sum(v.m_phase))
+
+    # Final refresh: recompute per-phase pressures from the preloaded
+    # masses (reset_mass=False preserves them).
+    mps.refresh(HC, dim, reset_mass=False)
 
     # -- Boundary conditions: all outer walls no-slip --
     bc_set = BoundaryConditionSet()

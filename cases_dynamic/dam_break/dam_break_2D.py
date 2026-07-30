@@ -108,15 +108,21 @@ def main():
                       f"KE_liq={ke:.4e}  |u|_max={u_max:.3f}")
 
     print("\nRunning simulation...")
-    # ``skip_triangulation=True`` keeps the initial Delaunay connectivity
-    # frozen and only recomputes duals as vertices move.  Without this,
-    # full Delaunay retopologisation every step creates cross-phase edges
-    # that destabilise the interface (see FEATURES.md / AMR remeshing).
+    # Retopology policy (laneF A/B, 2026-07-30): per-step FULL Delaunay
+    # reconnection kept thermodynamically neutral by the laneD
+    # conservative remap.  A dam break NEEDS reconnection — frozen
+    # connectivity (skip_triangulation=True) NaN-aborts once the
+    # collapse deformation reaches ~1 edge length (measured t=0.092 at
+    # alpha_art=0.1), and plain per-step Delaunay WITHOUT the remap
+    # blows up at its first reconnection event (KE x28 in one step,
+    # measured at alpha_art in {0.5, 0.1}).  With the remap the same
+    # configuration absorbs reconnection and survives the full horizon.
+    from functools import partial
+    retopo_fn = partial(retopo_fn, retopo_remap='conservative')
     try:
         t_final = symplectic_euler(
             HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
             bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-            skip_triangulation=True,
         )
     except Exception as e:
         t_final = 0.0
