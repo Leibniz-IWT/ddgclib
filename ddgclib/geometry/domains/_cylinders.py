@@ -22,6 +22,7 @@ def cylinder_volume(
     refinement: int = 2,
     flow_axis: int = 2,
     distr_law: str = "sinusoidal",
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 3D cylinder (tube) of radius *R* and length *L*.
 
@@ -101,7 +102,7 @@ def cylinder_volume(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -113,6 +114,9 @@ def cylinder_volume(
             'cross_axes': cross_axes,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result
 
 
 def pipe(
@@ -121,6 +125,7 @@ def pipe(
     refinement: int = 2,
     flow_axis: int = 2,
     distr_law: str = "sinusoidal",
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a long pipe domain by extruding a unit cylinder.
 
@@ -195,7 +200,7 @@ def pipe(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -207,3 +212,6 @@ def pipe(
             'cross_axes': cross_axes,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result

@@ -61,6 +61,7 @@ def setup_dam_break_multiphase(
     P_atm: float,
     n_refine: int,
     alpha_art: float = 0.0,
+    redistribute_mass: bool = True,
 ):
     """Build a rectangular tank (2D) or box (3D) filled with two phases.
 
@@ -68,6 +69,14 @@ def setup_dam_break_multiphase(
     rectangular column in the corner of the tank.  No-slip walls are
     placed on all exterior faces.  Surface tension acts on the
     liquid–air interface via the multiphase stress pipeline.
+
+    Parameters
+    ----------
+    redistribute_mass : bool
+        If True (default), per-phase mass is redistributed after each
+        Delaunay reconnection so that the pre-retopo per-phase pressure
+        field is preserved while total per-phase mass is conserved.
+        See ``setup_oscillating_droplet`` for the full rationale.
 
     Returns
     -------
@@ -176,7 +185,8 @@ def setup_dam_break_multiphase(
     def dudt_fn(v):
         return _stress_fn(v) + g_vec
 
-    retopo_fn = partial(_retopologize_multiphase, mps=mps)
+    retopo_fn = partial(_retopologize_multiphase, mps=mps,
+                        redistribute_mass=redistribute_mass)
 
     params = {
         'dim': dim,

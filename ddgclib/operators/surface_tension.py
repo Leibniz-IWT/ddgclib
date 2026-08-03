@@ -25,7 +25,9 @@ import numpy as np
 from ddgclib._curvatures_heron import hndA_i
 
 
-def surface_tension_force(v, gamma: float = 0.072, dim: int = 3) -> np.ndarray:
+def surface_tension_force(
+    v, gamma: float = 0.072, dim: int = 3, HC=None,
+) -> np.ndarray:
     """Surface tension force on vertex v from discrete mean curvature.
 
     Computes:
@@ -45,13 +47,17 @@ def surface_tension_force(v, gamma: float = 0.072, dim: int = 3) -> np.ndarray:
         Surface tension coefficient [N/m].
     dim : int
         Spatial dimension.
+    HC : Complex, optional
+        When supplied and ``HC._simplices`` is populated, apex
+        enumeration in ``hndA_i`` uses the simplex cache instead of the
+        legacy ``vi.nn ∩ vj.nn`` flag-complex path.
 
     Returns
     -------
     np.ndarray
         Force vector, shape ``(dim,)``.
     """
-    HNdA, C_i = hndA_i(v)
+    HNdA, C_i = hndA_i(v, HC=HC)
     return -gamma * HNdA[:dim]
 
 
@@ -60,6 +66,7 @@ def surface_tension_acceleration(
     gamma: float = 0.072,
     damping: float = 0.0,
     dim: int = 3,
+    HC=None,
     **kwargs,
 ) -> np.ndarray:
     """Acceleration from surface tension: a = F_st / m.
@@ -78,19 +85,21 @@ def surface_tension_acceleration(
         Adds ``-damping * v.u`` to the force.
     dim : int
         Spatial dimension.
+    HC : Complex, optional
+        Forwarded to ``hndA_i`` to enable simplex-aware apex enumeration.
 
     Returns
     -------
     np.ndarray
         Acceleration vector, shape ``(dim,)``.
     """
-    F = surface_tension_force(v, gamma=gamma, dim=dim)
+    F = surface_tension_force(v, gamma=gamma, dim=dim, HC=HC)
     if damping > 0:
         F -= damping * v.u[:dim]
     return F / v.m
 
 
-def dual_area_heron(v) -> float:
+def dual_area_heron(v, HC=None) -> float:
     """Dual area of vertex v from Heron's formula.
 
     Returns the second output of ``hndA_i`` — the sum of barycentric
@@ -99,11 +108,13 @@ def dual_area_heron(v) -> float:
     Parameters
     ----------
     v : vertex object
+    HC : Complex, optional
+        Forwarded to ``hndA_i`` to enable simplex-aware apex enumeration.
 
     Returns
     -------
     float
         Dual area (sum of cotangent-weighted triangle sub-areas).
     """
-    _, C_i = hndA_i(v)
+    _, C_i = hndA_i(v, HC=HC)
     return C_i

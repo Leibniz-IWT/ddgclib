@@ -141,8 +141,13 @@ def _setup_phases_and_duals(HC, R, center_arr, dim):
     from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
     from ddgclib.eos import TaitMurnaghan
 
-    # Identify domain boundary walls (outer box faces, not droplet interface)
-    dV = HC.boundary()
+    # Identify domain boundary walls (outer box faces, not droplet interface) —
+    # prefer the exact simplex-aware path when the cache is populated.
+    if getattr(HC, '_simplices', None) is not None:
+        from hyperct.ddg import boundary_from_simplices
+        dV = boundary_from_simplices(HC, dim)
+    else:
+        dV = HC.boundary()
     bV_walls = set()
     for v in dV:
         dist = np.linalg.norm(v.x_a[:dim] - center_arr)

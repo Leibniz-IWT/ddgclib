@@ -161,7 +161,13 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             # propagate so the user sees a clear error rather than a
             # silent fallback to Delaunay.
             from hyperct.remesh import adaptive_remesh
+            from hyperct.ddg import invalidate_simplex_cache
             adaptive_remesh(HC, dim=dim, **(remesh_kwargs or {}))
+            # Adaptive remesh mutates connectivity locally without going
+            # through connect_and_cache_simplices, so the simplex cache
+            # (if any) is stale.  Drop it so subsequent boundary +
+            # compute_vd calls fall back cleanly to the 1-skeleton path.
+            invalidate_simplex_cache(HC)
             # Recompute boundary from the updated connectivity.
             dV = HC.boundary()
         else:
@@ -177,14 +183,19 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                 for i in range(len(sorted_verts) - 1):
                     sorted_verts[i].connect(sorted_verts[i + 1])
             else:
-                # 2D/3D: Delaunay triangulation with simplex caching for
-                # the simplex-aware 3D dual path.
-                from ddgclib.geometry import connect_and_cache_simplices
+                # 2D/3D: Delaunay triangulation with simplex caching
+                # (used by simplex-aware boundary + compute_vd paths).
+                from hyperct.ddg import connect_and_cache_simplices
                 coords = np.array([v.x_a[:dim] for v in verts])
                 connect_and_cache_simplices(HC, verts, dim, coords=coords)
 
-            # 3. Recompute boundary via HC.boundary()
-            dV = HC.boundary()
+            # 3. Recompute boundary — prefer the exact simplex-aware
+            #    path when the cache was just populated (2D / 3D).
+            if getattr(HC, '_simplices', None) is not None:
+                from hyperct.ddg import boundary_from_simplices
+                dV = boundary_from_simplices(HC, dim)
+            else:
+                dV = HC.boundary()
     else:
         # skip_triangulation: keep existing connectivity,
         # use current bV as the boundary set
@@ -236,12 +247,52 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         )
 
 
+def _displacement_gate_should_skip(HC, displacement_eps):
+    """Skip-retopology gate based on max vertex displacement.
+
+    Returns ``True`` when retopology may be skipped because every vertex
+    has moved less than *displacement_eps* since the last call (and the
+    vertex set is unchanged).  Otherwise returns ``False`` and the
+    caller should run a full retopology, then call
+    :func:`_snapshot_retopo_positions` to refresh the cache.
+
+    On the first call (no snapshot yet), takes a snapshot from the
+    current positions and returns ``True`` — the rationale is that
+    callers opt into the gate by passing *displacement_eps*, which
+    implies trust that the existing duals (built by setup) are valid
+    for the current geometry; running an immediate full retopo on the
+    very first integrator step would defeat the purpose of the gate
+    in the static-equilibrium case.
+    """
+    prev = getattr(HC, '_retopo_prev_positions', None)
+    if prev is None:
+        _snapshot_retopo_positions(HC)
+        return True
+    current_ids = {id(v) for v in HC.V}
+    if current_ids != set(prev.keys()):
+        return False
+    eps = float(displacement_eps)
+    for v in HC.V:
+        dx = np.linalg.norm(np.asarray(v.x_a) - prev[id(v)])
+        if dx >= eps:
+            return False
+    return True
+
+
+def _snapshot_retopo_positions(HC):
+    """Cache current vertex positions for the displacement gate."""
+    HC._retopo_prev_positions = {
+        id(v): np.asarray(v.x_a).copy() for v in HC.V
+    }
+
+
 def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                      merge_cdist=None, periodic_axes=None,
                      domain_bounds=None, backend=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
-                     remesh_mode='delaunay', remesh_kwargs=None):
+                     remesh_mode='delaunay', remesh_kwargs=None,
+                     displacement_eps=None):
     """Dispatch topology management to custom or default function.
 
     Parameters
@@ -275,9 +326,32 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
         ``retopologize_fn`` when it accepts the parameter).
     remesh_kwargs : dict or None
         Forwarded alongside *remesh_mode*.
+    displacement_eps : float or None
+        Skip-retopology gate threshold.  When set to a positive number,
+        retopology is short-circuited when every vertex has moved less
+        than *displacement_eps* since the last call (and the vertex set
+        has not changed).  This avoids 3D Delaunay non-uniqueness
+        churning ~48 cross-phase edges per step on a near-cospherical
+        static interface cloud (Phase 2 finding 2026-04-29 — the
+        dominant residual driver for the static-droplet 3D residual
+        once the redistribute_mass guard fix is in place).
+
+        On the first call no snapshot exists; positions are snapshotted
+        and the call is short-circuited too (the gate assumes the
+        existing duals built by setup are valid).  Pass ``None`` (the
+        default) to disable the gate entirely and preserve the previous
+        every-step behaviour.
+
+        Suggested first cut for dynamic runs: ``1e-4 * h_min`` where
+        ``h_min`` is the minimum edge length.
     """
     if retopologize_fn is False:
         return
+
+    if displacement_eps is not None and displacement_eps > 0:
+        if _displacement_gate_should_skip(HC, displacement_eps):
+            return
+
     if retopologize_fn is not None:
         # Forward remesh_mode/kwargs only if the callable declares them
         # (either by name or via **kwargs).  This preserves the legacy
@@ -309,6 +383,9 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                       redistribute_mass=redistribute_mass,
                       remesh_mode=remesh_mode,
                       remesh_kwargs=remesh_kwargs)
+
+    if displacement_eps is not None and displacement_eps > 0:
+        _snapshot_retopo_positions(HC)
 
 
 def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
@@ -355,13 +432,17 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
     remesh_kwargs : dict or None
         Extra keyword arguments forwarded to the adaptive driver.
     """
-    # Snapshot per-phase pressure before topology change
+    # Snapshot per-phase pressure AND sub-volume before topology change.
+    # The pre-retopo dual_vol_phase is needed by
+    # redistribute_mass_multiphase to gate phase-presence at *v* —
+    # otherwise a phase at reference pressure P0=0 looks identical to
+    # an absent phase and is silently skipped.
     _p_snap = None
     if redistribute_mass and mps is not None:
         from ddgclib.operators.mass_redistribution import (
-            snapshot_pressure_multiphase,
+            snapshot_geometry_multiphase,
         )
-        _p_snap = snapshot_pressure_multiphase(HC, mps.n_phases)
+        _p_snap = snapshot_geometry_multiphase(HC, mps.n_phases)
 
     # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
     _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
@@ -575,6 +656,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
+          displacement_eps=None,
           **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -644,7 +726,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              pressure_model=pressure_model,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
-                             remesh_kwargs=remesh_kwargs)
+                             remesh_kwargs=remesh_kwargs,
+                             displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -678,6 +761,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
+                     displacement_eps=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
@@ -732,7 +816,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              pressure_model=pressure_model,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
-                             remesh_kwargs=remesh_kwargs)
+                             remesh_kwargs=remesh_kwargs,
+                             displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
@@ -765,6 +850,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           domain_bounds=None, skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
+          displacement_eps=None,
           **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
@@ -848,7 +934,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              pressure_model=pressure_model,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
-                             remesh_kwargs=remesh_kwargs)
+                             remesh_kwargs=remesh_kwargs,
+                             displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -909,6 +996,7 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         domain_bounds=None, skip_triangulation=False,
                         pressure_model=None, redistribute_mass=False,
                         remesh_mode='delaunay', remesh_kwargs=None,
+                        displacement_eps=None,
                         **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
@@ -959,7 +1047,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              pressure_model=pressure_model,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
-                             remesh_kwargs=remesh_kwargs)
+                             remesh_kwargs=remesh_kwargs,
+                             displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -985,6 +1074,7 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    domain_bounds=None, skip_triangulation=False,
                    pressure_model=None, redistribute_mass=False,
                    remesh_mode='delaunay', remesh_kwargs=None,
+                   displacement_eps=None,
                    **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
@@ -1070,7 +1160,8 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                              pressure_model=pressure_model,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
-                             remesh_kwargs=remesh_kwargs)
+                             remesh_kwargs=remesh_kwargs,
+                             displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

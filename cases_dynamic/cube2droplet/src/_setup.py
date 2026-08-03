@@ -73,8 +73,17 @@ def setup_cube_to_droplet(
     K_o: float = 125.0,
     P0: float = 0.0,
     n_refine: int = 4,
+    redistribute_mass: bool = True,
 ):
     """Set up the cube-to-droplet relaxation problem.
+
+    Parameters
+    ----------
+    redistribute_mass : bool
+        If True (default), per-phase mass is redistributed after each
+        Delaunay reconnection so that the pre-retopo per-phase pressure
+        field is preserved while total per-phase mass is conserved.
+        See ``setup_oscillating_droplet`` for the full rationale.
 
     Returns
     -------
@@ -154,6 +163,7 @@ def setup_cube_to_droplet(
     # Accept **kwargs so that the integrator can forward remesh_mode /
     # remesh_kwargs (see _do_retopologize's inspect.signature dispatch).
     def retopo_fn(HC, bV, dim, **kwargs):
+        kwargs.setdefault('redistribute_mass', redistribute_mass)
         _retopologize_multiphase(HC, bV, dim, mps=mps, **kwargs)
 
     # -- Equivalent radius --

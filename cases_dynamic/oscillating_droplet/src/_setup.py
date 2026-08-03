@@ -38,6 +38,8 @@ def setup_oscillating_droplet(
     refinement_droplet: int = 3,
     P0: float = 0.0,
     distr_law: str = "sinusoidal",
+    split_method: str = "neighbour_count",
+    redistribute_mass: bool = True,
 ):
     """Set up oscillating droplet problem (2D or 3D).
 
@@ -67,6 +69,25 @@ def setup_oscillating_droplet(
         Reference pressure [Pa].
     distr_law : str
         Radial distribution law for droplet mesh vertices.
+    split_method : {'neighbour_count', 'exact'}
+        Per-phase dual-volume split policy used at every
+        ``mps.refresh`` call (initial setup + the runtime
+        ``_retopologize_multiphase`` partial returned in
+        ``retopo_fn``).  Must be the same at setup and runtime —
+        otherwise ``v.m_phase`` (set at setup from
+        ``rho_d_eq * v.dual_vol_phase[1]``) goes stale on the first
+        retopo when ``v.dual_vol_phase`` is recomputed under a
+        different policy on an unmoved vertex.
+    redistribute_mass : bool
+        If True (default), per-phase mass is redistributed after each
+        Delaunay reconnection so that the pre-retopo per-phase pressure
+        field is preserved while total per-phase mass is conserved.
+        Required for static-droplet stability — without it, 3D
+        Delaunay non-uniqueness on a near-cospherical interface
+        cloud reconnects ~48 cross-phase edges per step and the
+        Lagrangian per-vertex ``v.m_phase`` is held against a shifting
+        ``v.dual_vol_phase``, driving spurious ``rho`` and ``p_phase``
+        swings (3D static-droplet A.5.b: 1.44e-3 → 7.4e-5 with this on).
 
     Returns
     -------
@@ -140,7 +161,6 @@ def setup_oscillating_droplet(
 
     # 2. Initialise all per-phase fields, split dual volumes, set
     #    per-phase mass and pressure using the new n-phase data model.
-    split_method = 'neighbour_count'
     mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
 
     # 3. Apply ellipsoidal perturbation to interface vertices.
@@ -196,7 +216,8 @@ def setup_oscillating_droplet(
     #      in the outer region when L_max is sized to the droplet.
     adaptive_kwargs = None
     retopo_fn = partial(_retopologize_multiphase, mps=mps,
-                        split_method=split_method)
+                        split_method=split_method,
+                        redistribute_mass=redistribute_mass)
 
     # -- Collect params --
     params = {

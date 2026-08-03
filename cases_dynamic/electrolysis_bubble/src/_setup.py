@@ -237,6 +237,7 @@ def setup_electrolysis_bubble(
     apply_hydrostatic_ic: bool = True,
     use_wall_clamp: bool = True,
     nucleation_frac: float = 0.5,
+    redistribute_mass: bool = True,
 ):
     """Build a bubble-on-electrode dynamic multiphase problem.
 
@@ -270,6 +271,11 @@ def setup_electrolysis_bubble(
         Add clamps on the TOP (destination wall) and BOTTOM
         (electrode) that prevent interior vertices from passing
         through walls.
+    redistribute_mass : bool
+        If True (default), per-phase mass is redistributed after each
+        Delaunay reconnection so that the pre-retopo per-phase pressure
+        field is preserved while total per-phase mass is conserved.
+        See ``setup_oscillating_droplet`` for the full rationale.
 
     Returns
     -------
@@ -467,6 +473,7 @@ def setup_electrolysis_bubble(
 
     retopo_fn = partial(
         _retopologize_multiphase, mps=mps, split_method='neighbour_count',
+        redistribute_mass=redistribute_mass,
     )
 
     params = {

@@ -80,10 +80,14 @@ def HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     return hnda_ijk, c_ijk
 
 
-def A_i(v, n_i=None):
+def A_i(v, n_i=None, HC=None):
     """
     Compute the discrete normal area of vertex v_i.
     Kept intact from the original file.
+
+    Pass ``HC`` to enable simplex-aware apex enumeration via
+    ``HC._edge_to_apex`` (falls back to legacy ``vi.nn ∩ vj.nn`` when
+    ``HC`` is omitted or its simplex cache is absent).
     """
     if n_i is not None:
         n_i = v.x
@@ -92,7 +96,14 @@ def A_i(v, n_i=None):
     C_i = 0.0
     vi = v
     for vj in v.nn:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)
+        from ddgclib._curvatures_heron import _apex_via_simplex_cache
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)
+        else:
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a
         e_ij = - e_ij
         vk = list(e_i_int_e_j)[0]
@@ -128,10 +139,14 @@ def A_i(v, n_i=None):
     return NdA_i
 
 
-def hndA_i(v, n_i=None):
+def hndA_i(v, n_i=None, HC=None):
     """
     Compute the mean normal curvature of vertex.
     Kept intact from the original file.
+
+    Pass ``HC`` to enable simplex-aware apex enumeration via
+    ``HC._edge_to_apex`` (falls back to legacy ``vi.nn ∩ vj.nn`` when
+    ``HC`` is omitted or its simplex cache is absent).
     """
     if n_i is not None:
         n_i = v.x
@@ -140,7 +155,14 @@ def hndA_i(v, n_i=None):
     C_i = 0.0
     vi = v
     for vj in v.nn:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)
+        from ddgclib._curvatures_heron import _apex_via_simplex_cache
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)
+        else:
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a
         e_ij = - e_ij
         vk = list(e_i_int_e_j)[0]
@@ -210,10 +232,14 @@ def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
     return hnda_ijk, c_ijk
 
 
-def int_hndA_i(v, n_i=None):
+def int_hndA_i(v, n_i=None, HC=None):
     """
     Compute the mean normal curvature of vertex.
     Kept intact from the original file.
+
+    Pass ``HC`` to enable simplex-aware apex enumeration via
+    ``HC._edge_to_apex`` (falls back to legacy ``vi.nn ∩ vj.nn`` when
+    ``HC`` is omitted or its simplex cache is absent).
     """
     if n_i is not None:
         n_i = v.x
@@ -222,7 +248,14 @@ def int_hndA_i(v, n_i=None):
     C_i = 0.0
     vi = v
     for vj in v.nn:
-        e_i_int_e_j = vi.nn.intersection(vj.nn)
+        from ddgclib._curvatures_heron import _apex_via_simplex_cache
+        apex = _apex_via_simplex_cache(HC, vi, vj)
+        if apex is None:
+            e_i_int_e_j = vi.nn.intersection(vj.nn)
+        else:
+            e_i_int_e_j = list(dict.fromkeys(apex))
+        if len(e_i_int_e_j) == 0:
+            continue
         e_ij = vj.x_a - vi.x_a
         e_ij = - e_ij
         vk = list(e_i_int_e_j)[0]

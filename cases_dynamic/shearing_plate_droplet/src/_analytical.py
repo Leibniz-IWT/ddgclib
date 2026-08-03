@@ -109,7 +109,14 @@ def compute_deformation_from_interface(
     # so the result matches the radius of the best-fit ellipse for a
     # uniformly sampled boundary.
     M = (Y.T @ Y) / Y.shape[0]
-    vals, vecs = np.linalg.eigh(M)
+    if not np.all(np.isfinite(M)):
+        return {'D': float('nan'), 'a': float('nan'), 'b': float('nan'),
+                'tilt': float('nan')}
+    try:
+        vals, vecs = np.linalg.eigh(M)
+    except np.linalg.LinAlgError:
+        return {'D': float('nan'), 'a': float('nan'), 'b': float('nan'),
+                'tilt': float('nan')}
     order = np.argsort(vals)[::-1]
     vals = vals[order]
     vecs = vecs[:, order]

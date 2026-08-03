@@ -15,6 +15,7 @@ def ball(
     center: tuple[float, float, float] = (0.0, 0.0, 0.0),
     refinement: int = 2,
     distr_law: str = "sinusoidal",
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 3D ball (sphere) of radius *R*.
 
@@ -60,7 +61,7 @@ def ball(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -71,3 +72,6 @@ def ball(
             'volume': (4.0 / 3.0) * math.pi * R ** 3,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result

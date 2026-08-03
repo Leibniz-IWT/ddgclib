@@ -17,6 +17,7 @@ def box(
     refinement: int = 2,
     origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
     flow_axis: int = 0,
+    retopologize: bool = False,
 ) -> DomainResult:
     """Build a filled 3D box (rectangular parallelepiped).
 
@@ -76,7 +77,7 @@ def box(
     for v in HC.V:
         v.boundary = v in bV
 
-    return DomainResult(
+    result = DomainResult(
         HC=HC,
         bV=bV,
         boundary_groups=groups,
@@ -89,3 +90,6 @@ def box(
             'lb': lb, 'ub': ub,
         },
     )
+    if retopologize:
+        result.retopologize()
+    return result

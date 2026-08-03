@@ -41,9 +41,9 @@ Usage
 """
 from __future__ import annotations
 
-import math
 import os
 import sys
+from functools import partial
 
 import numpy as np
 
@@ -56,18 +56,36 @@ from ddgclib.geometry.domains._multiphase_droplet import _build_combined_mesh
 from ddgclib.multiphase import (
     MultiphaseSystem, PhaseProperties,
 )
-from ddgclib.eos import TaitMurnaghan
+from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
+from ddgclib.multiphase import mass_conserving_merge
 from ddgclib.operators.stress import cache_dual_volumes
+from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.dynamic_integrators._integrators_dynamic import (
+    _retopologize_multiphase,
+)
+from ddgclib._boundary_conditions import (
+    BoundaryConditionSet, NoSlipWallBC,
+)
 from ddgclib.visualization import plot_fluid
+
+from cases_dynamic.electrolysis_bubble.src._setup import WallClampBC
 
 from cases_dynamic.electrolysis_bubble.src._params import (
     R0, L_domain, rho_liq, rho_gas, mu_liq, mu_gas,
     gamma, K_liq, K_gas, g, P0,
-    n_refine_outer_2d, n_refine_drop_2d,
+    n_refine_drop_2d, cfl_safety,
 )
 from cases_dynamic.electrolysis_bubble.src._analytical import (
     capillary_length, bond_number, young_laplace_jump,
 )
+
+# Override the electrolysis_bubble default (2) — the Fritz case wants a
+# finer outer water mesh so the edge length in the liquid is comparable
+# to the edge length inside the bubble.  At refinement=4 the outer box
+# has ~17 vertices per side (256 triangles) which matches the ~2^3 rows
+# of gas interior.
+n_refine_outer_2d = 4
 
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -291,26 +309,32 @@ def build_fritz_bubble_in_box_2d(
     height = float(z_profile[0] - z_profile[-1])  # apex - foot > 0
 
     # ---------- 2. Outer liquid box ---------------------------------
-    #  [-L, L] in x, [electrode_z, electrode_z + 2 L] in y.  The
-    #  electrode is the bottom wall.
-    Lx = 2.0 * L_domain
-    Ly = 2.0 * L_domain
+    # [-L, L] in x, [electrode_z, electrode_z + 2 L] in y.  The
+    # electrode is the bottom wall.  Build the mesh directly at the
+    # target origin — never translate after the fact with raw
+    # ``HC.V.move()`` in a loop, because the tuple-keyed vertex cache
+    # silently merges colliding coordinates (e.g. translating a
+    # ``[0, 2L]^2`` mesh by ``(-L, -L)`` maps the ``(2L, 2L)`` corner
+    # onto the existing centre vertex ``(L, L)`` — the corner
+    # disappears).  When a translate / stretch / shrink really is
+    # unavoidable, use ``ddgclib.geometry._complex_operations.translate``
+    # (with ``jitter=1e-12`` if needed) — it documents this failure
+    # mode and provides the workaround.
     outer = rectangle(
-        L=Lx, h=Ly, refinement=refinement_outer, flow_axis=0,
+        L=2.0 * L_domain, h=2.0 * L_domain,
+        refinement=refinement_outer, flow_axis=0,
+        origin=(-L_domain, electrode_z),
     )
     HC_outer = outer.HC
-    for v in list(HC_outer.V):
-        pos = v.x_a.copy()
-        pos[0] -= L_domain          # shift x: [0, 2L] → [-L, L]
-        pos[1] += electrode_z        # shift y: [0, 2L] → [electrode_z, electrode_z + 2L]
-        HC_outer.V.move(v, tuple(pos))
 
     # ---------- 3. Collect positions by phase -----------------------
-    # Liquid: outer-box vertices that are NOT inside the Fritz profile
-    # (we grow the cut region by one edge length to give Delaunay room
-    # to draw quality triangles between the interface and the bulk).
+    # Liquid: outer-box vertices that are NOT inside the Fritz profile.
+    # The cut region is grown by a small guard band (sized by the gas
+    # mesh spacing, not the outer mesh) so outer vertices don't land
+    # on top of interface vertices in Delaunay.
     outer_h = _estimate_outer_edge_length(HC_outer, dim)
-    guard_band = outer_h
+    gas_h = r_foot / max(1, 2 ** refinement_droplet)
+    guard_band = 0.5 * gas_h
 
     positions: list[np.ndarray] = []
     phases: list[int] = []
@@ -323,13 +347,15 @@ def build_fritz_bubble_in_box_2d(
             positions.append(pos2)
             phases.append(0)
 
-    # Gas interior: a structured sampling inside the Fritz profile.
-    gas_n_rows = 2 * (2 ** refinement_droplet)
-    gas_n_cols = 2 * (2 ** refinement_droplet)
+    # Gas interior: variable-density structured sampling inside the
+    # Fritz profile.  ``refinement_droplet`` sets the radial vertex
+    # count along the widest row; other rows are scaled proportionally
+    # so triangles stay roughly equilateral.
+    gas_n_rows = 2 ** refinement_droplet
     gas_interior = _sample_gas_interior(
         r_profile=r_profile,
         z_profile=z_profile,
-        n_rows=gas_n_rows, n_cols=gas_n_cols,
+        n_rows=gas_n_rows,
         safety=0.88,
     )
     for pt in gas_interior:
@@ -343,7 +369,7 @@ def build_fritz_bubble_in_box_2d(
     # electrode at the foot.  These vertices belong to the gas side
     # of the interface for labelling purposes; the primal-subcomplex
     # model derives the actual interface from simplex phase labels.
-    n_interface = max(32, 4 * (2 ** refinement_droplet))
+    n_interface = max(16, 2 * (2 ** refinement_droplet))
     iface = _sample_interface_positions(
         r_profile=r_profile, z_profile=z_profile,
         n_interface=n_interface, reflect=True,
@@ -534,61 +560,114 @@ def main():
           f"(liquid={n_liq}, gas={n_gas}, interface={n_iface}, "
           f"walls={len(bV)})")
 
-    # Simple pressure IC just for the plot: hydrostatic in the liquid
-    # + Young-Laplace in the gas, so the pressure panel shows the
-    # expected step across the interface.  This is NOT the full IC
-    # used by the dynamic setup — it's just enough to make the
-    # visualisation informative.
-    _apply_geometry_only_ic(HC, mps, meta, electrode_z=electrode_z,
-                            P0=P0, rho_liq=rho_liq, rho_gas=rho_gas,
-                            g=g, gamma=gamma, R_top=R_top)
+    # Full IC: mass / pressure / velocity (load-bearing for the dynamic
+    # run — masses set the EOS-derived per-phase pressures every step).
+    _apply_fritz_ic(HC, mps, meta, electrode_z=electrode_z,
+                    P0=P0, rho_liq=rho_liq, rho_gas=rho_gas,
+                    g=g, gamma=gamma, R_top=R_top)
+    # Pin masses against any pre-existing duplicate vertices, then
+    # re-derive phase fields (volumes, pressures) from the new state.
+    mass_conserving_merge(HC, cdist=1e-12)
+    mps.refresh(HC, dim=dim, reset_mass=False,
+                split_method='neighbour_count')
 
-    # -- Static plot -----------------------------------------------------
-    out_png = os.path.join(_FIG, 'electrolysis_bubble_fritz_2D_init.png')
-    fig, axes = plot_fluid(
-        HC, bV=bV, t=0.0,
-        scalar_field='p', vector_field='u',
-        scalar_label='Pressure [Pa]',
-        vector_label='Velocity [m/s]  (zero at t=0)',
+    # -- Static plots: initial state ------------------------------------
+    _save_fritz_plot(
+        HC, bV, meta,
+        electrode_z=electrode_z, L_domain=L_domain,
         xlim=(-L_domain * 1.05, L_domain * 1.05),
         ylim=(electrode_z - 0.05 * L_domain,
               electrode_z + 2.0 * L_domain + 0.05 * L_domain),
-        save_path=out_png,
-        face_alpha=0.5,
+        save_path=os.path.join(_FIG,
+                               'electrolysis_bubble_fritz_2D_init.png'),
+        title_suffix=' (full domain)',
+    )
+    zoom = 1.5 * max(meta['r_foot'], meta['height'])
+    _save_fritz_plot(
+        HC, bV, meta,
+        electrode_z=electrode_z, L_domain=L_domain,
+        xlim=(-zoom, zoom),
+        ylim=(electrode_z - 0.1 * zoom, electrode_z + zoom),
+        save_path=os.path.join(_FIG,
+                               'electrolysis_bubble_fritz_2D_init_zoom.png'),
+        title_suffix=' (zoom on bubble)',
     )
 
-    # Overlay the analytical Fritz profile and the electrode line on
-    # the pressure panel so the discretised interface can be eyeballed
-    # against the ODE solution.
+    # -- Short dynamic run ----------------------------------------------
+    print("\nRunning short dynamics smoke test...")
+    info = run_short_dynamics(HC, bV, mps, meta, n_steps=80)
+    print(f"  finished at t = {info['t_final']:.3e} s")
+
+    _save_fritz_plot(
+        HC, bV, meta,
+        electrode_z=electrode_z, L_domain=L_domain,
+        xlim=(-L_domain * 1.05, L_domain * 1.05),
+        ylim=(electrode_z - 0.05 * L_domain,
+              electrode_z + 2.0 * L_domain + 0.05 * L_domain),
+        save_path=os.path.join(_FIG,
+                               'electrolysis_bubble_fritz_2D_final.png'),
+        title_suffix=f" (t = {info['t_final']:.2e} s)",
+    )
+    _save_fritz_plot(
+        HC, bV, meta,
+        electrode_z=electrode_z, L_domain=L_domain,
+        xlim=(-zoom, zoom),
+        ylim=(electrode_z - 0.1 * zoom, electrode_z + zoom),
+        save_path=os.path.join(_FIG,
+                               'electrolysis_bubble_fritz_2D_final_zoom.png'),
+        title_suffix=f" zoom (t = {info['t_final']:.2e} s)",
+    )
+
+    print("\nDone.")
+
+
+def _save_fritz_plot(HC, bV, meta, *, electrode_z, L_domain,
+                      xlim, ylim, save_path, title_suffix=""):
+    """Two-panel plot (pressure + velocity) with Fritz overlay."""
     import matplotlib.pyplot as plt
-    try:
-        ax = axes[0]
-        z_world = meta['z_profile'] + electrode_z + meta['height']
+    fig, axes = plot_fluid(
+        HC, bV=bV, t=0.0,
+        scalar_field='p', vector_field='u',
+        scalar_label='Pressure [Pa]' + title_suffix,
+        vector_label='Velocity [m/s]  (zero at t=0)' + title_suffix,
+        xlim=xlim, ylim=ylim,
+        save_path=None,
+        face_alpha=0.5,
+    )
+    z_world = meta['z_profile'] + electrode_z + meta['height']
+    for ax in axes:
         ax.plot(meta['r_profile'], z_world, 'r-', lw=1.2,
                 label='Fritz profile')
         ax.plot(-meta['r_profile'], z_world, 'r-', lw=1.2)
         ax.axhline(electrode_z, color='k', ls='--', lw=1.0,
                    label='electrode')
-        ax.legend(loc='upper right', fontsize=8)
-        fig.savefig(out_png, dpi=150, bbox_inches='tight')
-        print(f"Saved initial-geometry plot: {out_png}")
-    except Exception as exc:   # plotting should never block the run
-        print(f"(overlay failed: {exc})")
-    finally:
-        plt.close(fig)
-
-    print("\nGeometry-only check complete.")
-    print("To turn this into a full dynamic run, the next step is to"
-          " feed ``HC, bV, mps`` into the same integrator + retopology"
-          " used by ``electrolysis_bubble_2D.py``.")
+        ax.set_aspect('equal', adjustable='box')
+    axes[0].legend(loc='upper right', fontsize=7)
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  saved: {save_path}")
 
 
-def _apply_geometry_only_ic(HC, mps, meta, *,
-                             electrode_z: float, P0: float,
-                             rho_liq: float, rho_gas: float,
-                             g: float, gamma: float,
-                             R_top: float) -> None:
-    """Minimal hydrostatic + Young-Laplace IC for the initial plot."""
+def _apply_fritz_ic(HC, mps, meta, *,
+                     electrode_z: float, P0: float,
+                     rho_liq: float, rho_gas: float,
+                     g: float, gamma: float,
+                     R_top: float) -> None:
+    """Apply hydrostatic-liquid + Young-Laplace-gas IC.
+
+    Same recipe as ``setup_electrolysis_bubble`` but applied to the
+    pre-built Fritz mesh.  Sets:
+
+    - ``v.u``           — zero velocity
+    - ``v.m_phase[k]``  — ``rho_target_k * dual_vol_phase[k]`` where
+                           ``rho_target_k = eos.density(P_target_k)``
+    - ``v.p_phase[k]``  — diagnostic, recomputed by ``mps.compute_phase_pressures``
+    - ``v.p``           — phase-volume-weighted aggregate for the
+                          scalar plot
+
+    The masses are the load-bearing IC: per-vertex pressures are
+    recovered by the EOS from rho = m / vol on every step.
+    """
     dim = 2
     axis = dim - 1
     L_domain = meta['L_domain']
@@ -597,16 +676,33 @@ def _apply_geometry_only_ic(HC, mps, meta, *,
     P_gas_apex = (P0 + rho_liq * g * (wall_top - z_top_of_bubble)
                   + gamma / R_top)
 
+    eos_liq = mps.phases[0].eos
+    eos_gas = mps.phases[1].eos
+
     for v in HC.V:
         v.u = np.zeros(dim)
         y = float(v.x_a[axis])
+
         vol_l = float(v.dual_vol_phase[0])
+        if np.isfinite(vol_l) and vol_l > 1e-30:
+            P_l = P0 + rho_liq * g * (wall_top - y)
+            rho_l = float(eos_liq.density(P_l))
+            v.m_phase[0] = rho_l * vol_l
+            v.p_phase[0] = P_l
+
         vol_g = float(v.dual_vol_phase[1])
-        if vol_l > 1e-30:
-            v.p_phase[0] = P0 + rho_liq * g * (wall_top - y)
-        if vol_g > 1e-30:
-            v.p_phase[1] = P_gas_apex + rho_gas * g * (z_top_of_bubble - y)
-        # Phase-volume-weighted aggregate for the colour panel.
+        if np.isfinite(vol_g) and vol_g > 1e-30:
+            P_g = P_gas_apex + rho_gas * g * (z_top_of_bubble - y)
+            rho_g = float(eos_gas.density(P_g))
+            v.m_phase[1] = rho_g * vol_g
+            v.p_phase[1] = P_g
+
+        # NaN sweep
+        if not np.all(np.isfinite(v.m_phase)):
+            v.m_phase = np.nan_to_num(v.m_phase, nan=0.0,
+                                      posinf=0.0, neginf=0.0)
+        v.m = float(np.sum(v.m_phase))
+
         num = 0.0
         den = 0.0
         if vol_l > 1e-30:
@@ -616,6 +712,100 @@ def _apply_geometry_only_ic(HC, mps, meta, *,
             num += float(v.p_phase[1]) * vol_g
             den += vol_g
         v.p = num / den if den > 0 else 0.0
+
+
+# =====================================================================
+# Dynamic-run wiring (BCs, dudt, retopology)
+# =====================================================================
+
+def setup_fritz_dynamics(HC, bV, mps, meta):
+    """Build ``bc_set, dudt_fn, retopo_fn`` for the Fritz mesh.
+
+    Mirrors the wall-clamp + multiphase-stress + gravity recipe from
+    ``setup_electrolysis_bubble``, parameterised by the Fritz mesh
+    metadata.  The returned callables plug straight into
+    ``symplectic_euler(HC, bV, dudt_fn, ..., bc_set=bc_set,
+    retopologize_fn=retopo_fn)``.
+    """
+    dim = 2
+    axis = dim - 1
+    L_dom = meta['L_domain']
+    wall_bottom = meta['electrode_z']
+    wall_top = wall_bottom + 2.0 * L_dom
+    R_top = meta['R_top']
+
+    bc_set = BoundaryConditionSet()
+    bc_set.add(NoSlipWallBC(dim=dim), bV)
+    bc_set.add(
+        WallClampBC(axis=axis, level=wall_bottom, direction=+1,
+                    min_gap=0.02 * R_top, exclude=bV),
+        None,
+    )
+    bc_set.add(
+        WallClampBC(axis=axis, level=wall_top, direction=-1,
+                    min_gap=0.02 * R_top, exclude=bV),
+        None,
+    )
+
+    eos_liq = mps.phases[0].eos
+    eos_gas = mps.phases[1].eos
+    meos = MultiphaseEOS([eos_liq, eos_gas])
+
+    _base_dudt = partial(
+        multiphase_dudt_i,
+        dim=dim, mps=mps, HC=HC, pressure_model=meos,
+    )
+    gravity_vec = np.zeros(dim)
+    gravity_vec[axis] = -g
+
+    def dudt_fn(v, **_kw):
+        if not np.isfinite(v.m) or v.m < 1e-30:
+            return np.zeros(dim)
+        a = _base_dudt(v)
+        if not np.all(np.isfinite(a)):
+            return np.zeros(dim)
+        return a + gravity_vec
+
+    retopo_fn = partial(
+        _retopologize_multiphase, mps=mps,
+        split_method='neighbour_count',
+    )
+    return bc_set, dudt_fn, retopo_fn
+
+
+def run_short_dynamics(HC, bV, mps, meta, *,
+                        n_steps: int = 80,
+                        cfl: float = 0.05) -> dict:
+    """Run a short symplectic-Euler integration to confirm stability.
+
+    Returns ``{'t_final', 'dt', 'dx_min'}``.  The mesh ``HC`` is updated
+    in place (positions, velocities, pressures, dual volumes).
+    """
+    dim = 2
+    bc_set, dudt_fn, retopo_fn = setup_fritz_dynamics(HC, bV, mps, meta)
+
+    c_s_liq = float(np.sqrt(K_liq / rho_liq))
+    c_s_gas = float(np.sqrt(K_gas / rho_gas))
+    c_s = max(c_s_liq, c_s_gas)
+    dx_min = min(
+        float(np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim]))
+        for v in HC.V for nb in v.nn
+        if float(np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim])) > 1e-15
+    )
+    dt_cfl = cfl * dx_min / c_s
+    dt_st = 0.4 * float(np.sqrt(rho_liq * dx_min**3 / gamma))
+    dt = min(dt_cfl, dt_st)
+
+    print(f"  c_s = {c_s:.2f} m/s, dx_min = {dx_min:.3e} m,"
+          f" dt = {dt:.3e} s, n_steps = {n_steps}"
+          f"  → t_window = {dt * n_steps:.3e} s")
+
+    t_final = symplectic_euler(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
+        bc_set=bc_set, retopologize_fn=retopo_fn,
+        remesh_mode='delaunay', remesh_kwargs=None,
+    )
+    return {'t_final': float(t_final), 'dt': float(dt), 'dx_min': float(dx_min)}
 
 
 if __name__ == '__main__':

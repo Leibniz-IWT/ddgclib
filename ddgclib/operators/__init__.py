@@ -53,6 +53,7 @@ from ddgclib.operators.multiphase_stress import (
 from ddgclib.operators.mass_redistribution import (
     snapshot_pressure,
     snapshot_pressure_multiphase,
+    snapshot_geometry_multiphase,
     redistribute_mass_single_phase,
     redistribute_mass_multiphase,
 )
@@ -72,5 +73,6 @@ __all__ = [
     'reconstruct_arc_length_and_bulge_area',
     'multiphase_stress_force', 'multiphase_stress_acceleration', 'multiphase_dudt_i',
     'snapshot_pressure', 'snapshot_pressure_multiphase',
+    'snapshot_geometry_multiphase',
     'redistribute_mass_single_phase', 'redistribute_mass_multiphase',
 ]

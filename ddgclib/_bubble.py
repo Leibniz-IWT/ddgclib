@@ -1,10 +1,37 @@
-#Ianto Cannon 2025 Fab 13. 
+#Ianto Cannon 2025 Fab 13.
 #Functions for calculating the interface shape of bubbles on surfaces
 #Adapted from code written by Stefan Endres
 import numpy as np
-from ddgclib._curvatures import construct_HC#, HC_curvatures_sessile 
+from ddgclib._curvatures import construct_HC#, HC_curvatures_sessile
 from ddgclib._curvatures_heron import hndA_i
 from ddgclib.geometry._volume import triangle_prism_volume, cross_prod
+
+
+def _common_neigh(HC, v1, v2):
+    """Return the apex vertex list shared by primal edge (v1, v2).
+
+    Prefers the simplex-aware ``HC._edge_to_apex`` cache (built from
+    ``HC._simplices`` when those are 2-simplex triangles).  Falls back
+    to ``v1.nn.intersection(v2.nn)`` when ``HC`` is ``None`` or its
+    simplex cache is absent / holds non-triangle simplices.
+
+    The legacy 1-skeleton path is unreliable on Delaunay-derived
+    bubble meshes near contact lines because the flag complex can
+    contain spurious K_3 cliques — see ``grok_1-skeleton-comment.pdf``.
+    """
+    if HC is not None:
+        simplices = getattr(HC, '_simplices', None)
+        if simplices and len(simplices[0]) == 3:
+            try:
+                from hyperct.ddg import get_edge_apex_map
+            except ImportError:
+                pass
+            else:
+                apex_map = get_edge_apex_map(HC)
+                if apex_map is not None:
+                    apex = apex_map.get(frozenset((id(v1), id(v2))), [])
+                    return list(dict.fromkeys(apex))
+    return list(v1.nn.intersection(v2.nn))
 
 def save_neighbours(fname,HC):
 #Make a text file listing the vertices (id from 0) in first column,
@@ -69,9 +96,9 @@ def refine_edges(HC, bV, dist):
       if v2 in to_split_1D: continue
       sep = sum( (v1.x_a[:]-v2.x_a[:])**2 )
       #if v1 in bV or v2 in bV: sep*=16
-      if sep > dist**2: 
-        common_neigh = list(v1.nn.intersection(v2.nn))
-        #Only refine if the vertices are in a planar region. 
+      if sep > dist**2:
+        common_neigh = _common_neigh(HC, v1, v2)
+        #Only refine if the vertices are in a planar region.
         #This will exclude boundaries
         if len(common_neigh) > 2: continue
         if any(n in to_split_1D for n in common_neigh): continue
@@ -104,8 +131,8 @@ def refine_boundaries(HC, bV, dist):
     for v2 in v1.nn:
       #if v2 not in bV: continue
       if (v2,v1) in to_split: continue
-      if np.linalg.norm(v1.x_a-v2.x_a) > dist: 
-        common_neigh = list(v1.nn.intersection(v2.nn))
+      if np.linalg.norm(v1.x_a-v2.x_a) > dist:
+        common_neigh = _common_neigh(HC, v1, v2)
         #Only refine if the vertices are in a planar region
         #if len(common_neigh) != 1: continue
         #if any(n in to_split_1D for n in common_neigh): continue
@@ -134,14 +161,14 @@ def reconnect_long_diagonals(HC, bV):
   to_reconnect=[]
   for v1 in HC.V:
     for v2 in v1.nn:
-      common_neigh = list(v1.nn.intersection(v2.nn))
+      common_neigh = _common_neigh(HC, v1, v2)
       #Only reconnect if the vertices are in a planar region
       if len(common_neigh) != 2: continue
       v3 = common_neigh[0]
       v4 = common_neigh[1]
       #don't connect boundary verts
       if v3 in bV and v4 in bV: continue
-      common_neigh = list(v3.nn.intersection(v4.nn))
+      common_neigh = _common_neigh(HC, v3, v4)
       if common_neigh != [v1,v2] and common_neigh != [v2,v1]: continue
       #Make sure quadrilaterals do not overlap
       if any( [len(set(quad).intersection((v1,v2,v3,v4))) > 2 for quad in to_reconnect] ): continue
@@ -203,7 +230,7 @@ def get_forces(HC, bV, t, params):
     #H = HNdA_i_cache[v.x]
     #interf_force = params['gamma'] * H
     #print('H',H)
-    HNdA_i, C_i = hndA_i(v)#, n_i=n_i)
+    HNdA_i, C_i = hndA_i(v, HC=HC)#, n_i=n_i)
     #print('v.x',v.x)
     #print('HNdA_i',HNdA_i)
     #print('HNdA_i/H',HNdA_i/H)
@@ -234,7 +261,7 @@ def get_forces(HC, bV, t, params):
       #get boundary sector length and normal, perhaps with b_curvatures
       for vn in v.nn:
         if vn in bV:
-          common_neigh = list(v.nn.intersection(vn.nn))
+          common_neigh = _common_neigh(HC, v, vn)
           if len(common_neigh)!=1:
             print('boundary vertices have', len(common_neigh), 'common_neigh')
             continue
