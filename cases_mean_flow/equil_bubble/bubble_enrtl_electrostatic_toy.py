@@ -46,7 +46,8 @@ R_GAS   = 8.314462618
 N_A     = 6.02214076e23
 T_REF   = 298.15
 P_ATM   = 1.01325e5
-G_GRAV  = 9.80665
+G_EARTH  = 9.80665
+G_MARS  = 3.721
 M_W     = 18.01528e-3            # kg/mol
 RHO_W   = 997.05                 # kg/m^3
 RHO_H2  = 0.0899                 # kg/m^3 at 1 bar, 25 C
@@ -71,6 +72,14 @@ KH_H2_0 = 7.8e-9
 
 # ── PHYSICAL CONSTANTS ──────────────────────────────────────────────────────
 EPS_0 = 8.854187817e-12   # F/m  — permittivity of free space
+
+# ── CURRENT DENSITY SCENARIOS ────────────────────────────────────────────────
+# Raman et al. 2022 regime: j ~ 1-5 A/m^2 (single bubble, low current)
+# Industrial alkaline regime: j ~ 500-5000 A/m^2
+# Final entry (5e5) is a stress-test value to probe where F_DEP becomes non-negligible relative to buoyancy (see docstring discussion).
+J_VALUES = np.array([0.0, 1.0, 5.0, 1000.0, 500000.0])
+J_LABELS = ['baseline', 'raman_min', 'raman_max', 
+            'industrial', 'stress_test']
 
 # ── ELECTROSTATIC: DEP / MAXWELL STRESS TENSOR ──────────────────────────────
 
@@ -369,7 +378,8 @@ def butler_surface_tension(m: float, salt: Salt) -> tuple[float, float]:
 # LAYER C -- axisymmetric Young-Laplace bubble shape
 # ---------------------------------------------------------------------------
 def young_laplace_shape(sigma: float, b: float, theta_gas: float,
-                        rho_l: float = RHO_W, s_max_factor: float = 8.0):
+                        rho_l: float = RHO_W, s_max_factor: float = 8.0,
+                        g: float = G_EARTH):
     """
     Integrate the axisymmetric Young-Laplace equation for a sessile bubble
     (gas, light) sitting on a horizontal solid at the bottom.
@@ -387,7 +397,7 @@ def young_laplace_shape(sigma: float, b: float, theta_gas: float,
     dict with arrays r, z (absolute, apex at z=H>0, contact at z=0),
     scalars r_cl, H, V (volume), and converged=True/False.
     """
-    beta = (rho_l - RHO_H2) * G_GRAV / sigma   # 1/m^2
+    beta = (rho_l - RHO_H2) * g / sigma   # 1/m^2
 
     # ODE:  d r/ds  = cos phi
     #       d z_dep/ds = sin phi              (z_dep = depth below apex)
@@ -459,8 +469,9 @@ def young_laplace_shape(sigma: float, b: float, theta_gas: float,
 def detachment_volume(sigma: float, theta_gas: float,
                       rho_l: float = RHO_W,
                       j: float = 0.0, 
-                      kappa_e: float = 1.0, 
-                      eps_r: float = 78.4) -> dict: 
+                      kappa_e: float = 21.5, 
+                      eps_r: float = 78.4,
+                      g: float = G_EARTH) -> dict: 
     """
     Find apex curvature b* such that buoyancy = vertical capillary pinning
     at the contact line.  Returns V_d, D_d, r_cl at detachment, and shape.
@@ -483,7 +494,7 @@ def detachment_volume(sigma: float, theta_gas: float,
     E_z = (j / kappa_e) if kappa_e > 1e-12 else 0.0
 
     def residual(b):
-        shape = young_laplace_shape(sigma, b, theta_gas, rho_l=rho_l)
+        shape = young_laplace_shape(sigma, b, theta_gas, rho_l=rho_l,g=g)
         if not shape['converged']:
             # return a large residual so the root-finder moves away
             return 1e6
@@ -492,7 +503,7 @@ def detachment_volume(sigma: float, theta_gas: float,
         r_cl = shape['r_cl']
 
         # 1. Buoyancy (Upward)
-        F_buoy = (rho_l - RHO_H2) * G_GRAV * V_bub
+        F_buoy = (rho_l - RHO_H2) * g * V_bub
         # 2. Pinning Force (Downward)
         F_pin  = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)
         
@@ -505,7 +516,7 @@ def detachment_volume(sigma: float, theta_gas: float,
         return (F_buoy + F_DEP) - F_pin
 
     # Scan over b to bracket the root
-    capillary_length = np.sqrt(sigma / ((rho_l - RHO_H2) * G_GRAV))
+    capillary_length = np.sqrt(sigma / ((rho_l - RHO_H2) * g))
     bs = np.linspace(0.1 * capillary_length, 2.5 * capillary_length, 18)
     residuals = []
     for b in bs:
@@ -524,25 +535,12 @@ def detachment_volume(sigma: float, theta_gas: float,
     shape = young_laplace_shape(sigma, b_star, theta_gas, rho_l=rho_l)
     V_d = shape['V']
     D_d = (6.0 * V_d / np.pi) ** (1.0 / 3.0)
-    # --- NEW DEBUG BLOCK: Calculate and print equilibrium forces ---
-    r_cl = shape['r_cl']
-    F_buoy = (rho_l - RHO_H2) * G_GRAV * V_d
-    F_pin = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)
-    
-    # Recalculate R_d and F_DEP exactly as done in the residual function
-    R_d = ((3.0 * V_d) / (4.0 * np.pi)) ** (1.0 / 3.0)
-    F_DEP = dep_force(R_d, E_z, eps_r)
-    
-    print(f"\n[Force Output] Detachment Equilibrium:")
-    print(f"  F_Buoyancy : {F_buoy:.4e} N")
-    print(f"  F_DEP      : {F_DEP:.4e} N")
-    print(f"  F_Pinning  : {F_pin:.4e} N")
+
     # ---------------------------------------------------------------
     # Calculate forces at exact equilibrium
     r_cl = shape['r_cl']
-    F_buoy = (rho_l - RHO_H2) * G_GRAV * V_d
-    F_pin = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)
-    
+    F_buoy = (rho_l - RHO_H2) * g * V_d
+    F_pin = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)    
     R_d = ((3.0 * V_d) / (4.0 * np.pi)) ** (1.0 / 3.0)
     F_DEP = dep_force(R_d, E_z, eps_r)
 
@@ -555,9 +553,12 @@ def detachment_volume(sigma: float, theta_gas: float,
         r_cl=r_cl,
         H=shape['H'], 
         shape=shape,
-        F_buoy=F_buoy,   # <-- Added
-        F_DEP=F_DEP,     # <-- Added
-        F_pin=F_pin      # <-- Added
+        F_buoy=F_buoy,   
+        F_DEP=F_DEP,     
+        F_pin=F_pin,
+        j=j,
+        E_z=E_z,
+        g=g      
     )
 
 
@@ -654,8 +655,11 @@ def _save_fig(fig, fig_dir: str, filename: str, citation_banner: str = '',
 
 
 def demo(salts=None, m_grids=None, colors=None,
-         fig_dir_name: str = 'fig', out_dir_name: str = 'out',
-         citation_banner: str = ''):
+         fig_dir_name='fig', out_dir_name='out',
+         citation_banner='',
+         j_current=0.0,          # A/m^2 — renamed from j to avoid collision
+         kappa_e_map=None,       # dict e.g. {'KOH': 21.5, 'H2SO4': 40.0}
+         g=G_EARTH):      
     """
     Produce the 6 slide-ready PNGs and summary CSV.
 
@@ -670,13 +674,9 @@ def demo(salts=None, m_grids=None, colors=None,
                       = omit).  Use to flag "representative" vs. "literature
                       parameters" runs on the slide.
     """
-    # Raman paper regime: j = 0.5–5 A/m² (low current, single bubble)
-    # Industrial regime:  j = 500–5000 A/m²
-    # Use log spacing to capture both decades
-
-    j_values = np.array([0.0, 1.0, 5.0, 100.0, 500.0, 1000.0, 2000.0, 5000.0, 500000.0])
-    KAPPA_E_KOH  = 21.5   # S/m — 1 M KOH at 298 K
-    KAPPA_E_H2SO4 = 40.0  # S/m — 1 M H2SO4 at 298 K
+    if kappa_e_map is None:
+        kappa_e_map = {'KOH': 21.5, 'H2SO4': 40.0,
+                       'KCl': 21.5}   # KCl proxy for KOH
 
     fig_dir, out_dir = _ensure_dirs(fig_dir_name, out_dir_name)
     _style()
@@ -756,18 +756,14 @@ def demo(salts=None, m_grids=None, colors=None,
     for s in salts:
         m_show = [m_grids[s.name][0], m_grids[s.name][len(m_grids[s.name]) // 2],
                   m_grids[s.name][-1]]
-        for j, m in enumerate(m_show):
+        for idx, m in enumerate(m_show):
             sigma, _ = butler_surface_tension(m, s)
-            # AFTER — pass current density; use KOH or H2SO4 conductivity per salt
-            kappa_e_map = {'KOH': 21.5, 'H2SO4': 40.0}
-            J_SIM = 1000.0  # A/m^2 — representative industrial current density
-            res = detachment_volume(sigma, theta_gas,
-                                    j=J_SIM,
-                                    kappa_e=kappa_e_map[s.name])
+            kappa_e = kappa_e_map.get(s.name, 21.5)
+            res     = detachment_volume(sigma, theta_gas, j=j_current, kappa_e=kappa_e, g=g)
             if not res['converged']:
                 continue
             shape = res['shape']
-            ls = ['-', '--', ':'][j]
+            ls = ['-', '--', ':'][idx]
             axL.plot(1e3 * shape['r'], 1e3 * shape['z'],
                      color=colors[s.name], linestyle=ls, alpha=0.9,
                      label=f'{s.name}  m={m:.2f} mol/kg')
@@ -785,41 +781,46 @@ def demo(salts=None, m_grids=None, colors=None,
         m = m_grids[s.name]
         V_d = []
         D_d = []
-        F_buoy = []   # <-- Add this
-        F_DEP = []    # <-- Add this
-        F_pin = []    # <-- Add this
+        F_buoy, F_DEP, F_pin = [], [], []
+        j_list, Ez_list = [], []                       # NEW
         for mi in m:
             sigma, _ = butler_surface_tension(mi, s)
-            # AFTER
-            res = detachment_volume(sigma, theta_gas,
-                                    j=J_SIM,
-                                    kappa_e=kappa_e_map[s.name])
+            kappa_e = kappa_e_map.get(s.name, 21.5)
+            res     = detachment_volume(sigma, theta_gas, j=j_current, kappa_e=kappa_e, g=g)
             if res['converged']:
                 V_d.append(res['V'])
                 D_d.append(res['D'])
-                F_buoy.append(res['F_buoy'])  # <-- Add this
-                F_DEP.append(res['F_DEP'])    # <-- Add this
-                F_pin.append(res['F_pin'])    # <-- Add this
+                F_buoy.append(res['F_buoy'])
+                F_DEP.append(res['F_DEP'])
+                F_pin.append(res['F_pin'])
+                j_list.append(res['j'])                # NEW
+                Ez_list.append(res['E_z'])             # NEW
             else:
                 V_d.append(np.nan)
                 D_d.append(np.nan)
-                F_buoy.append(np.nan)  # <-- Add this
-                F_DEP.append(np.nan)    # <-- Add this
-                F_pin.append(np.nan)    # <-- Add this
+                F_buoy.append(np.nan)
+                F_DEP.append(np.nan)
+                F_pin.append(np.nan)
+                j_list.append(j_current)               # NEW
+                Ez_list.append(np.nan)                 # NEW
         V_d = np.array(V_d)
         D_d = np.array(D_d)
-        F_buoy_out = np.array(F_buoy)   # <-- Add this
-        F_DEP_out = np.array(F_DEP)    # <-- Add this
-        F_pin_out = np.array(F_pin)    # <-- Add this
+        F_buoy = np.array(F_buoy)
+        F_DEP = np.array(F_DEP)
+        F_pin = np.array(F_pin)
+        j_arr  = np.array(j_list)                      # NEW
+        Ez_arr = np.array(Ez_list)                     # NEW
         results[s.name]['V_d'] = V_d
         results[s.name]['D_d'] = D_d
         results[s.name]['F_buoy'] = F_buoy
         results[s.name]['F_DEP'] = F_DEP
         results[s.name]['F_pin'] = F_pin
+        results[s.name]['j'] = j_arr                   # NEW
+        results[s.name]['E_z'] = Ez_arr                # NEW
         axR.plot(m, 1e9 * V_d, color=colors[s.name],
                  label=f'{s.name}  (Butler-eNRTL $\\sigma(m)$)')
     # Reference: constant-sigma (Sepahi et al. 2022 / Raman et al. 2022)
-    V_d_ref_info = detachment_volume(SIGMA_W, theta_gas)
+    V_d_ref_info = detachment_volume(SIGMA_W, theta_gas, g=g)
     if V_d_ref_info['converged']:
         V_ref = 1e9 * V_d_ref_info['V']
         axR.axhline(V_ref, color='k', linestyle=':',
@@ -907,12 +908,12 @@ def demo(salts=None, m_grids=None, colors=None,
         Vd_j, Dd_j = [], []
         for ji in j_sweep:
             res = detachment_volume(sigma_fixed, theta_gas,
-                                    j=ji, kappa_e=kappa_e)
+                                    j=ji, kappa_e=kappa_e, g=g)
             Vd_j.append(res['V'] if res['converged'] else np.nan)
             Dd_j.append(res['D'] if res['converged'] else np.nan)
 
         # Baseline (j=0)
-        res0 = detachment_volume(sigma_fixed, theta_gas, j=0.0, kappa_e=kappa_e)
+        res0 = detachment_volume(sigma_fixed, theta_gas, j=0.0, kappa_e=kappa_e, g=g)
         Vd_0 = res0['V'] if res0['converged'] else np.nan
 
         axL.semilogx(j_sweep, 1e9 * np.array(Vd_j),
@@ -924,8 +925,8 @@ def demo(salts=None, m_grids=None, colors=None,
         E_sweep = j_sweep / kappa_e
         R_d_fixed = ((3.0 * Vd_0) / (4.0 * np.pi)) ** (1.0/3.0)
         F_DEP_sweep = [dep_force(R_d_fixed, E) for E in E_sweep]
-        F_buoy_earth = (RHO_W - RHO_H2) * G_GRAV * Vd_0
-        F_buoy_mars  = (RHO_W - RHO_H2) * 3.72   * Vd_0
+        F_buoy_earth = (RHO_W - RHO_H2) * G_EARTH * Vd_0
+        F_buoy_mars  = (RHO_W - RHO_H2) * G_MARS   * Vd_0
 
         axR.loglog(j_sweep, 1e9 * np.array(F_DEP_sweep),
                 color=colors[s.name], label=f'F_DEP  {s.name}')
@@ -951,9 +952,10 @@ def demo(salts=None, m_grids=None, colors=None,
     with open(csv_path, 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(['salt', 'm (mol/kg)', 'gamma_pm', 'a_w',
-                    'sigma (N/m)', 'kH_eff/kH0',
-                    'V_d (m^3)', 'D_d (m)', 'y_H2', 'r_crit (m)',
-                    'F_buoy (N)', 'F_DEP (N)', 'F_pin (N)'])  # <-- ADDED HERE
+            'sigma (N/m)', 'kH_eff/kH0',
+            'V_d (m^3)', 'D_d (m)', 'y_H2', 'r_crit (m)',
+            'j (A/m^2)', 'E_z (V/m)',
+            'F_buoy (N)', 'F_DEP (N)', 'F_pin (N)'])
         for s in salts:
             n = len(results[s.name]['m'])
             for i in range(n):
@@ -967,9 +969,11 @@ def demo(salts=None, m_grids=None, colors=None,
                             f"{results[s.name]['D_d'][i]:.4g}",
                             f"{results[s.name]['y_H2'][i]:.4g}",
                             f"{results[s.name]['r_crit'][i]:.4g}",
-                            f"{results[s.name]['F_buoy'][i]:.4e}", # <-- ADDED HERE
-                            f"{results[s.name]['F_DEP'][i]:.4e}",  # <-- ADDED HERE
-                            f"{results[s.name]['F_pin'][i]:.4e}"]) # <-- ADDED HERE
+                            f"{results[s.name]['j'][i]:.4g}",       # NEW
+                            f"{results[s.name]['E_z'][i]:.4g}",     # NEW
+                            f"{results[s.name]['F_buoy'][i]:.4e}",
+                            f"{results[s.name]['F_DEP'][i]:.4e}",
+                            f"{results[s.name]['F_pin'][i]:.4e}"])
 
     # -------- print-to-console snapshot --------
     print(f'Wrote figures to {fig_dir}')
@@ -985,24 +989,16 @@ def demo(salts=None, m_grids=None, colors=None,
 # AFTER — separate folders per scenario
 if __name__ == '__main__':
 
-    # Run 1: baseline (no electric field) — original behaviour
-    demo(fig_dir_name='fig/baseline',
-         out_dir_name='out/baseline',
-         citation_banner='Baseline: j=0, no DEP electrostatic force')
+ # One scenario per current density in J_VALUES (Earth gravity)
+    for label, j_val in zip(J_LABELS, J_VALUES):
+        demo(fig_dir_name=f'fig/{label}',
+             out_dir_name=f'out/{label}',
+             j_current=float(j_val),
+             citation_banner=f'j = {j_val:g} A/m^2  ({label}, Earth g)')
+        print(f'--- scenario "{label}":  j = {j_val:g} A/m^2  -> written to fig/{label}/, out/{label}/')
 
-    # Run 2: Raman-paper current density regime (j ~ 1–5 A/m^2)
-    # (requires passing j into demo — see Edit A/B above)
-    demo(fig_dir_name='fig/raman_regime',
-         out_dir_name='out/raman_regime',
-         citation_banner='Raman et al. 2022 current density regime')
-
-    # Run 3: industrial current density (j ~ 1000 A/m^2)
-    demo(fig_dir_name='fig/industrial',
-         out_dir_name='out/industrial',
-         citation_banner='Industrial alkaline electrolysis regime')
-
-    # Run 4: Mars gravity
-    # (requires passing g into detachment_volume — future extension)
-    demo(fig_dir_name='fig/mars',
-         out_dir_name='out/mars',
-         citation_banner='Mars gravity g=3.72 m/s^2')
+    # Mars scenario: representative industrial current density at Mars gravity
+    demo(fig_dir_name='fig/mars', out_dir_name='out/mars',
+         j_current=1000.0, g=G_MARS,
+         citation_banner='Mars: g=3.72 m/s^2, j=1000 A/m^2')
+    print('--- scenario "mars":  j = 1000 A/m^2, g = 3.72 m/s^2  -> written to fig/mars/, out/mars/')
