@@ -1,0 +1,56 @@
+APPENDIX PSEUDOCODE: Quadric curved-volume patch
+
+Input:
+  Closed triangle surface mesh: vertices X = {x_i ∈ R^3}, faces F = {(i,j,k)}
+  Parameters: θ_crease, Nmin, ε_abs, ε_rel, (ring/rim caps)
+
+Output:
+  Total enclosed volume V_total
+  Per-face patch correction V_patch(f) (and optional A_curved(f))
+  Per-vertex dual corrections ΔV_i (and optional ΔA_i)
+
+Procedure:
+  1) Baseline (planar) enclosed volume:
+       V_flat ← signed PL volume of (X,F)
+
+  2) Initialize:
+       ΔV ← 0
+       ΔV_i ← 0  for all vertices i    (optionally ΔA_i ← 0)
+
+  3) For each face f = (i,j,k) with vertices A=x_i, B=x_j, C=x_k:
+
+       (a) Patch growth (smooth component only):
+            P_f ← GrowPatchVertices(seed=f, crease=θ_crease, caps)
+            if |P_f| < Nmin: continue   (flat fallback)
+
+       (b) Planarity predicate:
+            if max_dist_to_best_plane(P_f) ≤ max(ε_abs, ε_rel·diam(P_f)): continue
+
+       (c) Homogeneous quadric fit on P_f (SVD):
+            Build design rows z(p) = [x^2,y^2,z^2,xy,xz,yz,x,y,z,1]
+            Column-normalize Z, solve Z q ≈ 0 via smallest right singular vector
+            q_f = (A,B,C,D,E,F,G,H,I,J)
+
+       (d) Canonical transform (per-face):
+            (R_f, c_f, s_f, q̂_f, Â, B̂, Ĉ) ← Canonicalize(q_f, A,B,C)
+            where p̂ = (R_f^T (p − c_f)) / s_f    (anisotropic scale)
+            and small coefficients are snapped for stability
+
+       (e) Patch volume (class-specific engine, transformed frame):
+            V̂_patch ← PatchVolume(q̂_f, Â,B̂,Ĉ) using {ellipsoid | translation | rotation}
+            V_patch ← det(s_f) · V̂_patch
+
+           (optional) Curved area:
+            Â_patch ← PatchArea(q̂_f, Â,B̂,Ĉ) and map back consistently
+
+       (f) Enforce conservative per-vertex split (thickness-weighted):
+            (vA,vB,vC) ← SplitThicknessWeighted(V_patch, Â,B̂,Ĉ, q̂_f)
+            Normalize so vA+vB+vC = V_patch exactly (fallback: equal thirds)
+            ΔV_i += vA,  ΔV_j += vB,  ΔV_k += vC
+            ΔV += V_patch
+            (optional) same split for A_curved
+
+  4) Total volume:
+       V_total = V_flat + ΔV
+
+Return V_total and (ΔV_i, optional ΔA_i) as the dual form.

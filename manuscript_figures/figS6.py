@@ -16,7 +16,7 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 from ddgclib import *
-from ddgclib._complex import *
+from hyperct import *
 from ddgclib._curvatures import * #plot_surface#, curvature
 from ddgclib._capillary_rise_flow import * #plot_surface#, curvature
 from ddgclib._eos import *
@@ -24,23 +24,49 @@ from ddgclib._misc import *
 from ddgclib._plotting import *
 
 import matplotlib.pyplot as plt
+
+if 0:
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Helvetica"]})
+    # for Palatino and other serif fonts use:
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Palatino"],
+    })
+    # It's also possible to use the reduced notation by directly setting font.family:
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "Helvetica",
+        'font.size': 14
+    })
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Calibri"]})
+    # for Palatino and other serif fonts use:
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Calibri"],
+    })
+    # It's also possible to use the reduced notation by directly setting font.family:
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "Calibri",
+        'font.size': 14
+    })
+
 plt.rcParams.update({
     "text.usetex": True,
-    "font.family": "sans-serif",
-    "font.sans-serif": ["Helvetica"]})
-# for Palatino and other serif fonts use:
-plt.rcParams.update({
-    "text.usetex": True,
-    "font.family": "serif",
-    "font.serif": ["Palatino"],
-})
-# It's also possible to use the reduced notation by directly setting font.family:
-plt.rcParams.update({
-  "text.usetex": True,
-  "font.family": "Helvetica",
-  'font.size': 14
+   # "font.family": "sans-serif",
+   # "font.sans-serif": ["Calibri"]
 })
 
+font_size = 12
 
 # Parameters for a water droplet in air at standard laboratory conditions
 gamma = 0.0728  # N/m, surface tension of water at 20 deg C
@@ -83,7 +109,6 @@ cdist = 1e-10
 r = np.array(r, dtype=np.longdouble)
 theta_p = np.array(theta_p, dtype=np.longdouble)
 
-##################################################
 # PLot theta rise
 if 1:
     # First generate the smooth data
@@ -128,10 +153,7 @@ if 1:
                           'linestyle':  'None',
                           'marker': "D",
                           'color':'tab:purple'},
-                '((K/C_ijk)^0.5 + (K/C_ijk)^0.5)': {'label': r'$2 \sqrt{\frac{\Omega_{i}}{C_{i j k}}}$',
-                          'linestyle': 'None',
-                          'marker': 'o',
-                          'color':'tab:pink'},
+
     }
 
 
@@ -152,14 +174,16 @@ if 1:
                     color=keyslabel[key]['color'],
                     label=keyslabel[key]['label'], alpha=0.7)
 
-    plt.ylabel(r'Gaussian curvature ($m^{-2}$)')
+    plt.ylabel(r'Gaussian curvature ($m^{-2})$', fontsize=font_size)
     #plt.ylim((0, max(max( vdict['K_H_i']), max( vdict['HN_i']))))
     ax.legend(#bbox_to_anchor=(0.15, 0.15),
-              loc="upper center",
+              #loc="upper center",
+              #loc="lower left",
+        loc="center right",
               bbox_transform=fig.transFigure, ncol=1)
 
     # Next we plot the mean normal curvatures:
-    plt.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
+    plt.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)', fontsize=font_size)
     ax2 = ax.twinx()
     keyslabel = {
 
@@ -178,8 +202,11 @@ if 1:
                 '(1/2)*HNdA_ij_sum/C_ijk': {'label': r'$\int_{\star s t\left(v_{i}\right)} \frac{\langle H, N\rangle}{C_{i j k}} d A=\frac{\frac{1}{2} \sum_{i j \in s t\left(v_{j}\right)}\left(\cot \alpha_{i j}+\cot \beta_{i j}\right)\left(\mathbf{f}_{\mathbf{i}}-\mathbf{f}_{\mathbf{j}}\right)}{C_{i j k}}$',
                          'linestyle': 'None',
                          'marker': 'x',
-                          'color':'tab:olive'},
-
+                         'color':'tab:olive'},
+                '((K/C_ijk)^0.5 + (K/C_ijk)^0.5)': {'label': r'$2 \sqrt{\frac{\Omega_{i}}{C_{i j k}}}$',
+                          'linestyle': 'None',
+                          'marker': 'o',
+                          'color': 'tab:pink'},
     }
 
     keys = keyslabel.keys()
@@ -208,19 +235,18 @@ if 1:
     # Finally add the plot labels
     #fig.legend(ncol=3)
     #plt.xlabel('Contact angle $\Theta_{C}$')
-    plt.xlabel(r'Contact angle $\Theta_{C}$ ($^\circ$)')
+    plt.xlabel(r'Contact angle $\it{ \Theta_{C}$ ($^\circ}$)', fontsize=font_size)
 
 
     #ax2.set_ylim()
     #ax2.set_yticks(np.linspace(ax2.get_yticks()[0], ax2.get_yticks()[-1], len(ax.get_yticks())))
 
-    plt.ylabel('Mean normal curvature ($m^{-1}$)')
-    plt.legend()
+    plt.ylabel('Mean normal curvature ($m^{-1}$)', fontsize=font_size
+               )
+    plt.legend(fontsize=font_size-2)
+
+fig.set_size_inches(10,6)
+
+plt.savefig('figs6.png', dpi=600)
 plt.show()
-
-
-
-
-
-
 
