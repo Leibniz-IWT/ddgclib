@@ -522,30 +522,32 @@ def plot_drop_profile(name='pin spread'):
 def plot_drop_height_vs_rad(nam='rad ang bub'): 
   import os
   from matplotlib.patches import RegularPolygon
+  from ddgclib._bubble import AdamsBashforthProfile
+  def colRB(cont,r):
+    if r<1: 
+      colVal = r**.5
+      if 'rad' in cont: return ( colVal, 0, 0 )
+      else:             return ( 0, 0, colVal )
+    else: 
+      colVal = 1 - 1/r
+      if 'rad' in cont: return ( 1, colVal, colVal )
+      else:             return ( colVal, colVal, 1 )
   folName = 'data/'
+  figProf, axProf = plt.subplots(2, sharex=True)
+  fig, ax = plt.subplots(1, 2, sharey=True)
   for cont in nam.split():
-    fig, ax = plt.subplots(1)
     figV, axVV = plt.subplots(2, sharex=True)
-    plt.subplots_adjust(hspace=0.07)
+    figV.subplots_adjust(hspace=0.07)
     fig2, ax2 = plt.subplots(1)
-    figProf, axProf = plt.subplots(1)
     x=[]
-    y=[]
+    dfDet=[]
     z=[]
     zM=[]
-    rTopDet=[]
-    heigDet=[]
-    volDet=[]
-    radInd=0 
-    #rads=np.array((.5,1,1.5,2,2.5,3,3.5))
-    rads=np.array((0.5,1.5,2.5,3.5))
     for fname in reversed(sorted(os.listdir(folName))):
-      if 'Lo' in fname: continue
-      if 'Hi' in fname: continue
+      if 'prof' in fname: continue
       if 'txt' not in fname: continue
       if cont not in fname: continue
-      with open(folName+fname, encoding = 'utf-8') as f:
-        df = np.loadtxt(f)
+      with open(folName+fname, encoding = 'utf-8') as f: df = np.loadtxt(f)
       if df.ndim<2: continue
       df[:,0] /= df[:,4]
       df[:,1] /= df[:,4]
@@ -561,134 +563,191 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         else: x.append(angl)
         z.append(df[indVol,0])
         zM.append(np.max(df[:indVol+1,0]))
+        axInd=1
       if 'rad' in cont: 
         x.append(df[indVol,0])
         z.append( 1 - df[indVol,2]/np.pi )
         zM.append(np.min( 1 - df[:indVol+1,2]/np.pi ))
+        axInd=0
       if 'bub' in cont: 
         x.append(df[indVol,5])
         z.append(df[indVol,0])
         zM.append(np.max(df[:indVol+1,0]))
-      r = df[:,6]
-      y.append(r[indVol])
-      height = -df[:,1]
-      #height = df[:,0]
-      #height = 1 - df[:,2]/np.pi
-      #height = df[:,5]
-      rTopDet.append(df[indVol,5])
-      #rTopDet.append(np.max(df[:indVol+1,5]))
-      heigDet.append(-df[indVol,1])
-      #heigDet.append(np.max(-df[:indVol+1,1]))
-      volDet.append(df[indVol,6])
-      for i in range(0):#1, len(r)):
-        if abs(r[i]-r[i-1]) > 3: r[i-1]=np.nan
-      zord=3
+        axInd=0
+      dfDet.append(df[indVol,:])
       if '0.txt' not in fname: continue
-      if 'ang' in cont: 
-        if angl>181/180: continue
-        if round(angl*100)%10==0:
-          col='k'
-          if angl>50/180:
-            ax.text(r[indVol], height[indVol], rf"${angl:.1f}$", va='bottom', ha='center')
-            zord=3
-        else: 
-          col='silver'
-          zord=1
-      if 'rad' in cont: 
-        if round(df[0,0]*10)%5==0 and df[0,0]<3.7 and df[0,0]>.05:
-          col='k'
-          ax.text(r[indVol], height[indVol], rf"${df[0,0]:.1f}$", va='bottom', ha='center', c=col)
-          print(r[indVol], height[indVol], rf"${df[0,0]}$", fname)
-          zord=3
-        else: 
-          col='silver'
-          zord=1
-      if 'bub' in cont: 
-        if '9.txt' in fname or df[0,5]>5:
-          col='k'
-          zord=3
-          if df[0,5]>.5 and df[0,5]<=1: ax.text(r[indVol], height[indVol], rf"${df[0,5]:.1f}$", va='center', ha='left')
-        else: 
-          col='silver'
-          zord=1
-      ax.plot(r[:indVol+1], height[:indVol+1], c=col, zorder=zord)
+      ax[axInd].plot(df[:indVol+1,6], -df[:indVol+1,1], c='lightgrey', lw=.5)
+      #if 'ang' in cont and round(angl*100)%10!=0:continue
+      if 'ang' in cont and round(angl*100)%20!=0:continue
+      if 'ang' in cont and angl>50/180: ax[axInd].text(df[indVol,6], -df[indVol,1]+.05, rf"${angl:.1f}$", va='bottom', ha='center')
+      #if 'rad' in cont and round(df[0,0]*10)%5!=0: continue 
+      if 'rad' in cont and round(df[0,0]*10)%10!=5: continue 
+      if 'rad' in cont and df[0,0]<3.2 and df[0,0]>.05: ax[axInd].text(df[indVol,6], -df[indVol,1]+.05, rf"${df[0,0]:.1f}$", va='bottom', ha='center')
+      if 'bub' in cont and df[0,5]>.5 and df[0,5]<=1: ax[axInd].text(df[indVol,6], -df[indVol,1]+.05, rf"${df[0,5]:.1f}$", va='center', ha='left')
+      ax[axInd].plot(df[:indVol+1,6], -df[:indVol+1,1], c='k', zorder=3)
+      if 'rad' in cont and round(df[0,0]*10)%10==0: continue 
+      if 'ang' in cont and round(angl*100)%20!=0:continue
+      axRt = axProf[axInd].inset_axes((15/18.5, 2.6/3, (18.1-15)/18.5, .2/3))
+      axRt.set_xscale('log')
+      axRt.set_xlabel('$R_h/\\lambda$')
+      axRt.set_xlim([.1,10])
+      axRt.set_yticks([])
+      axRt.tick_params(which='both', direction='in', top=True, right=True)
+      for ri in range(21):
+        Rt=10**( (ri-10)/10 )
+        axRt.plot( (Rt,Rt), (0,1), lw=6, c=colRB(cont,Rt), zorder=-1)
+      #axProf[axInd].plot( (5.5,5.5), (2.5,1.5), c='grey')
+      #tri = RegularPolygon( (5.5,1.5), 3, radius=0.1, orientation=np.pi, color='grey', zorder=3)
+      #axProf[axInd].add_patch(tri)
+      #axProf[axInd].text(6, 2, '$g$', va='center', ha='left', c='grey')
+      if 'rad' in cont: spac=(1,3.5,8,14.5,20,30,40,50)[ round(df[0,0]-.5) ] 
+      if 'ang' in cont: spac=(.5,1.8,4.1,8,14.5,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160)[ round( 4-df[indVol,2]*5/np.pi) ]
+      if spac>6 and spac<10: drawCoord=True
+      else: drawCoord=False
+      for hei in range(5):#5
+        if drawCoord and hei<4: continue
+        heiInd = np.argmin( abs( (hei+1)*df[indVol,1]/5 - df[:indVol+1,1] ) )
+        #AdamsBashforthProfile(1, df[heiInd,5], fname=folName+f'prof{hei:05}'+fname)
+        with open(folName+f'prof{hei:05}'+fname, encoding = 'utf-8') as f: prof = np.loadtxt(f)
+        footInd = np.argmin( abs( df[heiInd,6] - prof[:,6] ))
+        ax[axInd].plot(prof[footInd,6], -prof[footInd,1], 'o', ms=5, c=colRB( cont, df[heiInd,5] ), clip_on=False, zorder=4)#, mfc='None'
+        xProf=np.concatenate(( -prof[:footInd,0][::-1] , prof[:footInd,0] ))
+        xProf=xProf+spac
+        yProf=np.concatenate(( prof[:footInd,1][::-1] - prof[footInd,1] , prof[:footInd,1] - prof[footInd,1] ))
+        axProf[axInd].plot(xProf,yProf, c=colRB(cont,df[heiInd,5]), clip_on=False)
+        #if hei!=4:continue
+        #if 'rad' in cont: axProf[axInd].plot(xProf,yProf*0, c='w', clip_on=False)
+        #if 'ang' in cont: continue
+        #if round(df[0,0]-.5): continue
+        if not drawCoord: continue
+        xAn = xProf[-1]
+        yAn = yProf[-1]
+        #axProf[axInd].plot((xAn,xAn+.3), (yAn,yAn), color='grey')
+        Xarr = []
+        Yarr = []
+        for phi in range(51):
+          X = xAn + .17*np.cos(phi*np.pi/50)
+          Y = yAn + .17*np.sin(phi*np.pi/50)
+          for i in range(len(xProf)):
+            if xProf[i]>X: break
+          if yProf[i]>Y: break
+          Xarr.append(X)
+          Yarr.append(Y)
+        axProf[axInd].plot(Xarr,Yarr,c='grey')
+        if 'rad' in cont: axProf[axInd].text(xAn+.1, yAn+.1, "$\\phi_0$", ha='left', va='bottom', c='grey') 
+        if 'ang' in cont: axProf[axInd].text(xAn+.1, yAn+.1, "$\\phi_c$", ha='left', va='bottom', c='grey') 
+        axProf[axInd].plot((spac,xProf[0]), (0,0), 'o', ls='solid', color='grey', clip_on=False, zorder=3)
+        #axProf[axInd].plot((spac,xProf[0]), (0,0), c='grey', clip_on=False, zorder=3)
+        if 'rad' in cont: axProf[axInd].text( (spac+xProf[0])/2, .1, "$r_c$", ha='center', va='bottom', c='grey') 
+        if 'ang' in cont: axProf[axInd].text( (spac+xProf[0])/2, .1, "$r_0$", ha='center', va='bottom', c='grey') 
+        h=int(0.5*(len(xProf)))
+        axProf[axInd].plot( (xProf[h],xProf[h]), (0,yProf[h]), c='grey')
+        axProf[axInd].text( xProf[h]-.1, yProf[h]/2, "$h$", ha='right', va='center', c='grey') 
+        axProf[axInd].plot(xProf[h],yProf[h],'o', c='grey')
+        t=int(0.8*(len(xProf)))
+        axProf[axInd].plot(xProf[h:t],yProf[h:t], c='grey')
+        theta = np.arctan2(yProf[t+1]-yProf[t], xProf[t+1]-xProf[t])-np.pi/2
+        tri = RegularPolygon( (xProf[t], yProf[t]), 3, radius=0.1, orientation=theta, color='grey', zorder=3)
+        axProf[axInd].add_patch(tri)
+        axProf[axInd].text(xProf[t]+0.1, yProf[t], '$s$', va='center', ha='left', c='grey')
+        t=int(0.63*(len(xProf)))
+        xAn = xProf[t]
+        yAn = yProf[t]
+        axProf[axInd].plot((xAn,xAn+.3), (yAn,yAn), color='grey')
+        Xarr = []
+        Yarr = []
+        for phi in range(51):
+          X = xAn + .17*np.cos(phi*np.pi/50)
+          Y = yAn + .17*np.sin(phi*np.pi/50)
+          for i in range(len(xProf)):
+            if xProf[i]>X: break
+          if yProf[i]>Y: break
+          Xarr.append(X)
+          Yarr.append(Y)
+        axProf[axInd].plot(Xarr,Yarr,c='grey')
+        axProf[axInd].text(xAn+.1, yAn+.1, "$\\phi$", ha='left', va='bottom', c='grey') 
+        gravX=18
+        gravTailY=1.8
+        gravHeadY=1
+        axProf[axInd].plot([gravX,gravX],[gravTailY,gravHeadY], c='grey')
+        tri = RegularPolygon( (gravX, gravHeadY), 3, radius=0.1, orientation=np.pi, color='grey', zorder=3)
+        axProf[axInd].add_patch(tri)
+        axProf[axInd].text(gravX+0.1, (gravHeadY+gravTailY)/2, '$g$', va='center', ha='left', c='grey')
     x = np.asarray(x)
-    y = np.asarray(y)
+    dfDet = np.asarray(dfDet)
     z = np.asarray(z)
-    ax2.plot(x,rTopDet,c='b')
-    ax2.plot(x,heigDet,c='k')
+    ax2.plot(x,dfDet[:,5],c='b')
+    ax2.plot(x,-dfDet[:,1],c='k')
     ax2.set_ylim([0,3.219])
-    #idx = np.argsort(x)
     axV = axVV[0]
     axM = axVV[1]
-    #axV.plot(x,y,c='k',clip_on=False)
-    maxVind=np.argmax(y)
-    print('x',x[0],x[maxVind],x[-1])
-    print('y',y[0],y[maxVind],y[-1])
-    print('rTopDet',rTopDet[0],rTopDet[maxVind],rTopDet[-1])
-    #axM = axV[1]#.twinx()
-    #axM.set_zorder(axV.get_zorder() - 1)
+    maxVind=np.argmax(dfDet[:,6])
+    print('maxVol',dfDet[maxVind,:])
+    maxVind=np.argmax(-dfDet[:,1])
+    print('maxHeight',dfDet[maxVind,:])
     axM.tick_params(direction='in')
-    ax.tick_params(which='both', direction='in', top=True, right=True)
-    ax.set_xlabel('$V/\\lambda^3$')
-    axV.text(5e-3,.99,'$\\mathrm{(a)}$',transform=axV.transAxes,va='top',ha='left')
+    ax[axInd].tick_params(which='both', direction='in', top=True, right=True)
+    ax[axInd].set_xlabel('$V/\\lambda^3$')
     axM.text(5e-3,.99,'$\\mathrm{(b)}$',transform=axM.transAxes,va='top',ha='left')
-    #figV.subplots_adjust(left=.1, right=.88, bottom=.18,top=.96)
-    #axV.text(-.1,.5,'$\\frac{V}{\\lambda^3}$',transform=axV.transAxes,size=22,ha='center')
-    axV.set_ylabel('$\\frac{V}{\\lambda^3}$',size=22,rotation=0,labelpad=15)
     ax2.tick_params(which='both', direction='in', top=True, right=True)
-    ax.set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22,labelpad=10)
-    axProf.tick_params(which='both', direction='in', top=True, right=True)
-    axProf.set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22,labelpad=15)
-    axProf.set_ylim([0,2.5])
-    #axProf.set_xlim([0,14])
-    axProf.set_xlim([0,18.5])
-    axProf.set_aspect('equal', adjustable='box')
-    ax.set_ylim([0,3])
-    ax.set_xlim([0,20])
+    ax[0].set_ylabel('$\\frac{h}{\\lambda}$',rotation=0,size=22,labelpad=10)
+    axProf[axInd].tick_params(which='both', direction='in', top=True, right=True)
+    axProf[axInd].set_ylabel('$\\frac{ z }{\\lambda}$',rotation=0,size=22,labelpad=15)
+    axProf[axInd].set_ylim([0,3])
+    axProf[axInd].set_xlim([0,18.5])
+    axProf[axInd].set_aspect('equal', adjustable='box')
+    ax[axInd].set_ylim([0,3])
+    ax[axInd].set_xlim([0,20])
     axV.set_ylim([0,30])
     axV.tick_params(which='both', direction='in', top=True, right=True)
     axM.tick_params(which='both', direction='in', top=True, right=True)
-    fig.set_figwidth(5)
-    figV.set_figwidth(5)
+    figV.set_figwidth(6)
     fig2.set_figwidth(5)
-    figProf.set_figwidth(10)
-    fig.set_figheight(3)
     figV.set_figheight(6)
     fig2.set_figheight(3)
-    figProf.set_figheight(2.3)
     if 'bub' in cont:
-      axV.plot(x,y,c='k',clip_on=False)
+      axV.plot(x,dfDet[:,6],c='k',clip_on=False)
       axV.set_xlabel('$R_t$')
-      axV.set_xscale('log')
-      axV.set_yscale('log')
       ax2.plot(x,z, c='k',clip_on=False)
     if 'ang' in cont:
-      axV.plot(x,y,c='b',clip_on=False)
-      axM.plot( x, z, c='b', clip_on=False, zorder=3)
-      axM.plot( x, zM, '--', c='b', clip_on=False, zorder=3)
+      axV.plot(x,dfDet[:,6],c='b',clip_on=False)
+      axI = inset_axes(axV, width="40%", height="50%", loc='upper left')
+      axI.yaxis.set_label_position("right")
+      axI.yaxis.tick_right()
+      axI.tick_params(which='both', direction='in', top=True, left=True, right=True, pad=6)
+      axI.set_xscale('log')
+      axI.set_yscale('log')
+      axI.set_xlim([.07,1])
+      axI.set_ylim([.01,100])
+      axI.plot(x,dfDet[:,6],c='b')
+      axM.plot( x[::30], z[::30], '.', c='b', clip_on=False, zorder=3)
+      axM.plot( x, zM, '-', c='b', clip_on=False, zorder=3)
       fig2.subplots_adjust(left=0.1, right=0.97, bottom=0.2, top=0.98)
-      figProf.subplots_adjust(left=0.05, right=0.97, bottom=0.2, top=0.98)
+      #figProf.subplots_adjust(left=0.05, right=0.97, bottom=0.2, top=0.98)
       xx=np.linspace(0,1)
-      axV.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dotted', c='b')
+      axV.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dashed', c='k')
+      axI.plot(xx, 4*np.pi*(.0104*xx*180)**3/3, ls='dashed', c='k')
+      axM.plot(xx, 3.219*xx**2, ls='dashed', c='k', zorder=3)
+      #axM.plot(xx, .887*(np.pi*xx)**3 /2/np.pi/np.sin(np.pi*xx), ls='solid', c='k')
+      #axM.plot(xx, np.sqrt( 6 * np.sin(np.pi*xx) * np.cos(np.pi*xx)**3 / (2 + np.sin(np.pi*xx) ) / (1 - np.sin(np.pi*xx) )**2 ), ls='dashed', c='k')
       print(4*np.pi*(.0104*180)**3/3, 'dotted')
-      axM.set_xlabel('$\\phi_0/\\pi$')
-      ax2.set_xlabel('$\\phi_0/\\pi$')
+      axM.set_xlabel('$\\phi_c/\\pi$')
+      ax2.set_xlabel('$\\phi_c/\\pi$')
       ax2.text(-.08,.7,'$\\frac{h}{\\lambda}$',c='k',transform=ax2.transAxes,size=22,ha='center')
       ax2.text(-.08,.5,'$\\frac{R_t}{\\lambda}$',c='b',transform=ax2.transAxes,size=22,ha='center')
       ax2.text(-.08,.3,'$\\frac{r_0}{\\lambda}$',c='r',transform=ax2.transAxes,size=22,ha='center')
-      axProf.text(5e-3,.99,'$\\mathrm{(b)}$',transform=axProf.transAxes,va='top',ha='left')
-      ax.text(5e-3,.99,'$\\mathrm{(b)}$',transform=ax.transAxes,va='top',ha='left')
+      axProf[axInd].text(5e-3,.99,'$\\mathrm{(b)}$',transform=axProf[axInd].transAxes,va='top',ha='left')
+      ax[axInd].text(5e-3,.99,'$\\mathrm{(b)}$',transform=ax[axInd].transAxes,va='top',ha='left')
       ax2.set_xlim([0,1])
       ax2.plot(x,z, c='r',clip_on=False)
       axV.set_xlim([0,1])
-      #axV.text(1.08,.5,'$\\frac{r_0}{\\lambda}$',c='r',transform=axV.transAxes,size=22,ha='center')
+      axV.text(1-5e-3,.99,'$\\mathrm{(a)}$',transform=axV.transAxes,va='top',ha='right')
+      axV.set_ylabel('$\\frac{V_s}{\\lambda^3}$',size=22,rotation=0,labelpad=15)
       axM.set_ylabel('$\\frac{r_0}{\\lambda}$',size=22,rotation=0,labelpad=10)
       axM.set_ylim([0,4])
       fname = 'demirkir24life.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f, skiprows=1)
+      with open(fname) as f: df = np.loadtxt(f, skiprows=1)
       for i in range(len(df[:,0])):
         rad = df[i,1]*1e-6
         density = df[i,2] -	0.08988*1e-6
@@ -698,10 +757,10 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         if df[i,0]-mid*180 > 20: continue
         print(i, [df[i,0]-mid])
         axV.errorbar( mid, 4*np.pi/3 * rad**3 / capLen**3, xerr=[ [df[i,0]/180-mid], [mid-df[i,4]/180] ], fmt='^', c='b', mfc='None',clip_on=False, zorder=3)
+        axI.errorbar( mid, 4*np.pi/3 * rad**3 / capLen**3, xerr=[ [df[i,0]/180-mid], [mid-df[i,4]/180] ], fmt='^', c='b', mfc='None',clip_on=False, zorder=3)
       fname = 'allred21role.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f, skiprows=1)
+      with open(fname) as f: df = np.loadtxt(f, skiprows=1)
       for i in range(len(df[:,0])):
         if (max(df[i,2:]) - min(df[i,2:])) > 20: continue
         if max(df[i,2:]) < 20: continue
@@ -715,36 +774,47 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
         if mid>mx: continue
         axV.plot(mid, vol, 'v', c='b', mfc='None', zorder=3)
         axV.plot([mn,mx], [vol,vol], c='b', zorder=3)
+        axI.plot(mid, vol, 'v', c='b', mfc='None', zorder=3)
+        axI.plot([mn,mx], [vol,vol], c='b', zorder=3)
       fname = 'huang25effects.txt'
       print('open',fname)
       surf=72.25e-3
       density=998
       capLen = (surf/density/9.81)**.5
-      with open(fname) as f:
-        df = np.loadtxt(f, skiprows=1)
+      with open(fname) as f: df = np.loadtxt(f, skiprows=1)
       for i in range(len(df[:,0])):
         if df[i,0]<50: continue
         axV.errorbar(df[i,0]/180, df[i,3]/capLen**3, xerr=[ [ df[i,1]/180-df[i,0]/180 ] , [ df[i,0]/180-df[i,2]/180 ] ], fmt='d', c='b', mfc='None', clip_on=False, zorder=3)
-      ax.set_yticklabels([])
-      ax.set_ylabel('')
-      fig.subplots_adjust(left=0.03, right=0.86, bottom=0.2, top=0.98)
-      radInd=2
+        axI.errorbar(df[i,0]/180, df[i,3]/capLen**3, xerr=[ [ df[i,1]/180-df[i,0]/180 ] , [ df[i,0]/180-df[i,2]/180 ] ], fmt='d', c='b', mfc='None', clip_on=False, zorder=3)
+      #ax[axInd].set_yticklabels([])
+      #ax[axInd].set_ylabel('')
+      #fig.subplots_adjust(left=0.03, right=0.86, bottom=0.2, top=0.98)
       rads = np.pi*np.arange(0.8, -0.1, -0.2)
       print('rads',rads/np.pi)
-      outName = folName+f'spr.pdf'
-      #spc = (30, 20, 25, 10, 6, 4, 2, .7, 0)
-      spc=(1,3,6,11,15)
-      axProf.set_xlabel('$x/\\lambda$')
     if 'rad' in cont:
-      axV.plot((3.832,*x),(0,*y),c='r',clip_on=False)
-      axM.plot( x, z, c='r', clip_on=False, zorder=3)
-      axM.plot( x, zM, '--', c='r', clip_on=False, zorder=3)
+      axV.plot((3.832,*x),(0,*dfDet[:,6]),c='r',clip_on=False)
+      from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+      axI = inset_axes(axV, width="40%", height="50%", loc='upper left')
+      axI.yaxis.set_label_position("right")
+      axI.yaxis.tick_right()
+      axI.tick_params(which='both', direction='in', top=True, left=True, right=True)
+      axI.set_xscale('log')
+      axI.set_yscale('log')
+      axI.set_xlim([6e-2,1.2])
+      axI.set_ylim([.3,8])
+      axI.plot(x,dfDet[:,6],c='r')
+      #axM.plot( x, z, c='r', clip_on=False, zorder=3)
+      #axM.plot( (x[:-2]+x[1:-1]+x[2:])/3, (z[:-2]+z[1:-1]+z[2:])/3, c='r', clip_on=False, zorder=3)
+      axM.plot( x[::15], z[::15], '.', c='r', clip_on=False, zorder=3)
+      axM.plot( x, zM, c='r', clip_on=False, zorder=3)
       fig2.subplots_adjust(left=0.1, right=0.88, bottom=0.2, top=0.98)
-      figProf.subplots_adjust(left=0.05, right=0.97, bottom=0.02, top=0.98)
       xx=np.linspace(0,4)
-      axV.plot( xx, 2*np.pi*xx, linestyle='dotted', c='r', lw=2)
-      axM.set_xlabel('$r_0/\\lambda$')
-      ax2.set_xlabel('$r_0/\\lambda$')
+      axV.plot( xx, 2*np.pi*xx, linestyle='dashed', c='k')
+      axI.plot( xx, 2*np.pi*xx, linestyle='dashed', c='k')
+      axM.plot( xx, (xx/3.5)**.5, linestyle='dashed', c='k', zorder=3)
+      axM.set_xlabel('$r_c/\\lambda$')
+      #axI.set_xlabel('$r_c/\\lambda$',labelpad=-5)
+      ax2.set_xlabel('$r_c/\\lambda$')
       axP = ax2.twinx()
       axP.tick_params(direction='in')
       ax2.tick_params(right=False)
@@ -755,108 +825,58 @@ def plot_drop_height_vs_rad(nam='rad ang bub'):
       axM.set_ylim([0,1.05])
       axM.set_yticks([0,.25,.5,.75,1])
       axV.axvspan(3.219, 4, color='lightgrey')
+      axV.text(1-5e-3,.99,'$\\mathrm{(a)}$',transform=axV.transAxes,va='top',ha='right')
+      axV.set_ylabel('$\\frac{V_p}{\\lambda^3}$',size=22,rotation=0,labelpad=15)
+      #axI.set_ylabel('$\\frac{V_p}{\\lambda^3}$',size=22,rotation=0,labelpad=15)
       axM.axvspan(3.219, 4, color='lightgrey')
-      #axV.text(1.12,.5,'$\\frac{\\phi_0}{\\pi}$',c='r',transform=axV.transAxes,size=22,ha='center')
       axM.set_ylabel('$\\frac{\\phi_0}{\\pi}$',size=22,rotation=0,labelpad=10)
-      axProf.text(5e-3,.99,'$\\mathrm{(a)}$',transform=axProf.transAxes,va='top',ha='left')
-      ax.text(5e-3,.99,'$\\mathrm{(a)}$',transform=ax.transAxes,va='top',ha='left')
+      axProf[axInd].text(5e-3,.99,'$\\mathrm{(a)}$',transform=axProf[axInd].transAxes,va='top',ha='left')
+      ax[axInd].text(5e-3,.99,'$\\mathrm{(a)}$',transform=ax[axInd].transAxes,va='top',ha='left')
       ax2.set_xlim([0,4])
-      #idx = np.argmax(x<.5)
-      #mdx = np.argmax(x>5)+1
-      #ax2.plot( (*x[mdx:idx],0), (*z[mdx:idx],.5), c='k',clip_on=False)#,'.',ms=5
       axP.plot( x, z, c='r',clip_on=False, zorder=3)#,'.',ms=5
       fname = 'LesageVolVsContRadSq.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f)
+      with open(fname) as f: df = np.loadtxt(f)
       for i in range(len(df[:,0])):
         if df[i,2]>1:continue
         axV.plot(df[i,0]**.5, df[i,1]*df[i,0]**1.5, 's', mec='r', mfc='None', clip_on=False, zorder=3)
+        axI.plot(df[i,0]**.5, df[i,1]*df[i,0]**1.5, 's', mec='r', mfc='None', zorder=3)
       fname = 'MoriVolByContCubeVsContSqByCapSq.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f)
+      with open(fname) as f: df = np.loadtxt(f)
       axV.plot(.5/df[:,0]**.5, df[:,1]/df[:,0]**1.5, 'd', mec='r', mfc='None', clip_on=False, zorder=3)
+      axI.plot(.5/df[:,0]**.5, df[:,1]/df[:,0]**1.5, 'd', mec='r', mfc='None', zorder=3)
       fname = 'sasetty23stability.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f)
+      with open(fname) as f: df = np.loadtxt(f)
       axV.plot(df[:,2]/df[:,3]/2, df[:,1]/(df[:,3]*1e-3)**3, 'v', mec='r', mfc='None', clip_on=False)
+      axI.plot(df[:,2]/df[:,3]/2, df[:,1]/(df[:,3]*1e-3)**3, 'v', mec='r', mfc='None')
       fname = 'gunde01measurement.txt'
       print('open',fname)
-      with open(fname) as f:
-        df = np.loadtxt(f, skiprows=2)
+      with open(fname) as f: df = np.loadtxt(f, skiprows=2)
       capLen=(df[:,2]*1e-3/df[:,1]/9.81)**.5
       axV.plot(df[:,0]*1e-3/capLen, df[:,4]*1e-6*1e-3/capLen**3, '^', mec='r', mfc='None', clip_on=False)
+      axI.plot(df[:,0]*1e-3/capLen, df[:,4]*1e-6*1e-3/capLen**3, '^', mec='r', mfc='None')
       axV.set_xlim([0,4])
-      fig.subplots_adjust( left=0.14, right=0.97, bottom=0.2, top=0.98)
-      outName = folName+f'pin.pdf'
-      #spc=(1,3,6,10,15,21,28,40,50,60)
-      #spc=(1.5,5,10.5)
-      spc=(1,3.5,8,14.5)
-      axProf.set_xticklabels([])
-    for rad in range(len(rads)):
-      for fname in reversed(sorted(os.listdir(folName))):
-        if 'bub' not in fname: continue
-        if 'txt' not in fname: continue
-        with open(folName+fname, encoding = 'utf-8') as f:
-          df = np.loadtxt(f)
-        if df.ndim<2: continue
-        if df[0,5]<1: col = ( 1-df[0,5], 0, 0)
-        else: col = ( 0, 0, df[0,5]-1)
-        #if not rad: 
-        #  axProf.plot((0,.2),(df[0,5],df[0,5]),c=col)
-        for p in range(1, len(df[:,0])):
-          if (df[p,radInd] - rads[rad]) * (df[p-1,radInd] - rads[rad]) >= 0: continue
-          volInd = np.argmin( abs( volDet - df[p,6] ))
-          if -df[p,1]>heigDet[volInd]:continue
-          ax.plot(df[p,6], -df[p,1], '.', c=col, clip_on=False, zorder=3)
-          x=np.concatenate(( -df[:p,0][::-1] , df[:p,0] ))
-          x=x+spc[rad]
-          y=np.concatenate(( df[:p,1][::-1] - df[p,1] , df[:p,1] - df[p,1] ))
-          axProf.plot(x,y, c=col, clip_on=False)
-          if radInd!=0 or rad!=0 or df[p,1]>=-1: continue
-          axProf.plot(x,y, c=col, clip_on=False)
-          h=int(0.5*(len(x)))
-          #axProf.text(x[h], y[h]+.2, '$(a,h)$', va='bottom', ha='center', c='grey')
-          axProf.plot(x[h],y[h],'o', c='grey')
-          t=int(0.7*(len(x)))
-          axProf.plot(x[h:t],y[h:t], c='grey')
-          theta = np.arctan2(y[t+1]-y[t], x[t+1]-x[t])-np.pi/2
-          print('theta',theta)
-          tri = RegularPolygon((x[t], y[t]), 3, radius=0.1, orientation=theta, color='grey', zorder=3)
-          axProf.add_patch(tri)
-          axProf.text(x[t]+0.1, y[t], '$s$', va='center', ha='left', c='grey')
-          t=int(0.63*(len(x)))
-          xAn = x[t]
-          yAn = y[t]
-          axProf.plot((xAn,xAn+.3), (yAn,yAn), color='grey')
-          Xarr = []
-          Yarr = []
-          for phi in range(51):
-            X = xAn + .17*np.cos(phi*np.pi/50)
-            Y = yAn + .17*np.sin(phi*np.pi/50)
-            for i in range(len(x)):
-              if x[i]>X: break
-            if y[i]>Y: break
-            Xarr.append(X)
-            Yarr.append(Y)
-          axProf.plot(Xarr,Yarr,c='grey')
-          axProf.text(xAn+.1, yAn+.1, "$\\phi$", ha='left', va='bottom', c='grey') 
-    print('savin ',outName,spc)
-    figProf.savefig(outName, transparent=True)
-    fname = folName+'heightVsVol_'+cont+'.pdf'
-    #fname = folName+'radFootVsVol_'+cont+'.pdf'
-    #fname = folName+'contAngVsVol_'+cont+'.pdf'
-    #fname = folName+'radTopVsVol_'+cont+'.pdf'
-    print('savin ',fname)
-    fig.savefig(fname, transparent=True, format='pdf')
+      #fig.subplots_adjust( left=0.14, right=0.97, bottom=0.2, top=0.98)
     fname = folName+'MaxVolVs_'+cont+'.pdf'
     print('savin ',fname)
-    figV.savefig(fname, transparent=True, format='pdf', bbox_inches='tight')
+    figV.savefig(fname, transparent=True, format='pdf', bbox_inches='tight', pad_inches=0)
     fname = folName+'ax2_'+cont+'.pdf'
     print('savin ',fname)
     fig2.savefig(fname, transparent=True, format='pdf')
+  fname = folName+'heightVsVol_'+cont+'.pdf'
+  print('savin ',fname)
+  fig.set_figwidth(10)
+  fig.set_figheight(3)
+  fig.tight_layout(pad=.7)
+  fig.savefig(fname, transparent=True, bbox_inches='tight', pad_inches=0)
+  figProf.set_figwidth(12)
+  axProf[1].set_xlabel('$x/\\lambda$',labelpad=-5)
+  figProf.subplots_adjust(hspace=-.05)
+  outName = folName+f'pin.pdf'
+  print('savin ',outName)
+  figProf.savefig(outName, transparent=True, bbox_inches='tight', pad_inches=0)
   return
 
 def plot_drop_size_vs_rad(): 
