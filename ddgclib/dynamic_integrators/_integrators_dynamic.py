@@ -50,7 +50,8 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   periodic_axes=None, domain_bounds=None, backend=None,
                   skip_triangulation=False,
                   pressure_model=None, redistribute_mass=False,
-                  remesh_mode='delaunay', remesh_kwargs=None):
+                  remesh_mode='delaunay', remesh_kwargs=None,
+                  retopo_remap=None):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -111,6 +112,29 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         Extra keyword arguments forwarded to
         :func:`hyperct.remesh.adaptive_remesh` (e.g. ``L_min``,
         ``L_max``, ``alpha_max``, ``quality_target_deg``).
+    retopo_remap : {None, 'conservative'}
+        Single-phase conservative remap of the thermodynamic state across
+        the connectivity rebuild (default ``None``: previous behaviour,
+        bit-identical).  A reconnection changes the barycentric dual
+        volume of a vertex by 33-100 % at fixed positions; with masses
+        held the EOS reads that as compression and the run blows up at
+        any time step (laneK).  ``'conservative'`` makes the pressure
+        field invariant across the rebuild:
+
+        1. snapshot ``p_i = eos(m_i / Vol_i)`` with ``Vol_i`` re-measured
+           on the OLD connectivity at the current positions
+           (:func:`~ddgclib.operators.mass_redistribution.snapshot_pressure_fresh`),
+           so the step's physical compression is kept;
+        2. rebuild connectivity and duals;
+        3. re-target the mass of EVERY vertex with a dual volume,
+           frozen boundary vertices included, to that pressure and
+           rescale once so total mass is conserved exactly.
+
+        Requires *pressure_model* (an EOS with ``.density``) and
+        ``redistribute_mass=True``; no-op when *skip_triangulation* is
+        True; not available on the periodic path.  The multiphase
+        counterpart is ``_retopologize_multiphase(retopo_remap=...)``.
+        See docs_temp/debug_session/laneK-single-phase-eos-instability.md.
 
     Steps:
         0. (Optional) Merge close vertices via ``HC.V.merge_all``
@@ -121,6 +145,24 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         3. Tag ``v.boundary`` on all vertices
         4. Recompute barycentric dual mesh via ``compute_vd``
     """
+    if retopo_remap not in (None, 'conservative'):
+        raise ValueError(
+            f"retopo_remap must be None or 'conservative', "
+            f"got {retopo_remap!r}"
+        )
+    remap_active = retopo_remap == 'conservative' and not skip_triangulation
+    if remap_active:
+        if periodic_axes:
+            raise ValueError(
+                "retopo_remap='conservative' is not implemented on the "
+                "periodic retopology path"
+            )
+        if not (redistribute_mass and hasattr(pressure_model, 'density')):
+            raise ValueError(
+                "retopo_remap='conservative' requires redistribute_mass=True "
+                "and an EquationOfState pressure_model"
+            )
+
     # Dispatch to periodic path if periodic_axes is set
     if periodic_axes:
         from ddgclib.geometry.periodic import retopologize_periodic
@@ -139,7 +181,15 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
 
     # Snapshot pressure field before topology change (for mass redistribution)
     _p_snap = None
-    if redistribute_mass and pressure_model is not None:
+    if remap_active:
+        # NOTE(laneR): fresh snapshot on the OLD connectivity at the
+        # current positions, not the stale v.p of the last force
+        # evaluation (which would erase this step's compression).
+        from ddgclib.operators.mass_redistribution import (
+            snapshot_pressure_fresh,
+        )
+        _p_snap = snapshot_pressure_fresh(HC, dim, pressure_model)
+    elif redistribute_mass and pressure_model is not None:
         from ddgclib.operators.mass_redistribution import snapshot_pressure
         _p_snap = snapshot_pressure(HC)
 
@@ -292,9 +342,17 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         from ddgclib.operators.mass_redistribution import (
             redistribute_mass_single_phase,
         )
-        redistribute_mass_single_phase(
-            HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
-        )
+        if remap_active:
+            # NOTE(laneR): frozen (bV) vertices are re-targeted too; the
+            # interior-only remap leaves the wall-cell flip jumps in.
+            redistribute_mass_single_phase(
+                HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
+                include_frozen=True,
+            )
+        else:
+            redistribute_mass_single_phase(
+                HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
+            )
 
 
 def _displacement_gate_should_skip(HC, displacement_eps):
@@ -795,6 +853,17 @@ def _interior_verts(HC, bV):
     return [v for v in HC.V if v not in bV]
 
 
+def _density_diffusion(HC, verts, delta, pressure_model, dt, dim):
+    """Gradient-corrected density diffusion step on the interior vertices
+    (method axis ``density_diffusion``; needs an EOS for the sound speed)."""
+    from ddgclib.operators.stabilisation import density_diffusion_step
+    from ddgclib.operators.stress import _get_dual_vol
+    for v in HC.V:                      # make sure every cell has a volume
+        _get_dual_vol(v, HC, dim)
+    c0 = float(pressure_model.sound_speed(pressure_model.rho0))
+    return density_diffusion_step(HC, verts, delta, c0, dt, dim=dim)
+
+
 def _apply_bc_set(bc_set, HC, bV, dt):
     """Apply boundary condition set if provided."""
     if bc_set is not None:
@@ -918,7 +987,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
-          displacement_eps=None,
+          displacement_eps=None, density_diffusion=None,
           **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -991,6 +1060,11 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              remesh_kwargs=remesh_kwargs,
                              displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
+        if density_diffusion:
+            if not hasattr(pressure_model, 'sound_speed'):
+                raise ValueError("density_diffusion needs an EquationOfState "
+                                 "pressure_model (sound speed)")
+            _density_diffusion(HC, verts, density_diffusion, pressure_model, dt, dim)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -1023,7 +1097,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
-                     displacement_eps=None,
+                     displacement_eps=None, density_diffusion=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
@@ -1063,12 +1137,22 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         ``L_min``, ``L_max``, ``quality_target_deg``,
         ``max_iterations``, ``smooth_iterations``).  Ignored when
         ``remesh_mode='delaunay'``.
+    density_diffusion : float or None
+        Coefficient ``delta`` of the gradient-corrected density diffusion
+        (:func:`ddgclib.operators.stabilisation.density_diffusion_step`)
+        applied to the interior vertices before every force evaluation.
+        Requires an EOS *pressure_model* (sound speed).  Damps the
+        checkerboard density mode of the centred pressure flux; method
+        axis ``density_diffusion``.
 
     Returns
     -------
     float
         Final time.
     """
+    if density_diffusion and not hasattr(pressure_model, 'sound_speed'):
+        raise ValueError("density_diffusion needs an EquationOfState "
+                         "pressure_model (sound speed)")
     t = 0.0
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
@@ -1081,6 +1165,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              remesh_kwargs=remesh_kwargs,
                              displacement_eps=displacement_eps)
         verts = _interior_verts(HC, bV)
+        if density_diffusion:
+            _density_diffusion(HC, verts, density_diffusion, pressure_model, dt, dim)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

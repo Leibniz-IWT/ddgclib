@@ -39,6 +39,58 @@ def snapshot_pressure(HC) -> dict[int, float]:
     return {id(v): float(getattr(v, 'p', 0.0)) for v in HC.V}
 
 
+def _connectivity_dual_volumes(HC, dim: int) -> dict | None:
+    """Exact barycentric dual volumes of the CURRENT connectivity at the
+    CURRENT vertex positions, or ``None`` when they cannot be measured.
+
+    Reads the top-simplex cache ``HC._simplices`` (the connectivity of the
+    previous retopology).  When the cache is missing, or references
+    vertices that have left ``HC.V`` (outlet deletion, merges), it is
+    rebuilt from the 1-skeleton in 2D; in 3D there is no such rebuild and
+    ``None`` is returned.
+    """
+    from hyperct.ddg import simplex_dual_volumes
+
+    simplices = getattr(HC, '_simplices', None)
+    if simplices is not None:
+        live = {id(v) for v in HC.V}
+        if any(id(vv) not in live for s in simplices for vv in s):
+            simplices = None
+    if simplices is None:
+        if dim != 2:
+            return None
+        from hyperct.ddg import rebuild_simplex_cache_2d
+        rebuild_simplex_cache_2d(HC)
+    return simplex_dual_volumes(HC, dim)
+
+
+def snapshot_pressure_fresh(HC, dim: int, eos) -> dict[int, float]:
+    """Capture ``{id(v): eos.pressure(v.m / Vol_i)}`` with ``Vol_i``
+    re-measured on the current (pre-rebuild) connectivity at the current
+    positions: the pressure the fluid has NOW, after the last move.
+
+    This is the snapshot of the single-phase conservative remap
+    (``_retopologize(retopo_remap='conservative')``).  The stale ``v.p``
+    of :func:`snapshot_pressure` was written by the last force
+    evaluation, before the move, so re-targeting masses to it erases the
+    step's compression (laneK P3/P12: stable but ``p`` pinned at the IC).
+
+    Vertices without a measurable volume are left out of the snapshot and
+    therefore out of the redistribution.  When the connectivity cannot be
+    re-measured (3D without a valid simplex cache: the first call on a
+    builder mesh, or after vertices were deleted) the cached
+    ``v.dual_vol`` is used, which is exact as long as no vertex has moved
+    since it was cached.
+    """
+    vols = _connectivity_dual_volumes(HC, dim)
+    snap: dict[int, float] = {}
+    for v in HC.V:
+        vol = vols.get(v, 0.0) if vols is not None else getattr(v, 'dual_vol', 0.0)
+        if vol > 1e-30:
+            snap[id(v)] = float(eos.pressure(v.m / vol))
+    return snap
+
+
 def snapshot_pressure_multiphase(HC, n_phases: int) -> dict[int, np.ndarray]:
     """Capture ``{id(v): v.p_phase.copy()}`` before retriangulation."""
     snap = {}
@@ -108,6 +160,7 @@ def redistribute_mass_single_phase(
     eos,
     bV: set | None = None,
     pressure_snapshot: dict[int, float] | None = None,
+    include_frozen: bool = False,
 ) -> dict:
     """Pressure-preserving mass redistribution after retriangulation.
 
@@ -133,6 +186,13 @@ def redistribute_mass_single_phase(
     pressure_snapshot : dict or None
         ``{id(v): p_before}`` captured before retriangulation.
         If ``None``, falls back to current ``v.p`` (less accurate).
+    include_frozen : bool
+        If True, vertices in *bV* are re-targeted too (every vertex with
+        a positive dual volume that is in the snapshot).  Required by the
+        conservative remap: a reconnection changes the dual volume of a
+        frozen wall vertex exactly as it does an interior one, and the
+        EOS reads that jump through the wall cell's pressure (laneK P2:
+        the interior-only remap blows up).
 
     Returns
     -------
@@ -144,6 +204,8 @@ def redistribute_mass_single_phase(
         # Fallback: use current v.p (already reflects new dual volumes
         # if EOS was evaluated, but better than nothing)
         pressure_snapshot = snapshot_pressure(HC)
+    if include_frozen:
+        bV = None
 
     # Compute target masses for redistributable vertices
     targets = {}

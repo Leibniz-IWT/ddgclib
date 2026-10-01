@@ -60,7 +60,6 @@ from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
 from ddgclib.multiphase import mass_conserving_merge
 from ddgclib.operators.stress import cache_dual_volumes
 from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.dynamic_integrators._integrators_dynamic import (
     _retopologize_multiphase,
 )
@@ -782,7 +781,11 @@ def run_short_dynamics(HC, bV, mps, meta, *,
     in place (positions, velocities, pressures, dual volumes).
     """
     dim = 2
-    bc_set, dudt_fn, retopo_fn = setup_fritz_dynamics(HC, bV, mps, meta)
+    bc_set, dudt_fn, _setup_retopo_fn = setup_fritz_dynamics(HC, bV, mps, meta)
+    # Solver methods (METHODS.md): per-step Delaunay, NO redistribution
+    # (the historic partial left it unbound -> integrator default False).
+    from ddgclib.methods import PRESETS, record_methods
+    methods = PRESETS['electrolysis_bubble_fritz_2D']
 
     c_s_liq = float(np.sqrt(K_liq / rho_liq))
     c_s_gas = float(np.sqrt(K_gas / rho_gas))
@@ -800,10 +803,13 @@ def run_short_dynamics(HC, bV, mps, meta, *,
           f" dt = {dt:.3e} s, n_steps = {n_steps}"
           f"  → t_window = {dt * n_steps:.3e} s")
 
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, retopologize_fn=retopo_fn,
-        remesh_mode='delaunay', remesh_kwargs=None,
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, bc_set=bc_set, mps=mps,
+    )
+    record_methods(
+        os.path.join(_CASE_DIR, 'results', 'methods_fritz_2D.json'),
+        methods, HC,
+        extra={'dt': float(dt), 'n_steps': n_steps, 'dx_min': float(dx_min)},
     )
     return {'t_final': float(t_final), 'dt': float(dt), 'dx_min': float(dx_min)}
 

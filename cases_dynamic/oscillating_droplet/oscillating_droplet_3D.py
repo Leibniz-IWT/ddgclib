@@ -24,8 +24,6 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from functools import partial
-
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
     L_domain, beta_3d, t_end_3d, retopo_policy_3d,
@@ -43,8 +41,8 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
 from cases_dynamic.oscillating_droplet.src._metrics import (
     oscillation_score_3d, save_score,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,11 +50,20 @@ _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results_3d')
 _SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 
+# Retopology policy string -> solver-method preset (ddgclib.methods,
+# documented in METHODS.md).
+_POLICY_PRESETS = {
+    'dual_only': 'oscillating_droplet_3D',
+    'delaunay': 'oscillating_droplet_3D_delaunay',
+}
+
 
 def main(retopo_policy: str | None = None):
     dim = 3
     if retopo_policy is None:
         retopo_policy = retopo_policy_3d
+    methods = PRESETS[_POLICY_PRESETS[retopo_policy]]
+    print(methods.describe())
     print("=" * 60)
     print("3D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
@@ -84,13 +91,15 @@ def main(retopo_policy: str | None = None):
     # discrete-consistent scalar YL preload (see _setup.py step 4
     # note) and stencil variants ('stokes' == 'integrated' to 1e-14).
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=2,
             refinement_droplet=2,
+            split_method=methods.split_method,
+            redistribute_mass=methods.redistribute_mass,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -103,9 +112,9 @@ def main(retopo_policy: str | None = None):
     # skip-triangulation path has different boundary-volume bookkeeping
     # (batch_e_star zeroing) — trust its score only after checking
     # mass_drift, n_interface_* and the dual_vol_* fields in the score.
-    if retopo_policy == 'dual_only':
-        retopo_fn = partial(retopo_fn, skip_triangulation=True)
-    print(f"Retopo policy: {retopo_policy}")
+    # The preset builds the partial the old dispatch built by hand.
+    print(f"Retopo policy: {retopo_policy} -> preset "
+          f"{_POLICY_PRESETS[retopo_policy]}")
 
     # Non-default policies write suffixed artifacts (snapshots, figures,
     # score) so an A/B run never clobbers the default baseline outputs.
@@ -165,11 +174,9 @@ def main(retopo_policy: str | None = None):
 
     # -- Run --
     print("\nRunning simulation...")
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
 
     record(t_final)
@@ -196,7 +203,14 @@ def main(retopo_policy: str | None = None):
     score['refinement_droplet'] = 2
     score['retopo_policy'] = retopo_policy
     score_path = os.path.join(_RESULTS, f'score{suffix}.json')
-    save_score(score_path, score)
+    save_score(score_path, score, methods=methods)   # self-describing score
+    record_methods(
+        os.path.join(_RESULTS, f'methods{suffix}.json'), methods, HC,
+        extra={'retopo_policy': retopo_policy, 'dt': dt,
+               'n_steps': n_steps, 't_end': t_end,
+               'refinement_outer': 2, 'refinement_droplet': 2,
+               'K_d': K_d, 'K_o': K_o},
+    )
     print(f"\n3D oscillation score saved to {score_path}")
     print(f"  summary                  = {score['summary']:.4e}")
     print(f"  l2_error_normalized      = {score['l2_error_normalized']:.4e}")

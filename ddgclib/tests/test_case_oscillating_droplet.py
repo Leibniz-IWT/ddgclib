@@ -20,6 +20,7 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
 from ddgclib.dynamic_integrators import euler_velocity_only
+from ddgclib.methods import PRESETS
 
 
 class TestStaticDroplet(unittest.TestCase):
@@ -174,16 +175,20 @@ class TestStaticDroplet2DRetopologyFloor(unittest.TestCase):
             n_refine_outer, n_refine_droplet,
         )
         from ddgclib.operators.multiphase_stress import multiphase_stress_force
-        from ddgclib.dynamic_integrators import euler
         from ddgclib.data import compute_conservation
 
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        # The pinned configuration is a named preset (METHODS.md):
+        # euler + per-step Delaunay (no remap) + redistribution.
+        methods = PRESETS['static_droplet_floor_2D']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=2, R0=R0, epsilon=0.0, l=l,
                 rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
                 gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
                 refinement_outer=n_refine_outer,
                 refinement_droplet=n_refine_droplet,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
 
         def max_iface_F(HC_):
@@ -227,12 +232,9 @@ class TestStaticDroplet2DRetopologyFloor(unittest.TestCase):
             for v in HC_cb.V:
                 v.u[:] = 0.0
 
-        euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS, dim=2,
-            bc_set=bc_set, callback=zero_u_callback,
-            retopologize_fn=retopo_fn,
-            remesh_mode=params['remesh_mode'],
-            remesh_kwargs=params['remesh_kwargs'],
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS,
+            bc_set=bc_set, callback=zero_u_callback, mps=mps,
         )
 
         self.assertEqual(len(history), self.N_STEPS)
@@ -351,16 +353,20 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
             R0, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o, L_domain,
         )
         from ddgclib.operators.multiphase_stress import multiphase_stress_force
-        from ddgclib.dynamic_integrators import euler
         from ddgclib.data import compute_conservation
 
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        # The pinned configuration is a named preset (METHODS.md):
+        # euler + per-step Delaunay (no remap) + redistribution.
+        methods = PRESETS['static_droplet_floor_3D']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=3, R0=R0, epsilon=0.0, l=l,
                 rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
                 gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
                 refinement_outer=self.REFINE_OUTER,
                 refinement_droplet=self.REFINE_DROPLET,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
 
         def max_iface_F(HC_):
@@ -406,12 +412,9 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
             for v in HC_cb.V:
                 v.u[:] = 0.0
 
-        euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS, dim=3,
-            bc_set=bc_set, callback=zero_u_callback,
-            retopologize_fn=retopo_fn,
-            remesh_mode=params['remesh_mode'],
-            remesh_kwargs=params['remesh_kwargs'],
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=self.N_STEPS,
+            bc_set=bc_set, callback=zero_u_callback, mps=mps,
         )
 
         self.assertEqual(len(f_history), self.N_STEPS)
@@ -482,18 +485,17 @@ class TestDualOnlyRetopoPolicy2D(unittest.TestCase):
     """
 
     def test_dual_only_dynamic_run_healthy(self):
-        from functools import partial
-        from ddgclib.dynamic_integrators import symplectic_euler
-
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        # The runner's 'dual_only' policy is this preset (METHODS.md).
+        methods = PRESETS['oscillating_droplet_2D_dual_only']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=2, R0=0.01, epsilon=0.05, l=2,
                 rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
                 gamma=0.05, L_domain=0.05,
                 refinement_outer=1, refinement_droplet=2,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
-        # Same rebinding as oscillating_droplet_2D.py's 'dual_only' policy.
-        dual_only_fn = partial(retopo_fn, skip_triangulation=True)
 
         diag0 = compute_diagnostics(HC, dim=2)
         edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
@@ -510,9 +512,8 @@ class TestDualOnlyRetopoPolicy2D(unittest.TestCase):
         dt = min(0.25 * dx_min / c_s,
                  0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
 
-        symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
-            bc_set=bc_set, retopologize_fn=dual_only_fn,
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, bc_set=bc_set, mps=mps,
         )
 
         diag1 = compute_diagnostics(HC, dim=2)
@@ -588,8 +589,6 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
     REFINE = 2
 
     def test_shortened_run_metrics(self):
-        from functools import partial
-
         from cases_dynamic.oscillating_droplet.src._params import (
             R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
             L_domain, t_end_2d,
@@ -600,25 +599,25 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
         from cases_dynamic.oscillating_droplet.src._metrics import (
             oscillation_score,
         )
-        from ddgclib.dynamic_integrators import symplectic_euler
 
         dim = 2
         omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim,
                                    rho_outer=rho_o)
         beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
 
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        # The production default 'delaunay_remap' policy is this preset
+        # (METHODS.md); the runner uses the same object.
+        methods = PRESETS['oscillating_droplet_2D']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=dim, R0=R0, epsilon=epsilon, l=l,
                 rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
                 gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
                 refinement_outer=self.REFINE,
                 refinement_droplet=self.REFINE,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
-
-        # Same rebinding as the runner's 'delaunay_remap' policy
-        # (the production default since lane E).
-        retopo_fn = partial(retopo_fn, retopo_remap='conservative')
 
         # CFL dt — identical formula to oscillating_droplet_2D.py.
         c_s = float(np.sqrt(K_d / rho_d))
@@ -646,11 +645,9 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
             if step % record_every == 0:
                 record(t)
 
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-            bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-            remesh_mode=params['remesh_mode'],
-            remesh_kwargs=params['remesh_kwargs'],
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
         record(t_final)
 
@@ -689,13 +686,17 @@ class TestConservativeRetopoRemap2D(unittest.TestCase):
     docs_temp/debug_session/laneD-conservative-retopo-remap.md.
     """
 
-    @staticmethod
-    def _build():
+    METHODS = PRESETS['oscillating_droplet_2D']   # delaunay + conservative remap
+
+    @classmethod
+    def _build(cls):
         return setup_oscillating_droplet(
             dim=2, R0=0.01, epsilon=0.05, l=2,
             rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
             gamma=0.05, L_domain=0.05,
             refinement_outer=1, refinement_droplet=2,
+            split_method=cls.METHODS.split_method,
+            redistribute_mass=cls.METHODS.redistribute_mass,
         )
 
     def test_remap_pressure_neutral_across_rebuild(self):
@@ -726,11 +727,7 @@ class TestConservativeRetopoRemap2D(unittest.TestCase):
         """40-step run with per-step FULL Delaunay + remap stays at the
         physical KE scale (measured 1.3e-7 J; remap OFF measures
         4.5e-5 J on this fixture) with machine-precision mass."""
-        from functools import partial
-        from ddgclib.dynamic_integrators import symplectic_euler
-
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
-        remap_fn = partial(retopo_fn, retopo_remap='conservative')
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = self._build()
 
         diag0 = compute_diagnostics(HC, dim=2)
         edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
@@ -744,9 +741,8 @@ class TestConservativeRetopoRemap2D(unittest.TestCase):
         dt = min(0.25 * dx_min / c_s,
                  0.5 * float(np.sqrt(800.0 * dx_min ** 3 / 0.05)))
 
-        symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
-            bc_set=bc_set, retopologize_fn=remap_fn,
+        self.METHODS.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, bc_set=bc_set, mps=mps,
         )
 
         diag1 = compute_diagnostics(HC, dim=2)
@@ -795,17 +791,16 @@ class TestDelaunayRemapEndurance2D(unittest.TestCase):
     """
 
     def test_remap_endurance_200_steps(self):
-        from functools import partial
-        from ddgclib.dynamic_integrators import symplectic_euler
-
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        methods = PRESETS['oscillating_droplet_2D']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=2, R0=0.01, epsilon=0.05, l=2,
                 rho_d=800.0, rho_o=1000.0, mu_d=0.5, mu_o=0.1,
                 gamma=0.05, L_domain=0.05,
                 refinement_outer=1, refinement_droplet=2,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
-        remap_fn = partial(retopo_fn, retopo_remap='conservative')
 
         diag0 = compute_diagnostics(HC, dim=2)
         edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
@@ -828,9 +823,9 @@ class TestDelaunayRemapEndurance2D(unittest.TestCase):
                 d = compute_diagnostics(HC_cb, dim=2)
                 ke_trace.append(float(d['KE']))
 
-        symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=200, dim=2,
-            bc_set=bc_set, callback=callback, retopologize_fn=remap_fn,
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=200,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
 
         diag1 = compute_diagnostics(HC, dim=2)
@@ -979,19 +974,16 @@ class TestProjectionCadence2D(unittest.TestCase):
         """dual_only with cadence 4: off-cadence calls skip the
         redistribution (mass stays Lagrangian), mass is machine-
         conserved, and the trajectory differs from every-call
-        projection (the knob takes effect)."""
-        from functools import partial
-        from ddgclib.dynamic_integrators import symplectic_euler
-
+        projection (the knob takes effect).  The A/B is expressed as a
+        preset and its ``.replace(projection_every=4)`` variant."""
+        base = PRESETS['oscillating_droplet_2D_dual_only']
         finals = []
-        for extra in ({}, {'projection_every': 4}):
-            HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
-            fn = partial(retopo_fn, skip_triangulation=True, **extra)
+        for methods in (base, base.replace(projection_every=4)):
+            HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = self._build()
             dt = self._dt(HC, params)
             diag0 = compute_diagnostics(HC, dim=2)
-            symplectic_euler(
-                HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
-                bc_set=bc_set, retopologize_fn=fn,
+            methods.integrate(
+                HC, bV, dudt_fn, dt=dt, n_steps=40, bc_set=bc_set, mps=mps,
             )
             diag1 = compute_diagnostics(HC, dim=2)
             mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \
@@ -999,7 +991,7 @@ class TestProjectionCadence2D(unittest.TestCase):
             self.assertLess(mass_drift, 1e-10)
             self.assertTrue(np.isfinite(diag1['KE']))
             self.assertLess(diag1['KE'], 1e-5)
-            if extra:
+            if methods.projection_every > 1:
                 self.assertEqual(mps._projection_call_idx, 40)
             finals.append(float(diag1['R_max']))
         self.assertNotEqual(finals[0], finals[1])
@@ -1009,18 +1001,13 @@ class TestProjectionCadence2D(unittest.TestCase):
         neutrality holds every call (KE stays at the physical scale,
         machine mass) while the compression response evolves between
         projections."""
-        from functools import partial
-        from ddgclib.dynamic_integrators import symplectic_euler
-
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = self._build()
-        fn = partial(retopo_fn, retopo_remap='conservative',
-                     projection_every=5)
+        methods = PRESETS['oscillating_droplet_2D'].replace(projection_every=5)
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = self._build()
         dt = self._dt(HC, params)
         diag0 = compute_diagnostics(HC, dim=2)
         edges0 = {frozenset((id(v), id(nb))) for v in HC.V for nb in v.nn}
-        symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=40, dim=2,
-            bc_set=bc_set, retopologize_fn=fn,
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=40, bc_set=bc_set, mps=mps,
         )
         diag1 = compute_diagnostics(HC, dim=2)
         mass_drift = abs(diag1['total_mass'] - diag0['total_mass']) \

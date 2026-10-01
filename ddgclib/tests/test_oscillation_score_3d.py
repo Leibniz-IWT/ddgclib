@@ -219,22 +219,27 @@ class TestDualOnlyRetopoPolicy3D(unittest.TestCase):
         from cases_dynamic.oscillating_droplet.src._params import (
             retopo_policy_3d,
         )
+        from ddgclib.methods import PRESETS
         self.assertEqual(retopo_policy_3d, 'dual_only')
+        # ... and the preset the runner maps it to says the same.
+        m = PRESETS['oscillating_droplet_3D']
+        self.assertEqual((m.dim, m.connectivity, m.remap, m.redistribute_mass),
+                         (3, 'dual_only', None, True))
 
     def test_dual_only_run_bookkeeping(self):
-        from functools import partial
-
         from cases_dynamic.oscillating_droplet.src._setup import (
             setup_oscillating_droplet,
         )
-        from ddgclib.dynamic_integrators import symplectic_euler
+        from ddgclib.methods import PRESETS
         from ddgclib.operators.stress import _use_exact_barycentric_volume
 
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+        methods = PRESETS['oscillating_droplet_3D']
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = \
             setup_oscillating_droplet(
                 dim=3, refinement_outer=1, refinement_droplet=1,
+                split_method=methods.split_method,
+                redistribute_mass=methods.redistribute_mass,
             )
-        retopo_fn = partial(retopo_fn, skip_triangulation=True)
 
         m0 = sum(v.m for v in HC.V)
         iface0 = {v.x for v in HC.V if getattr(v, 'is_interface', False)}
@@ -243,11 +248,8 @@ class TestDualOnlyRetopoPolicy3D(unittest.TestCase):
         }
         self.assertGreater(len(iface0), 0)
 
-        symplectic_euler(
-            HC, bV, dudt_fn, dt=1e-5, n_steps=5, dim=3,
-            bc_set=bc_set, retopologize_fn=retopo_fn,
-            remesh_mode=params['remesh_mode'],
-            remesh_kwargs=params['remesh_kwargs'],
+        methods.integrate(
+            HC, bV, dudt_fn, dt=1e-5, n_steps=5, bc_set=bc_set, mps=mps,
         )
 
         # Mass at machine precision.

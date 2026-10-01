@@ -43,6 +43,8 @@ Constitutive relation TODOs
 
 import numpy as np
 
+from ddgclib.operators._registry import MethodRegistry
+
 
 # ---------------------------------------------------------------------------
 # Geometry: dual area vectors and dual volumes
@@ -749,6 +751,44 @@ def pressure_flux(p_i: float, p_j: float, A_ij: np.ndarray) -> np.ndarray:
     return -0.5 * (p_i + p_j) * A_ij
 
 
+def pressure_flux_riemann(p_i: float, p_j: float, rho_i: float, rho_j: float,
+                          c_i: float, c_j: float, u_i: np.ndarray, u_j: np.ndarray,
+                          A_ij: np.ndarray) -> np.ndarray:
+    """Acoustic-Riemann (Lagrangian Godunov) contact pressure flux.
+
+    ::
+
+        p*_ij  = 0.5 (p_i + p_j) - 0.5 rho_f c_f (u_j - u_i) . n_ij
+        F_p_ij = -p*_ij A_ij,     rho_f = 0.5 (rho_i + rho_j),  c_f = 0.5 (c_i + c_j)
+
+    The velocity-jump term is the contact pressure of the linearised
+    (acoustic) Riemann problem across the dual face: cells separating
+    along the face normal see a lower face pressure and are pushed back
+    together, cells approaching see a higher one.  It is pairwise
+    antisymmetric (momentum conserving), vanishes for rigid translation
+    and for any velocity field with no jump normal to the face, and
+    damps the grid-scale acoustic (checkerboard) velocity mode that the
+    centred flux cannot see.  Its price is a numerical bulk viscosity of
+    order ``rho c |d_ij|`` on compressive modes, which at low Mach
+    number can exceed the physical viscosity (use the density-diffusion
+    stabilisation for density noise instead).
+    """
+    An = float(np.linalg.norm(A_ij))
+    if An == 0.0:
+        return np.zeros_like(A_ij)
+    w = float((u_j - u_i) @ A_ij) / An          # normal velocity jump
+    p_star = 0.5 * (p_i + p_j) - 0.25 * (rho_i + rho_j) * 0.5 * (c_i + c_j) * w
+    return -p_star * A_ij
+
+
+pressure_flux_methods = MethodRegistry("pressure_flux")
+pressure_flux_methods.register("centred", pressure_flux)
+pressure_flux_methods.register("acoustic-riemann", pressure_flux_riemann)
+# stress_force takes the method KEY as a keyword named ``pressure_flux``,
+# which shadows the function inside that scope: keep an alias.
+_pressure_flux_centred = pressure_flux
+
+
 def viscous_flux(
     mu: float,
     delta_u: np.ndarray,
@@ -767,15 +807,21 @@ def viscous_flux(
 
 
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
-                 pressure_model=None) -> np.ndarray:
+                 pressure_model=None, pressure_flux: str = "centred") -> np.ndarray:
     """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
 
     For each dual flux plane between parcels i and j, the force has two
     contributions computed directly from edge data:
 
-    Pressure (face-average, conservative):
+    Pressure (face-average, conservative; ``pressure_flux='centred'``):
 
         F_p_ij = -0.5 * (p_i + p_j) * A_ij
+
+    or, with ``pressure_flux='acoustic-riemann'`` (needs an EOS as
+    *pressure_model* for the density and sound speed), the Lagrangian
+    Godunov contact pressure of :func:`pressure_flux_riemann`.  The
+    registry ``pressure_flux_methods`` lists the available keys; the
+    method axis ``pressure_flux`` of :mod:`ddgclib.methods` records them.
 
     Viscous (face-centered diffusion):
 
@@ -811,15 +857,29 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         - :class:`~ddgclib.eos.EquationOfState`: weakly compressible
           pressure from density ``rho = m / dual_vol``.  Updates ``v.p``
           and ``v.rho`` in-place.
+    pressure_flux : {'centred', 'acoustic-riemann'}
+        Pressure flux formulation (see above).  ``'acoustic-riemann'``
+        requires an EOS *pressure_model* (density and sound speed).
 
     Returns
     -------
     np.ndarray
         Force vector, shape ``(dim,)``.
     """
+    if pressure_flux not in pressure_flux_methods:
+        raise KeyError(
+            f"unknown pressure_flux {pressure_flux!r}; available: "
+            f"{pressure_flux_methods.available()}")
+    riemann = pressure_flux == "acoustic-riemann"
+    if riemann and not hasattr(pressure_model, "sound_speed"):
+        raise ValueError("pressure_flux='acoustic-riemann' needs an "
+                         "EquationOfState pressure_model (density + sound speed)")
     p_i = _resolve_pressure(v, pressure_model, HC, dim)
     u_i = v.u[:dim]
     x_i = v.x_a[:dim]
+    if riemann:
+        rho_i = v.rho
+        c_i = float(pressure_model.sound_speed(rho_i))
 
     # Use cached oriented edge area vectors when available (set by
     # batch_e_star(..., orient=True) during retopologization).
@@ -836,7 +896,13 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
-        F += pressure_flux(p_i, p_j, A_ij)
+        if riemann:
+            rho_j = v_j.rho
+            F += pressure_flux_riemann(p_i, p_j, rho_i, rho_j, c_i,
+                                       float(pressure_model.sound_speed(rho_j)),
+                                       u_i, v_j.u[:dim], A_ij)
+        else:
+            F += _pressure_flux_centred(p_i, p_j, A_ij)
         F += viscous_flux(mu, delta_u, d_ij, A_ij)
 
     return F
@@ -848,6 +914,7 @@ def stress_acceleration(
     mu: float = 8.9e-4,
     HC=None,
     pressure_model=None,
+    pressure_flux: str = "centred",
 ) -> np.ndarray:
     """Acceleration from Cauchy stress: a_i = F_stress_i / m_i.
 
@@ -882,6 +949,8 @@ def stress_acceleration(
         Simplicial complex with duals computed.
     pressure_model : None, callable, or EquationOfState
         See :func:`stress_force`.
+    pressure_flux : {'centred', 'acoustic-riemann'}
+        See :func:`stress_force`.
 
     Returns
     -------
@@ -889,7 +958,8 @@ def stress_acceleration(
         Acceleration vector, shape ``(dim,)``.
     """
     return stress_force(v, dim=dim, mu=mu, HC=HC,
-                        pressure_model=pressure_model) / v.m
+                        pressure_model=pressure_model,
+                        pressure_flux=pressure_flux) / v.m
 
 
 # Simplified alias for use as dudt_fn in dynamic integrators

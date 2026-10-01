@@ -38,7 +38,6 @@ import sys
 
 import warnings
 import numpy as np
-from functools import partial
 
 # Suppress RuntimeWarnings from degenerate simplices in compute_vd
 # (expected near cylindrical surface after Delaunay retriangulation)
@@ -68,8 +67,7 @@ from ddgclib.initial_conditions import (
     HagenPoiseuille3D,
 )
 from ddgclib.geometry.domains import cylinder_volume
-from ddgclib.operators.stress import dudt_i
-from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.data import StateHistory, save_state
 
 
@@ -407,8 +405,11 @@ def run_simulation(HC, bV, bc_set, n_steps_override=None, dt_override=None):
     _dt = dt_override if dt_override is not None else dt
     _n_steps = n_steps_override if n_steps_override is not None else n_steps
 
-    # Bind physics parameters via partial
-    dudt_fn = partial(dudt_i, dim=3, mu=mu, HC=HC)
+    # Solver methods (METHODS.md): symplectic Euler with the case-local
+    # cylinder retopology (connectivity='custom'); workers from the CLI.
+    methods = PRESETS['hagen_poiseuille_3D'].replace(workers=n_workers)
+    print(methods.describe())
+    dudt_fn = methods.dudt_fn(HC, mu=mu)
 
     history = StateHistory(fields=['u', 'p'], record_every=record_every)
 
@@ -441,16 +442,19 @@ def run_simulation(HC, bV, bc_set, n_steps_override=None, dt_override=None):
     # (cylindrical wall + inlet/outlet end caps) instead of the default
     # HC.boundary() which fails to identify all surface vertices after
     # 3D Delaunay retriangulation.
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn,
-        dt=_dt, n_steps=_n_steps, dim=3,
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=_dt, n_steps=_n_steps,
         bc_set=bc_set,
-        retopologize_fn=retopologize_cylinder,
+        custom=retopologize_cylinder,
         callback=_progress_callback,
         save_every=save_every,
         save_dir=_RESULTS,
-        workers=n_workers,
     )
+    record_methods(os.path.join(_RESULTS, 'methods.json'), methods, HC,
+                   extra={'dt': _dt, 'n_steps': _n_steps, 'mu': mu, 'G': G,
+                          'n_refine': n_refine,
+                          'retopologize_fn': 'retopologize_cylinder '
+                                             '(case-local filtered Delaunay)'})
 
     print(f"Simulation complete: t = {t_final:.4f}")
     return t_final, history

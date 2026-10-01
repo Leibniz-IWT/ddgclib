@@ -33,8 +33,8 @@ from cases_dynamic.dam_break.src._params import (
 from cases_dynamic.dam_break.src._setup import (
     setup_dam_break_multiphase, cfl_timestep,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 from ddgclib.visualization.unified import plot_fluid
 
@@ -50,8 +50,13 @@ def main():
     print("2D Dam Break — Multiphase (liquid + air)")
     print("=" * 60)
 
+    # Solver methods (see METHODS.md): per-step Delaunay + conservative
+    # remap, per-phase mass redistribution.
+    methods = PRESETS['dam_break_2D']
+    print(methods.describe())
+
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_dam_break_multiphase(
             dim=dim, a=a, L=L, H=H, W=W,
             col_w=col_w, col_h=col_h, col_d=col_d,
@@ -59,6 +64,7 @@ def main():
             gamma=gamma, K_l=K_l, K_g=K_g,
             g=g, gravity_axis=gravity_axis, P_atm=P_atm,
             n_refine=n_refine_2d, alpha_art=alpha_art,
+            redistribute_mass=methods.redistribute_mass,
         )
     n_verts = sum(1 for _ in HC.V)
     n_liq = sum(1 for v in HC.V if v.phase == 1)
@@ -117,12 +123,11 @@ def main():
     # blows up at its first reconnection event (KE x28 in one step,
     # measured at alpha_art in {0.5, 0.1}).  With the remap the same
     # configuration absorbs reconnection and survives the full horizon.
-    from functools import partial
-    retopo_fn = partial(retopo_fn, retopo_remap='conservative')
+    # (remap='conservative' is carried by the 'dam_break_2D' preset.)
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-            bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         t_final = 0.0
@@ -130,6 +135,13 @@ def main():
         print(f"  recorded {history.n_snapshots} snapshots before abort")
     print(f"Simulation finished at t={t_final:.4f} s, "
           f"snapshots recorded: {history.n_snapshots}")
+    record_methods(
+        os.path.join(_RESULTS, 'methods_2D.json'), methods, HC,
+        extra={'dt': dt, 'n_steps': n_steps, 't_end': t_end,
+               't_final': t_final, 'n_refine': n_refine_2d,
+               'alpha_art': alpha_art, 'cfl': cfl,
+               'body_force': f'g={g} on axis {gravity_axis} (setup closure)'},
+    )
 
     # -- Static plots --
     try:

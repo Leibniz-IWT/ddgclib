@@ -1,240 +1,257 @@
 """
-Template for dynamic continuum simulations using ddgclib.
+Template for dynamic (Lagrangian) continuum simulations with ddgclib.
 
-Copy this file and modify it for each new case. The 5-step workflow is:
+Copy this file and modify it for each new case.  The workflow is:
 
-    1. Domain      — Build mesh (hyperct.Complex) and identify boundary vertices
-    2. Boundary    — Define boundary conditions (no-slip, Dirichlet, Neumann, ...)
-    3. Initial     — Set initial fields (velocity, pressure, mass)
-    4. Integrate   — Choose a time integrator and run the simulation
-    5. Postprocess — Save results, visualize, analyze
+    1. Domain      - build the mesh with a domain builder, compute duals
+    2. Boundary    - collect boundary conditions in a BoundaryConditionSet
+    3. Initial     - set the vertex fields (volume-averaged where it matters)
+    4. Methods     - name EVERY solver method choice in one SolverMethods
+    5. Integrate   - build dudt_fn and run through methods.integrate()
+    6. Record      - write methods.json next to the results (what actually ran)
+    7. Postprocess - save state, plot, animate
 
-This template demonstrates a 2D channel flow (Poiseuille) as a concrete example.
-Replace/modify each section for your own problem.
+The concrete example is a weakly compressible single-phase fluid in a
+closed box: a smooth swirl decays viscously on a Lagrangian mesh.
+Vertices advect, connectivity is rebuilt by Delaunay every step, and the
+pressure comes from an equation of state, p = eos(m / dual volume).  It
+runs in a few seconds.
 
-Step 1 in more detail:
+The one method choice that is not optional here is
+``remap='conservative'``.  A Delaunay flip changes a vertex's dual
+volume by 33-100 % at fixed positions; without the remap the EOS reads
+that as 3e4-5e4 Pa of compression and the run blows up at any time step
+or sound speed (lane K,
+docs_temp/debug_session/laneK-single-phase-eos-instability.md).  The
+remap keeps the pressure field invariant across the rebuild.
+``SolverMethods.dudt_fn`` warns if you bind an EOS without it.  The
+alternative that needs no remap is ``connectivity='dual_only'`` (fixed
+connectivity, fine for small deformation).  For two fluids start from
+``cases_dynamic/oscillating_droplet/`` and
+``ddgclib.methods.PRESETS['oscillating_droplet_2D']``.
 
-1.a The geometry can be created using the starting cube (Complex.triangulate),
-    refining (Complex.refine_all or similar) and then modifying it (e.g. by
-    removing vertices, edges, faces) or by using the built-in geometry generators
-    (e.g. for a cylinder using the functions in ddgclib.geometry).
-1.b Alternatively, the geometry can be imported from an external mesh file (e.g.
-    a tet mesh) and converted to a Complex using the hyperct functions.
-1.c Finally a domain can be defined by abstract mathematical functions (e.g. level
-    sets) and then discretized into a Complex using the hyperct functions.
+Every method switch (time integrator, connectivity policy, mass
+redistribution, ...) is a field of ``SolverMethods``; the allowed values,
+their measured status and the evidence behind them are tabulated in
+``METHODS.md`` (repo root).  Do not build ``functools.partial`` chains or
+integrator kwargs by hand in a case: let the config build them, so the
+recorded ``methods.json`` is the truth.
 """
-
 import os
-import numpy as np
-from hyperct import Complex
+import sys
 
-# Output directory: fig/ next to this script
+import numpy as np
+
+# Make the repo root importable when this file is run by path
+# (python cases_dynamic/template/template.py); every case runner does this.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+# Output directories next to this script (project convention)
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_HERE, 'fig')
+_RESULTS = os.path.join(_HERE, 'results')
 os.makedirs(_FIG, exist_ok=True)
+os.makedirs(_RESULTS, exist_ok=True)
 
-# Step 1: Define the domain and boundary set
-# Create a simplicial complex on [0, L] x [0, h]
 
-d = 2                  # dimension (1, 2, or 3)
-L, h = 2.0, 1.0       # channel length and height
+# ---------------------------------------------------------------------
+# Step 1: Domain
+# ---------------------------------------------------------------------
+# Domain builders return the mesh, the topological boundary set and named
+# boundary groups (walls, inlet, outlet, ...).  Other options: build a
+# hyperct.Complex by hand (Complex.triangulate + refine_all), import an
+# external mesh, or discretise a level set.
+from ddgclib.geometry.domains import rectangle
+from hyperct.ddg import compute_vd, rebuild_simplex_cache_2d
+from ddgclib.operators.stress import cache_dual_volumes
 
-HC = Complex(d, domain=[(0.0, L), (0.0, h)])
-HC.triangulate()       # initial triangulation of the cube/rectangle
-HC.refine_all()        # refine once (increase for finer mesh)
-HC.refine_all()        # refine again
+d = 2
+L, h = 1.0, 1.0
+result = rectangle(L=L, h=h, refinement=2, flow_axis=0)
+HC, bV = result.HC, result.bV
+# Closed box: every boundary face is a wall.  (For a channel use
+# result.boundary_groups['walls'] / ['inlet'] / ['outlet'] instead.)
+walls = bV
 
-# Identify boundary vertices — any vertex on the domain faces
-from ddgclib._boundary_conditions import (
-    identify_boundary_vertices,
-    identify_cube_boundaries,
-    BoundaryConditionSet,
-    NoSlipWallBC,
-    DirichletPressureBC,
-)
-
-# For axis-aligned cube/rectangle domains, use the convenience helper:
-#   bV = identify_cube_boundaries(HC, lb=0.0, ub=1.0, dim=d)
-#
-# For non-cube domains or when faces have different bounds, use the general helper:
-bV = identify_boundary_vertices(HC, lambda v: (
-    abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - L) < 1e-14 or
-    abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - h) < 1e-14
-))
-
-# Identify specific boundary regions for different BCs
-bV_walls = identify_boundary_vertices(
-    HC, lambda v: abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - h) < 1e-14
-)
-bV_inlet = identify_boundary_vertices(HC, lambda v: abs(v.x_a[0]) < 1e-14)
-bV_outlet = identify_boundary_vertices(HC, lambda v: abs(v.x_a[0] - L) < 1e-14)
+# Duals are needed BEFORE any volume-averaged initial condition and
+# before the first force evaluation.  The integrator rebuilds them every
+# step according to the connectivity policy chosen in step 4.
+# The simplex cache makes the setup dual volumes exact (they tile the
+# domain, corners included), i.e. the same measure every later
+# retopology uses; without it the 2D fallback undercounts corner cells
+# 4x and the EOS starts from a wrong density there (lane K).
+rebuild_simplex_cache_2d(HC)
+compute_vd(HC, method='barycentric')
+cache_dual_volumes(HC, d)
 
 print(f"Mesh: {sum(1 for _ in HC.V)} vertices, {len(bV)} boundary, "
-      f"{len(bV_walls)} wall, {len(bV_inlet)} inlet, {len(bV_outlet)} outlet")
+      f"{len(walls)} wall")
 
 
-# Step 2: Define the boundary conditions
-# BCs are collected in a BoundaryConditionSet and applied each time step
-# automatically by the integrator (when bc_set is passed).
+# ---------------------------------------------------------------------
+# Step 2: Boundary conditions
+# ---------------------------------------------------------------------
+# BCs are applied by the integrator after every step.  Wall vertices are
+# also FROZEN because they sit in bV (the topological boundary set the
+# integrator rebuilds each step); pass boundary_filter=... to integrate()
+# when only part of the hull should be frozen (e.g. walls but not an
+# inlet/outlet).
+from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
 
 bc_set = BoundaryConditionSet()
-
-# No-slip walls at y=0 and y=h (velocity = 0)
-bc_set.add(NoSlipWallBC(dim=d), bV_walls)
-
-# Fixed pressure at outlet (atmospheric, P = 0)
-bc_set.add(DirichletPressureBC(value=0.0), bV_outlet)
-
-# You can also use callable BCs for spatially varying conditions:
-#   from ddgclib._boundary_conditions import DirichletVelocityBC
-#   bc_set.add(DirichletVelocityBC(lambda v: np.array([v.x_a[1], 0.0]), dim=2), bV_inlet)
-
-print(f"Boundary conditions: {len(bc_set._bcs)} BCs registered")
+bc_set.add(NoSlipWallBC(dim=d), walls)
 
 
-# Step 3: Define the initial conditions
-# ICs set vertex fields (v.u, v.p, v.m) on the entire mesh.
-# Use CompositeIC to combine multiple ICs — they are applied in order.
+# ---------------------------------------------------------------------
+# Step 3: Initial conditions
+# ---------------------------------------------------------------------
+# Physics: water-like density and a large viscosity so the decay is
+# visible within a few hundred steps (nu = mu/rho0 = 0.05 m^2/s).  The
+# sound speed is numerical: Mach 0.01 keeps density within 0.1 % of rho0.
+from ddgclib.eos import TaitMurnaghan
+from ddgclib.initial_conditions import CompositeIC, DualVolumeMass, CustomFieldIC, UniformPressure
 
-from ddgclib.initial_conditions import (
-    CompositeIC,
-    ZeroVelocity,
-    LinearPressureGradient,
-    UniformMass,
-    PoiseuillePlanar,
+rho0 = 1000.0        # kg/m^3
+mu = 50.0            # Pa s
+u0 = 0.1             # m/s   perturbation amplitude
+c_s = 100.0 * u0     # m/s   numerical sound speed (Mach 0.01)
+eos = TaitMurnaghan(rho0=rho0, P0=0.0, K=rho0 * c_s**2, n=1.0)
+
+
+def perturbation(x):
+    """Divergence-free swirl from the stream function
+    psi = sin^2(pi x) sin^2(pi y); u = (dpsi/dy, -dpsi/dx) vanishes on
+    all four walls."""
+    sx, cx = np.sin(np.pi * x[0]), np.cos(np.pi * x[0])
+    sy, cy = np.sin(np.pi * x[1]), np.cos(np.pi * x[1])
+    return u0 * np.array([sx * sx * sy * cy, -sx * cx * sy * sy])
+
+
+ic = CompositeIC(
+    CustomFieldIC(perturbation, field_name='u'),   # v.u = f(x)
+    UniformPressure(P0=0.0),                        # = eos(rho0); the EOS takes over
+    DualVolumeMass(rho=rho0),                       # v.m = rho0 * dual_vol
 )
-
-# Physical parameters
-G = 1.0     # pressure gradient magnitude
-mu = 0.1    # dynamic viscosity
-rho = 1.0   # density
-
-# Option A: Start from rest (zero velocity + linear pressure + uniform mass)
-ic_from_rest = CompositeIC(
-    ZeroVelocity(dim=d),
-    LinearPressureGradient(G=G, axis=0),
-    UniformMass(total_volume=L * h, rho=rho),
-)
-
-# Option B: Start from analytical Poiseuille profile (for equilibrium testing)
-ic_equilibrium = CompositeIC(
-    PoiseuillePlanar(G=G, mu=mu, y_lb=0.0, y_ub=h, flow_axis=0, normal_axis=1, dim=d),
-    LinearPressureGradient(G=G, axis=0),
-    UniformMass(total_volume=L * h, rho=rho),
-)
-
-# Choose which IC to apply:
-ic = ic_from_rest
 ic.apply(HC, bV)
 
-print(f"Initial conditions applied. Sample vertex: "
-      f"u={list(next(iter(HC.V)).u)}, p={next(iter(HC.V)).p:.4f}")
 
+# ---------------------------------------------------------------------
+# Step 4: Solver methods (the single source of truth for the run)
+# ---------------------------------------------------------------------
+# Every field is a registered axis (ddgclib.methods.AXES / METHODS.md).
+# Invalid or silently-ignored combinations raise ValueError here, not
+# three functions deeper.  For a shipped case use a PRESET instead:
+#     from ddgclib.methods import PRESETS
+#     methods = PRESETS['oscillating_droplet_2D']
+from ddgclib.methods import SolverMethods, record_methods, effective_methods
 
-# Step 4: Specify the integrator and run the simulation
-# Choose an acceleration function (du/dt) and a time integrator.
-#
-# The acceleration function computes forces on each vertex:
-#   acceleration(v) = (-grad_P + mu * laplacian_u) / m
-#
-# For problems requiring the full DDG operators with duals:
-#   from hyperct.ddg import compute_vd
-#   compute_vd(HC, method="barycentric")
-#   from ddgclib.operators.gradient import acceleration as dudt_fn
-#
-# For this template, we use a simple mock acceleration for demonstration:
-
-def dudt_fn(v, dim=2, mu=0.1, **kwargs):
-    """Mock acceleration: diffusion toward neighbor average (Laplacian-like)."""
-    if not v.nn:
-        return np.zeros(dim)
-    avg_u = np.mean([nb.u[:dim] for nb in v.nn], axis=0)
-    return mu * (avg_u - v.u[:dim])
-
-
-# Option A: Direct integrator call
-from ddgclib.dynamic_integrators import euler_velocity_only
-
-# Record history for post-processing
-from ddgclib.data import StateHistory
-history = StateHistory(fields=['u', 'p'], record_every=50)
-
-dt = 0.001
-n_steps = 500
-
-t_final = euler_velocity_only(
-    HC, bV, dudt_fn,
-    dt=dt, n_steps=n_steps, dim=d,
-    bc_set=bc_set,                  # BCs enforced after each step
-    callback=history.callback,      # record snapshots
-    mu=mu,                          # forwarded to dudt_fn as **dudt_kwargs
+methods = SolverMethods(
+    dim=d,
+    phases='single',
+    integrator='symplectic_euler',   # Lagrangian: u += dt a, x += dt u
+    connectivity='delaunay',         # per-step global Delaunay + dual rebuild
+    remap='conservative',            # pressure invariant across the rebuild
+    redistribute_mass=True,          # (the remap re-targets the masses)
+    label='template: weakly compressible viscous decay in a closed box',
 )
-
-print(f"Simulation complete: t = {t_final:.4f}, {history.n_snapshots} snapshots recorded")
-
-
-# Option B: DynamicSimulation runner (convenience wrapper)
-# Bundles everything into a single object. Uncomment to use instead of Option A:
-#
-# from ddgclib.dynamic_integrators import DynamicSimulation, SimulationParams
-#
-# sim = (DynamicSimulation(HC, bV, SimulationParams(dt=0.001, n_steps=500, dim=2, mu=0.1))
-#        .set_initial_conditions(ic)
-#        .set_boundary_conditions(bc_set)
-#        .set_integrator(euler_velocity_only)
-#        .set_acceleration_fn(dudt_fn))
-# t_final = sim.run(callback=history.callback)
+print(methods.describe())
 
 
-# Step 5: Post-processing — save, visualize, analyze
+# ---------------------------------------------------------------------
+# Step 5: Integrate
+# ---------------------------------------------------------------------
+# dudt_fn is the integrated Cauchy-stress acceleration (pressure flux +
+# viscous flux over the dual cell) bound the canonical way.  The EOS
+# goes in twice: into the force (pressure from density) and into
+# integrate() (the remap needs its inverse).  With pressure_model=None
+# the pressure field stays at its IC instead.  Add
+# body_force=[0, -9.81] for gravity.
+dudt_fn = methods.dudt_fn(HC, mu=mu, pressure_model=eos)
 
-# 5a: Save state to disk (JSON format)
-from ddgclib.data import save_state
+dx_min = min(float(np.linalg.norm(v.x_a[:d] - nb.x_a[:d]))
+             for v in HC.V for nb in v.nn)
+nu = mu / rho0
+dt = min(0.25 * dx_min / c_s,        # acoustic CFL (stable up to 1.5)
+         0.1 * dx_min**2 / nu)       # explicit viscous limit
+n_steps = 400                        # ~1.8 s: KE decays by ~3 orders
+record_every = 20
+
+from ddgclib.data import StateHistory
+history = StateHistory(fields=['u', 'p'], record_every=record_every,
+                       save_dir=os.path.join(_RESULTS, 'snapshots'))
+
+KE = []
+
+
+def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
+    history.callback(step, t, HC_cb, bV_cb, diagnostics)
+    if step % record_every == 0:
+        ke = sum(0.5 * v.m * float(np.dot(v.u[:d], v.u[:d])) for v in HC_cb.V)
+        KE.append((t, ke))
+
+
+print(f"\nRunning: dt={dt:.3e}, n_steps={n_steps}, t_end={dt * n_steps:.3f}")
+t_final = methods.integrate(
+    HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+    bc_set=bc_set, callback=callback, pressure_model=eos,
+)
+rho = np.array([v.m / v.dual_vol for v in HC.V])
+print(f"Done: t = {t_final:.4f}, KE {KE[0][1]:.3e} -> {KE[-1][1]:.3e} J, "
+      f"density within {np.max(np.abs(rho / rho0 - 1)):.1e} of rho0, "
+      f"{history.n_snapshots} snapshots")
+
+
+# ---------------------------------------------------------------------
+# Step 6: Record what actually ran
+# ---------------------------------------------------------------------
+# methods.json = requested config + the implicit (dimension / cache
+# gated) choices resolved on the final mesh + git SHAs of both repos.
+# Quote it (or the preset name) whenever you discuss a result.
+record_methods(os.path.join(_RESULTS, 'methods.json'), methods, HC,
+               extra={'dt': dt, 'n_steps': n_steps, 'mu': mu, 'u0': u0,
+                      'c_s': c_s, 'eos': 'TaitMurnaghan(n=1, P0=0)',
+                      'refinement': 2})
+print("Effective (implicit) choices:",
+      {k: v for k, v in effective_methods(HC, d, methods).items()
+       if k in ('dual_volume', 'edge_area_source', 'boundary_dual_vol')})
+
+
+# ---------------------------------------------------------------------
+# Step 7: Post-processing
+# ---------------------------------------------------------------------
+from ddgclib.data import save_state, load_state
 
 save_state(HC, bV, t=t_final, fields=['u', 'p', 'm'],
-           path=os.path.join(_FIG, 'final_state.json'),
-           extra_meta={'case': 'template_channel', 'mu': mu, 'G': G})
-print(f"State saved to {_FIG}/final_state.json")
+           path=os.path.join(_RESULTS, 'final_state.json'),
+           extra_meta={'case': 'template_box_decay', 'mu': mu})
+HC_loaded, bV_loaded, meta = load_state(os.path.join(_RESULTS, 'final_state.json'))
+print(f"State round-trip: t={meta['time']}, case={meta.get('case')}")
 
-
-# 5b: Load a saved state (round-trip)
-from ddgclib.data import load_state
-HC_loaded, bV_loaded, meta = load_state(os.path.join(_FIG, 'final_state.json'))
-print(f"Loaded state at t={meta['time']}, case={meta.get('case')}")
-
-
-# 5c: Query history
-some_vertex = next(iter(HC.V))
-vertex_key = tuple(float(x) for x in some_vertex.x_a)
-times, pressures = history.query_vertex(vertex_key, 'p')
-if times:
-    print(f"Vertex at {vertex_key}: P went from {pressures[0]:.4f} to {pressures[-1]:.4f}")
-
-
-# 5d: Visualization
 import matplotlib
-matplotlib.use('Agg')  # use 'TkAgg' for interactive display
-
-from ddgclib.visualization import (
-    plot_scalar_field_2d,
-    plot_vector_field_2d,
-    plot_mesh_2d,
-)
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from ddgclib.visualization import plot_fluid
 
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+plot_fluid(HC, bV=bV, t=t_final,
+           save_path=os.path.join(_FIG, 'template_fluid.png'))
 
-plot_mesh_2d(HC, bV=bV, ax=axes[0], title='Mesh')
-plot_scalar_field_2d(HC, field='p', ax=axes[1], title='Pressure')
-plot_vector_field_2d(HC, bV=bV, ax=axes[2], title='Velocity')
+fig, ax = plt.subplots(figsize=(6, 4))
+t_arr = np.array([k[0] for k in KE])
+ke_arr = np.array([k[1] for k in KE])
+ax.semilogy(t_arr, ke_arr, 'o-', label='simulation')
+ax.semilogy(t_arr, ke_arr[0] * np.exp(-2 * nu * 2 * np.pi**2 * t_arr), '--',
+            label=r'$e^{-2\nu k^2 t}$ (unbounded Stokes reference)')
+ax.set_xlabel('t [s]')
+ax.set_ylabel('kinetic energy [J]')
+ax.legend()
+fig.tight_layout()
+fig.savefig(os.path.join(_FIG, 'template_ke.png'), dpi=150)
+plt.close('all')
+print(f"Figures saved to {_FIG}/")
 
-plt.tight_layout()
-plt.savefig(os.path.join(_FIG, 'template_results.png'), dpi=150)
-print(f"Plot saved to {_FIG}/template_results.png")
-# plt.show()  # uncomment for interactive display
-
-# Animation from history:
-from ddgclib.visualization.animation import animate_scalar_2d
-anim = animate_scalar_2d(history, field='p')
-anim.save(os.path.join(_FIG, 'pressure_evolution.gif'), writer='pillow', fps=10)
-print(f"Animation saved to {_FIG}/pressure_evolution.gif")
+# Animation from the recorded history (mp4 needs ffmpeg):
+#   from ddgclib.visualization import dynamic_plot_fluid
+#   dynamic_plot_fluid(history, HC, bV=bV,
+#                      save_path=os.path.join(_FIG, 'template.mp4'))
+# Interactive 3D replay of the snapshots:
+#   python -m ddgclib.scripts.view_polyscope --snapshots results/snapshots

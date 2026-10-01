@@ -302,9 +302,21 @@ def oscillation_score_3d(
     return score
 
 
-def save_score(path: str | Path, score: dict) -> None:
+def save_score(path: str | Path, score: dict, methods=None) -> None:
+    """Write *score* as JSON.
+
+    *methods* (a ``ddgclib.methods.SolverMethods``) is embedded under the
+    ``'methods'`` key so the score is self-describing: a baseline pins a
+    number AND the configuration that produced it, and
+    :func:`diff_baselines` flags a configuration drift before comparing
+    numbers.  Reproducibility rule of the campaign (debugging_plan.md,
+    2026-09-25): every scored run passes its config here.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if methods is not None:
+        score = dict(score)
+        score['methods'] = methods.to_dict()
     with open(path, 'w') as f:
         json.dump(score, f, indent=2, sort_keys=True)
 
@@ -324,6 +336,22 @@ def diff_baselines(baseline_path: str | Path, current_path: str | Path) -> dict:
     assert base['kind'] == curr['kind'], (
         f"kind mismatch: {base['kind']} vs {curr['kind']}"
     )
+
+    # Configuration drift check (reproducibility rule, 2026-09-25): the
+    # numbers are only comparable if the solver methods match.
+    mb, mc = base.get('methods'), curr.get('methods')
+    _doc_fields = ('label', 'notes')   # documentation, not method choices
+    if mb is not None and mc is not None:
+        changed = sorted(k for k in set(mb) | set(mc)
+                         if k not in _doc_fields and mb.get(k) != mc.get(k))
+        if changed:
+            print(f"\n!! SOLVER METHODS DIFFER from the baseline on: "
+                  + ', '.join(f"{k}: {mb.get(k)!r} -> {mc.get(k)!r}"
+                              for k in changed))
+            print("!! (a different method, not a regression of the same one)")
+    elif mb is None or mc is None:
+        print("\n?? one of the scores carries no 'methods' block; comparison "
+              "is not configuration-checked")
 
     keys = sorted(k for k in base if isinstance(base[k], (int, float)))
     rows = []

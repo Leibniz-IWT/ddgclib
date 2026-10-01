@@ -22,7 +22,6 @@ plain per-step Delaunay blowing up at its FIRST reconnection event
 the full case horizon.
 """
 import warnings
-from functools import partial
 
 import numpy as np
 import pytest
@@ -35,7 +34,11 @@ from cases_dynamic.dam_break.src._params import (
 from cases_dynamic.dam_break.src._setup import (
     setup_dam_break_multiphase, cfl_timestep,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.methods import PRESETS
+
+# The shipped runner configuration (METHODS.md): per-step full Delaunay
+# kept thermodynamically neutral by the laneD conservative remap.
+METHODS = PRESETS['dam_break_2D']
 
 
 def _build_2d(alpha=alpha_art):
@@ -47,6 +50,7 @@ def _build_2d(alpha=alpha_art):
         gamma=gamma, K_l=K_l, K_g=K_g,
         g=g, gravity_axis=gravity_axis, P_atm=P_atm,
         n_refine=3, alpha_art=alpha,
+        redistribute_mass=METHODS.redistribute_mass,
     )
 
 
@@ -97,10 +101,7 @@ class TestDamBreakCollapseSmoke:
     """Short smoke of the shipped config: collapse starts, stays clean."""
 
     def test_collapse_starts_and_conserves_mass(self):
-        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = _build_2d(0.5)
-        # Shipped runner configuration: per-step full Delaunay kept
-        # thermodynamically neutral by the laneD conservative remap.
-        retopo_fn = partial(retopo_fn, retopo_remap='conservative')
+        HC, bV, mps, bc_set, dudt_fn, _retopo_fn, params = _build_2d(0.5)
         c_s = float(np.sqrt(K_l / rho_l))
         dt = cfl_timestep(HC, 2, c_s, cfl=cfl)
         M0 = sum(v.m for v in HC.V)
@@ -108,8 +109,8 @@ class TestDamBreakCollapseSmoke:
                         if v.phase == 1 or getattr(v, 'is_interface', False))
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', RuntimeWarning)
-            symplectic_euler(HC, bV, dudt_fn, dt=dt, n_steps=150, dim=2,
-                             bc_set=bc_set, retopologize_fn=retopo_fn)
+            METHODS.integrate(HC, bV, dudt_fn, dt=dt, n_steps=150,
+                              bc_set=bc_set, mps=mps)
         # No NaN anywhere
         for v in HC.V:
             assert np.all(np.isfinite(v.u)), f"NaN velocity at {v.x_a}"

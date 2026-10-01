@@ -1,0 +1,674 @@
+"""Registry of every method choice in the dynamic (Lagrangian) pipeline.
+
+This module is DATA.  Each :class:`MethodAxis` names one decision the
+solver makes (time integrator, connectivity policy, per-phase volume
+split, ...).  Each :class:`MethodOption` names one allowed value, says
+where in the code it lives, what its measured status is, and which lane
+log / test is the evidence.
+
+Two kinds of axis exist:
+
+``explicit``
+    A field of :class:`ddgclib.methods.SolverMethods`.  The value is
+    chosen by the user and applied by the builders in ``_config.py``.
+
+``reported`` (``explicit=False``)
+    The code picks the value implicitly (by dimension, by whether a
+    cache exists, by which function was called).  These are not
+    controllable today; :func:`ddgclib.methods.effective_methods`
+    resolves them on a concrete mesh so they are RECORDED next to every
+    result.  Making one of them controllable is a code change to the
+    operator layer, not to this registry.
+
+Status vocabulary (``MethodOption.status``):
+
+- ``validated``      default of a pinned case / regression-locked
+- ``opt-in``         tested, works, deliberately not the default
+- ``experimental``   exists, no regression net, use with care
+- ``measured-worse`` A/B'd against the default and rejected (DO-NOT)
+- ``broken``         known to give wrong results in some regime
+- ``dead``           no production caller / superseded
+
+Keep this file in sync with ``METHODS.md`` (regenerate the tables with
+``python -m ddgclib.methods --markdown``).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+__all__ = ['MethodOption', 'MethodAxis', 'AXES', 'AXIS_GROUPS', 'STATUSES']
+
+STATUSES = (
+    'validated', 'opt-in', 'experimental', 'measured-worse', 'broken', 'dead',
+)
+
+
+@dataclass(frozen=True)
+class MethodOption:
+    """One allowed value of a method axis."""
+
+    key: Any
+    summary: str
+    status: str
+    where: str
+    evidence: str = ''
+    dims: tuple[int, ...] = (1, 2, 3)
+    phases: str = 'both'   # 'single' | 'multi' | 'both'
+
+    def __post_init__(self) -> None:
+        if self.status not in STATUSES:
+            raise ValueError(
+                f"bad status {self.status!r} for option {self.key!r}; "
+                f"allowed: {STATUSES}"
+            )
+
+
+@dataclass(frozen=True)
+class MethodAxis:
+    """One decision the dynamic pipeline makes."""
+
+    name: str
+    title: str
+    group: str
+    options: tuple[MethodOption, ...]
+    default: Any = None
+    kind: str = 'choice'      # 'choice' | 'int' | 'float' | 'bool' | 'object'
+    explicit: bool = True
+    applies_to: str = 'both'  # 'single' | 'multi' | 'both'
+    control: str = ''         # where the value is applied at runtime
+    notes: str = ''
+
+    def keys(self) -> list[Any]:
+        return [o.key for o in self.options]
+
+    def option(self, key: Any) -> MethodOption:
+        for o in self.options:
+            if o.key == key:
+                return o
+        raise KeyError(
+            f"unknown value {key!r} for axis {self.name!r}; "
+            f"allowed: {self.keys()}"
+        )
+
+
+def _opt(key, summary, status, where, evidence='', dims=(1, 2, 3), phases='both'):
+    return MethodOption(key, summary, status, where, evidence, dims, phases)
+
+
+AXIS_GROUPS = (
+    'problem', 'time', 'connectivity', 'thermodynamics', 'forces',
+    'dual geometry (reported)', 'execution',
+)
+
+_LANE = 'docs_temp/debug_session/'
+
+_AXES: list[MethodAxis] = [
+    # ------------------------------------------------------------------
+    # problem class
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='mesh', title='Mesh representation', group='problem',
+        default='complex', explicit=False,
+        control='how the case builds HC (domain builders always build '
+                'hyperct.Complex); reported from type(HC) and HC._SC',
+        options=(
+            _opt('complex', 'hyperct.Complex vertex-vertex flag complex '
+                 '(v.nn sets) + raw top-simplex list HC._simplices', 'validated',
+                 'hyperct/_complex.py:Complex',
+                 'the only representation any ddgclib code path uses'),
+            _opt('simplicial', 'Complex(simplicial=True) with the hyperct '
+                 'SimplicialComplex / _ops index-array layer (branch '
+                 'wip/simplicial-layer, not on master)', 'broken',
+                 'hyperct (branch wip/simplicial-layer: _simplicial.py, _ops/, '
+                 'Complex._simplices setter hooks)',
+                 'audit 2026-09-25: unused by ddgclib; 4 verified sync defects '
+                 '(retriangulation ignored, invalidate no-op, collapse holes, '
+                 'read side effects); parked on the branch 2026-09-25'),
+        ),
+    ),
+    MethodAxis(
+        name='phases', title='Phase model', group='problem',
+        default='single',
+        control='selects dudt_i vs multiphase_dudt_i and _retopologize vs '
+                '_retopologize_multiphase',
+        options=(
+            _opt('single', 'One fluid; v.p from pressure_model or held; '
+                 'forces from operators.stress.stress_force', 'validated',
+                 'ddgclib/operators/stress.py:stress_force',
+                 'Hagen-Poiseuille / hydrostatic machine-precision equilibria'),
+            _opt('multi', 'Sharp-interface n-phase model on MultiphaseSystem; '
+                 'per-phase summed stress + surface tension', 'validated',
+                 'ddgclib/operators/multiphase_stress.py:multiphase_stress_force',
+                 'oscillating droplet 2D/3D pins (test_case_oscillating_droplet.py)'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # time integration
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='integrator', title='Time integrator', group='time',
+        default='symplectic_euler',
+        control='ddgclib.dynamic_integrators.<name>(HC, bV, dudt_fn, ...)',
+        options=(
+            _opt('symplectic_euler', 'u += dt a; x += dt u_new (Lagrangian)',
+                 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:symplectic_euler',
+                 'every pinned dynamic case'),
+            _opt('euler', 'x += dt u_old; u += dt a (forward Euler, Lagrangian)',
+                 'opt-in',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:euler',
+                 'cube_flow demos and the u=0 static floor tests only; laneK: with '
+                 'an EOS it GROWS at CFL 0.25 even on fixed connectivity '
+                 '(symplectic_euler is stable to dt c_s/dx = 1.5)'),
+            _opt('rk45', 'scipy RK45 per macro step; duals/edge cache frozen at '
+                 'macro-step start (stale within stages)', 'experimental',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:rk45',
+                 'audit 2026-09-25 §1.2: no per-stage dual rebuild; skips BCs '
+                 'when no interior vertices'),
+            _opt('euler_velocity_only', 'Eulerian fixed mesh, u += dt a only. '
+                 'Validation/equilibrium checks ONLY (CLAUDE.md)', 'opt-in',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:euler_velocity_only',
+                 'Poiseuille equilibrium tests'),
+            _opt('euler_adaptive', 'Advective-CFL adaptive dt; velocity_only=True '
+                 'by default (Eulerian), else forward Euler', 'experimental',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:euler_adaptive',
+                 'audit §1.3: no sound-speed term in the CFL; not used by any case'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # connectivity / retopology
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='connectivity', title='Connectivity (retopology) policy',
+        group='connectivity', default='delaunay',
+        control='retopologize_fn / skip_triangulation / remesh_mode / '
+                'periodic_axes on the integrator; bound into the multiphase '
+                'retopo partial by SolverMethods.retopologize_fn()',
+        notes='Formerly spread over five switches and named differently '
+              'per case (retopo_policy_2d "delaunay_remap", 3D CLI '
+              '"delaunay|dual_only", dam break partial).',
+        options=(
+            _opt('delaunay', 'Per-step global scipy Delaunay rebuild '
+                 '(connect_and_cache_simplices), boundary_from_simplices, '
+                 'compute_vd, dual volumes/edge-area cache', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize',
+                 '2D droplet default WITH remap (laneE); bare (no remap) is '
+                 'measured-worse for multiphase: 2D l2 0.490 / 3D 1.524 (lane5, laneB). '
+                 'SINGLE-PHASE + EOS without remap: measured unstable in every '
+                 'laneK arm (a flip changes a dual volume by 33-100 %, read as '
+                 '3e4-5e4 Pa; blows up at CFL 0.01, c_s 10 or 100, n 1 or 7.15, '
+                 'redistribution on or off); use remap=conservative (laneR)',
+                 dims=(1, 2, 3)),
+            _opt('dual_only', 'skip_triangulation=True: keep builder connectivity, '
+                 'refresh v.boundary tags, duals, dual volumes (and per-phase '
+                 'split / redistribution / EOS for multiphase) every step',
+                 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize '
+                 '(skip_triangulation branch)',
+                 '3D droplet default (laneB l2 0.24811); 2D opt-in (l2 0.17857, lane5). '
+                 'Cannot follow large deformation (dam break NaN-aborts, laneF). '
+                 'laneK: single-phase + EOS is stable here without any remap '
+                 '(pressure force = exact volume gradient to 1e-10; '
+                 'symplectic_euler stable to dt c_s/dx = 1.5)',
+                 dims=(2, 3)),
+            _opt('dual_only_bare', 'Frozen connectivity, boundary retagged from '
+                 'HC.boundary(), compute_vd + cache_dual_volumes (half-cell '
+                 'boundary volumes, no edge-area cache) + per-phase split; NO '
+                 'mps.refresh, NO redistribution, NO EOS update (pressure '
+                 'frozen at its setup value)', 'validated',
+                 'ddgclib/methods/_retopo.py:bare_dual_refresh',
+                 'static_droplet_2D pin 1.1847162859108737e-03 (was the '
+                 'case-local _dual_only_retopo closure; audit F11: validates '
+                 'surface tension against a FROZEN pressure field)',
+                 dims=(2, 3)),
+            _opt('frozen', 'retopologize_fn=False: NO topology or dual refresh at '
+                 'all. Surface meshes / A.5.a static probes only', 'opt-in',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_do_retopologize',
+                 'A.5.a frozen-mesh floors 2.3749e-3 (2D) / 6.0153e-05 (3D); '
+                 'multiphase p_phase is NEVER updated on this path; laneK: with an '
+                 'EOS the pressure is inert (dual volumes never refreshed), so a '
+                 'stable frozen run is NOT evidence of EOS stability'),
+            _opt('adaptive', 'hyperct.remesh.adaptive_remesh local split/collapse/flip '
+                 'preserving the v.phase interface; 2D only', 'opt-in',
+                 'hyperct/remesh/_driver.py:adaptive_remesh via '
+                 '_retopologize(remesh_mode="adaptive")',
+                 'lane4 upstream conservation fix; l2 0.326 at refine 3/3 '
+                 '(second-best after dual_only); no pinned case uses it',
+                 dims=(2,)),
+            _opt('periodic', 'retopologize_periodic: wrap, ghost-cell Delaunay, '
+                 'min-image duals (2D only in stress.py). Multiphase: '
+                 'retopologize_multiphase_periodic adds mps.refresh + '
+                 'redistribution + EOS (no remap, no cadence)', 'experimental',
+                 'ddgclib/geometry/periodic.py:retopologize_periodic; '
+                 'ddgclib/methods/_retopo.py:retopologize_multiphase_periodic',
+                 'periodic path ignores skip_triangulation/remesh/backend; '
+                 'shearing_plate_droplet 2D is unstable (interface lost by '
+                 't=0.044 s), 3D crashes in setup; domain_bounds is a build-time '
+                 'argument (geometry), periodic_axes the method field',
+                 dims=(2, 3)),
+            _opt('custom', 'User-supplied retopologize_fn callable (e.g. '
+                 'static_droplet_2D bare dual-only, Hagen_Poiseuile_3D cylinder)',
+                 'experimental',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_do_retopologize '
+                 '(callable branch)',
+                 'recorded by label only; kwargs forwarded by declared name'),
+        ),
+    ),
+    MethodAxis(
+        name='remap', title='Conservative retopology remap', group='connectivity',
+        default=None,
+        control='retopo_remap= in _retopologize_multiphase (multiphase partial) '
+                'or in _retopologize (single-phase partial built by '
+                'SolverMethods.retopologize_fn)',
+        notes='Same axis, two implementations. Multiphase: projection of the '
+              'PRE-call field (cadence on projection_every). Single-phase: '
+              'fresh snapshot, so the step\'s compression survives and there '
+              'is no cadence to choose.',
+        options=(
+            _opt(None, 'No remap: reconnection changes dual volumes, EOS reads '
+                 'them as compression', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize_multiphase',
+                 'required value under dual_only (remap is a silent no-op there)'),
+            _opt('conservative', 'Pressure field invariant across the rebuild. '
+                 'MULTIPHASE: stage-1 dual refresh on OLD connectivity, rebuild, '
+                 'per-phase redistribution, vol_corr gauge, '
+                 'restore_pressure_multiphase, anchor_phase_pressure_levels. '
+                 'SINGLE-PHASE: fresh snapshot eos(m / V_old-connectivity) at the '
+                 'current positions, rebuild, re-target EVERY vertex with a dual '
+                 'volume (frozen walls included), one exact mass rescale',
+                 'validated',
+                 'ddgclib/operators/mass_redistribution.py:restore_pressure_multiphase, '
+                 'anchor_phase_pressure_levels (multi); snapshot_pressure_fresh, '
+                 'redistribute_mass_single_phase(include_frozen=True) via '
+                 '_retopologize(retopo_remap=) (single)',
+                 '2D droplet default (laneD/E, l2 0.17479); dam break survives '
+                 'reconnection (laneF); 3D multiphase measured-worse (laneE l2 1.873 '
+                 'vs 0.248, DO-NOT; confirmed cache-free by laneI). SINGLE-PHASE '
+                 '(laneK prototype, laneR library): box + EOS stable where bare '
+                 'Delaunay blows up at any CFL / c_s / n; final KE within 0.2 % of '
+                 'dual_only; pinned by test_single_phase_remap.py. Interior-only '
+                 'or stale-v.p variants are measured DO-NOTs (laneK P2, P3)',
+                 dims=(2, 3)),
+        ),
+    ),
+    MethodAxis(
+        name='projection_every', title='Pressure-projection cadence',
+        group='connectivity', default=1, kind='int', applies_to='multi',
+        control='projection_every= in _retopologize_multiphase (partial); '
+                'counter on mps._projection_call_idx',
+        options=(
+            _opt(1, 'Every call: per-phase masses re-targeted to the PRE-call '
+                 'pressure snapshot', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize_multiphase',
+                 'all pins; attributed cause of the 2D over-decay (laneH) and '
+                 'half the 3D bump (laneG)'),
+            _opt('N>1', 'Project every N-th call; off-cadence remap snapshots '
+                 'are strain-advanced (evolve_snapshot_local_strain)', 'opt-in',
+                 'ddgclib/operators/mass_redistribution.py:evolve_snapshot_local_strain',
+                 'laneH: delaunay+remap N=2 gives l2 0.03796 (-78%) and matches '
+                 'the two-fluid reference to ~2%; tail gate uncalibrated; '
+                 '3D untested; forbidden under bare delaunay (ValueError)',
+                 phases='multi'),
+        ),
+    ),
+    MethodAxis(
+        name='displacement_eps', title='Skip-retopology displacement gate',
+        group='connectivity', default=None, kind='float',
+        control='displacement_eps= integrator kwarg (_do_retopologize)',
+        options=(
+            _opt(None, 'Retopologize every step', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_do_retopologize'),
+            _opt('eps>0', 'Skip when every vertex moved < eps since the last '
+                 'call; first call always skips', 'measured-worse',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:'
+                 '_displacement_gate_should_skip',
+                 'lane5 sweep: eps in {0.01,0.05,0.2} h_min all worse than either '
+                 'extreme (cases_dynamic/oscillating_droplet/src/_params.py)'),
+        ),
+    ),
+    MethodAxis(
+        name='merge_cdist', title='Pre-retopology vertex merge', group='connectivity',
+        default=None, kind='float',
+        control='merge_cdist= integrator kwarg (forwarded to _retopologize)',
+        options=(
+            _opt(None, 'No merge', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize'),
+            _opt('cdist>0', 'HC.V.merge_all(cdist) before Delaunay; NOT '
+                 'mass-conserving and does not merge m_phase', 'experimental',
+                 'hyperct/_vertex.py:merge_all; ddgclib/multiphase.py:'
+                 'mass_conserving_merge is the separate conserving path',
+                 'DO-NOT wire into multiphase without per-phase ledger (laneF)'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # thermodynamics / mass bookkeeping
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='redistribute_mass', title='Pressure-preserving mass redistribution',
+        group='thermodynamics', default=False, kind='bool',
+        control='redistribute_mass= (integrator kwarg for single-phase, partial '
+                'for multiphase); single-phase also needs pressure_model',
+        options=(
+            _opt(False, 'Lagrangian masses held against the new duals', 'opt-in',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py',
+                 'multiphase noredist rings acoustically: 2D l2 0.495 (laneH); '
+                 '3D l2 0.266 vs 0.248 but cleaner channels (laneG)'),
+            _opt(True, 'After each rebuild rescale masses so the pre-rebuild '
+                 'pressure field is reproduced, exact total per phase',
+                 'validated',
+                 'ddgclib/operators/mass_redistribution.py:'
+                 'redistribute_mass_multiphase / redistribute_mass_single_phase',
+                 'every shipped multiphase setup binds True (M1 rollout); '
+                 '3D A.5.b 1.44e-3 -> 7.38e-05 (Phase 2c). SINGLE-PHASE: on its '
+                 'own it is NOT a cure for Delaunay + EOS (laneK: stale v.p '
+                 'snapshot, frozen walls skipped, so wall flip jumps survive); '
+                 'combine it with remap=conservative (laneR)'),
+        ),
+    ),
+    MethodAxis(
+        name='split_method', title='Per-phase dual-volume split at interface vertices',
+        group='thermodynamics', default='neighbour_count', applies_to='multi',
+        control='split_method= in mps.refresh (setup) AND in the retopo partial; '
+                'the two MUST match',
+        notes='A typo silently falls back to neighbour_count (multiphase.py '
+              'tests only == "exact"). SolverMethods validates the key.',
+        options=(
+            _opt('neighbour_count', 'Interface vertex: fraction of 1-ring bulk '
+                 'neighbours per phase times v.dual_vol', 'validated',
+                 'ddgclib/multiphase.py:MultiphaseSystem.split_dual_volumes',
+                 'all pins', phases='multi'),
+            _opt('exact', '2D: clip the barycentric dual polygon by the interface '
+                 'polyline (NOT rescaled to v.dual_vol); 3D: PCA tangent plane '
+                 'clip of the dual polyhedron, rescaled to v.dual_vol',
+                 'measured-worse',
+                 'ddgclib/geometry/_dual_split_2d.py:split_dual_polygon_2d / '
+                 'split_dual_polyhedron_3d',
+                 '3D end-to-end 1.75e-3 vs 1.44e-3 (worse); 2D retopo-neutral '
+                 'but no metric gain (debugging_plan 2026-04-29)',
+                 dims=(2, 3), phases='multi'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # forces
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='curvature_path', title='Interface curvature / surface-tension stencil',
+        group='forces', default='integrated', applies_to='multi',
+        control='curvature_path= on multiphase_dudt_i (dudt partial)',
+        options=(
+            _opt('integrated', '2D: exact piecewise-linear FTC gamma*(t_next - t_prev) '
+                 '(surface_tension_force_2d); 3D: cotangent/Heron '
+                 'hndA_i_interface on the interface sub-mesh', 'validated',
+                 'ddgclib/operators/multiphase_stress.py:_interface_surface_tension',
+                 'all pins. The 3D apex cache HC._interface_edge_to_apex was '
+                 'never invalidated (audit 2026-09-25 T1); FIXED in laneI '
+                 '(cleared when the interface triangle set changes, '
+                 'test_interface_cache_invalidation.py). laneI also showed the '
+                 'droplet runs never flip interface triangles, so every pinned '
+                 '3D score (dual_only, delaunay, delaunay+remap) is bit-identical '
+                 'before/after the fix',
+                 dims=(2, 3), phases='multi'),
+            _opt('stokes', '3D conormal boundary integral on the barycentric dual '
+                 '(integrated_hndA_i_interface); 2D aliases "integrated"',
+                 'experimental',
+                 'ddgclib/_curvatures_heron.py:integrated_hndA_i_interface',
+                 'bit-identical to integrated on a STATIC mesh (Probe 2). The '
+                 'coordinate-keyed cache HC._interface_x_to_v that made the force '
+                 'vanish after the first vertex move (audit T2) is cleared on '
+                 'every interface refresh since laneI (tested); no dynamic A/B '
+                 'or regression pin yet',
+                 dims=(2, 3), phases='multi'),
+            _opt('csf_dual', 'Magnitude of the integrated stencil redirected along '
+                 'the dual-face normal S_inner', 'experimental',
+                 'ddgclib/operators/multiphase_stress.py:_csf_dual_surface_tension',
+                 'A/B probe only, no tests', dims=(2, 3), phases='multi'),
+        ),
+    ),
+    MethodAxis(
+        name='pressure_flux', title='Pressure flux across the dual faces',
+        group='forces', default='centred', applies_to='single',
+        control='pressure_flux= on dudt_i / stress_force (dudt partial); '
+                'registry operators.stress.pressure_flux_methods',
+        notes='Added 2026-09-26 (capillary_rise_energy_grad). The multiphase '
+              'force still hard-codes the centred flux.',
+        options=(
+            _opt('centred', 'Face-average -1/2 (p_i + p_j) A_ij: exact volume '
+                 'gradient at uniform p (linear precision), no dissipation; '
+                 'BLIND to the checkerboard density/pressure mode (the '
+                 'face average of an alternating field is uniform)', 'validated',
+                 'ddgclib/operators/stress.py:pressure_flux',
+                 'every pinned case; capillary_rise static check: half-cell '
+                 'closure 4e-15 (run_free_surface_static_check.py)',
+                 phases='single'),
+            _opt('acoustic-riemann', 'Lagrangian Godunov contact pressure '
+                 'p* = 1/2 (p_i + p_j) - 1/2 rho_f c_f (u_j - u_i).n: momentum '
+                 'conserving, zero for rigid translation, damps normal velocity '
+                 'jumps; numerical bulk viscosity ~ rho c |d| on compressive '
+                 'modes (low-Mach caveat). Needs an EOS pressure_model',
+                 'measured-worse',
+                 'ddgclib/operators/stress.py:pressure_flux_riemann',
+                 'capillary_rise dynCA A/B 2026-09-26 (energy_grad README 5.6b): '
+                 'with c_s = 10 u_ref the numerical viscosity rho c dx ~ 0.5 Pa s '
+                 'is 700x mu; the column barely flows (smoke L2 0.53 vs 0.075 '
+                 'centred + density diffusion; quiescent column drains as with '
+                 'centred but the driven rise is lost). Correct for acoustic '
+                 'velocity noise, wrong tool at low Mach; the density-diffusion '
+                 'axis is the one to use. Unit tests: antisymmetry, rigid '
+                 'translation, dissipativity (test_pressure_flux_stabilisation.py)',
+                 phases='single'),
+        ),
+    ),
+    MethodAxis(
+        name='density_diffusion', title='Gradient-corrected density diffusion',
+        group='thermodynamics', default=None, kind='float', applies_to='single',
+        control='density_diffusion= integrator kwarg (euler, symplectic_euler); '
+                'needs pressure_model=EOS; case loops call '
+                'operators.stabilisation.density_diffusion_step directly',
+        notes='Added 2026-09-26. delta-SPH type mass flux on the dual faces; '
+              'the cure for the checkerboard density mode that the centred '
+              'pressure flux cannot see. Not available on rk45 / euler_adaptive.',
+        options=(
+            _opt(None, 'No density diffusion', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:symplectic_euler',
+                 'every pinned case', phases='single'),
+            _opt('delta>0', 'dm_i/dt = sum_j delta c0 |A_ij| [(rho_j - rho_i) - '
+                 '1/2 (grad rho_i + grad rho_j).d_ij]: exactly mass conserving, '
+                 'exactly zero on linear density fields (interior), no shear '
+                 'viscosity; explicit stability delta < ~0.3 at acoustic CFL 0.4',
+                 'opt-in',
+                 'ddgclib/operators/stabilisation.py:density_diffusion_step',
+                 'capillary_rise dynCA smoke (water R 0.5 mm, after the corner '
+                 'fix): L2 0.26 -> 0.075 (delta 0.05) / 0.13 (0.1); 0.2-0.3 '
+                 'over-smooth (capillary_rise_energy_grad README Section 5)',
+                 phases='single'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # dual geometry: resolved from the mesh, reported only
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='dual_method', title='Dual vertex construction', group='dual geometry (reported)',
+        default='barycentric', explicit=False,
+        control='hard-coded compute_vd(HC, method="barycentric") in _retopologize',
+        options=(
+            _opt('barycentric', 'Dual vertices at simplex barycentres', 'validated',
+                 'hyperct/ddg/_compute_dual.py:compute_vd'),
+            _opt('circumcentric', 'Dual vertices at circumcentres (benchmarks only; '
+                 'linear precision lost on jittered meshes)', 'opt-in',
+                 'hyperct/ddg/_compute_dual.py:compute_vd',
+                 'INTEGRATED_BENCHMARKS.md'),
+        ),
+    ),
+    MethodAxis(
+        name='dual_path', title='Dual construction path', group='dual geometry (reported)',
+        default='simplex_aware', explicit=False,
+        control='presence of HC._simplices (connect_and_cache_simplices)',
+        options=(
+            _opt('simplex_aware', 'Top-simplex cache drives compute_vd, '
+                 'boundary_from_simplices, exact volumes', 'validated',
+                 'hyperct/ddg/_retriangulation.py:connect_and_cache_simplices',
+                 'commit 8321c71; test_simplex_aware_duals.py'),
+            _opt('nn_walk', 'Legacy 1-skeleton (v.nn intersection) walk; ghost '
+                 'K_{d+1} cliques on Delaunay meshes', 'dead',
+                 'hyperct/ddg/_compute_dual.py (legacy branch)',
+                 'docs/3d_simplex_aware_dual_fix.md'),
+        ),
+    ),
+    MethodAxis(
+        name='dual_volume', title='Dual cell volume source', group='dual geometry (reported)',
+        default='simplex_exact', explicit=False,
+        control='dim + HC._simplices + HC._vd_method + whether batch_e_star runs '
+                '(stress.py:_use_exact_barycentric_volume, _retopologize step 5b)',
+        options=(
+            _opt('simplex_exact', 'Vol_i = (1/(d+1)) sum_{T contains i} |T| '
+                 '(hyperct.ddg.simplex_dual_volumes / vertex_dual_volume)',
+                 'validated',
+                 'hyperct/ddg/_dual_volume.py',
+                 '3D switch ON 2026-07-29 (laneA), floor re-pinned 7.274172e-05'),
+            _opt('fan_walk_3d', 'batch_e_star / v_star tetra fan sum; undercounts '
+                 '1-4% interior, ~20% boundary', 'measured-worse',
+                 'hyperct/ddg/_operators.py:batch_e_star(compute_volumes=True)',
+                 'docs_temp/audit/dual-volume-3d.md', dims=(3,)),
+            _opt('dual_cell_area_2d', 'Shoelace area of the 2D dual polygon '
+                 '(circumcentric or no simplex cache, i.e. every 2D mesh at '
+                 'SETUP before the first retopology)', 'broken',
+                 'hyperct/ddg/_dual_cell.py:dual_cell_area_2d',
+                 'laneK: undercounts the four corner cells 4x (rectangle total '
+                 '0.96875 instead of 1.0 = the old "2-4 % single-phase volume '
+                 'leak") and credits a moving free-surface vertex with 1/4 of its '
+                 'own volume change (0.0104 vs exact 0.0417): Hydrostatic_2D '
+                 'grows exponentially from roundoff with 0 flips, and decays 8 '
+                 'orders with exact simplex volumes. Populate HC._simplices at '
+                 'setup (lane S)', dims=(2,)),
+            _opt('interval_1d', 'Distance between the two dual vertices', 'validated',
+                 'ddgclib/operators/stress.py:dual_volume', dims=(1,)),
+        ),
+    ),
+    MethodAxis(
+        name='boundary_dual_vol', title='Boundary-vertex dual volume convention',
+        group='dual geometry (reported)', default='half_cell', explicit=False,
+        control='dim: 3D retopology zeroes boundary dual_vol (batch_e_star path); '
+                '1D/2D/periodic/setup keep the truncated half cell',
+        options=(
+            _opt('zeroed', 'v.dual_vol = 0 on every vertex in bV after retopology',
+                 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize step 5b',
+                 'measured 2026-09-25: 3D box boundary dual_vol 0.0', dims=(3,)),
+            _opt('half_cell', 'Boundary vertices keep the truncated dual cell '
+                 '(cache_dual_volumes path)', 'validated',
+                 'ddgclib/operators/stress.py:cache_dual_volumes',
+                 'measured 2026-09-25: 2D rectangle max boundary dual_vol 0.0156, '
+                 'total 1.0', dims=(1, 2)),
+        ),
+    ),
+    MethodAxis(
+        name='edge_area_source', title='Oriented dual face area A_ij source',
+        group='dual geometry (reported)', default='shared_vd_2d', explicit=False,
+        control='dim + HC._edge_area_cache + HC._periodic_axes '
+                '(stress.py:stress_force, dual_area_vector)',
+        notes='laneJ (2026-09-25) recommends making this an EXPLICIT 3D axis '
+              '(keys e_star_cache | p_ij | p_ij_simplex) once p_ij_simplex has '
+              'a vectorised hyperct kernel; until then it stays reported. '
+              'Forcing p_ij today = connectivity="custom" wrapper that clears '
+              'HC._edge_area_cache after each retopology '
+              '(cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py).',
+        options=(
+            _opt('batch_e_star_cache', '3D: cached e_star fan areas from '
+                 'batch_e_star(orient=True) at the last retopology', 'validated',
+                 'hyperct/ddg/_operators.py:batch_e_star',
+                 'all 3D pins. NOT linearly precise: laneJ measured per-edge '
+                 'difference to p_ij median 0.125 / max 0.625 (box), closure '
+                 'residual ~1 % at every droplet interface vertex, linear-precision '
+                 'error 3-25 %; it carries ~79 % of the 3D static floor '
+                 'retopology excess (7.274172e-05 vs 6.2839e-05 on p_ij, frozen '
+                 'floor 6.0153e-05) and part of the dynamic outward bump '
+                 '(final inflation 1.87 % -> 0.82 % R0 on p_ij) - but p_ij alone '
+                 'scores l2 0.28713 vs 0.24811 (laneG cancellation exposed), so '
+                 'no flip', dims=(3,)),
+            _opt('p_ij_ring_3d', '3D DEC p_ij dual polygon ring walk (linearly '
+                 'precise on box/ball, 1e-18); used only when no cache exists',
+                 'opt-in',
+                 'ddgclib/operators/stress.py:_dual_area_vector_3d_p_ij',
+                 'test_stress.py p_ij linear-precision tests. laneJ: the face '
+                 'vertex is chosen as the common neighbour nearest the midpoint '
+                 'of two tet barycentres; on 743 of 5193 directed droplet edges '
+                 'that picks a non-face vertex, giving the 2.6 % closure '
+                 'residuals laneG attributed to the pressure side. 4.1x wall '
+                 'cost (2.05 vs 0.50 s/step)', dims=(3,)),
+            _opt('p_ij_simplex', 'p_ij polygon with ring order and face vertices '
+                 'read from HC._simplices (exact faces): closure 2.3e-16, linear '
+                 'precision 1.9e-15 at every interior vertex', 'experimental',
+                 'cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py '
+                 '(driver only, not in the library yet)',
+                 'laneJ: static floor 6.28386e-05, dynamic l2 0.28653 / tail '
+                 '0.08818, 1.89 s/step. Target default after a vectorised '
+                 'hyperct kernel, 3D re-pin and co-evaluation with the '
+                 'redistribution-pump rework (laneG lever b)', dims=(3,)),
+            _opt('shared_vd_2d', '2D: segment between the two dual vertices shared '
+                 'by v_i and v_j, oriented outward', 'validated',
+                 'ddgclib/operators/stress.py:dual_area_vector (2D branch)',
+                 'all 2D pins (batch_e_star raises for dim != 3)', dims=(2,)),
+            _opt('min_image_2d', '2D periodic: minimum-image rebuild of the dual '
+                 'segment', 'experimental',
+                 'ddgclib/operators/stress.py:dual_area_vector (periodic branch)',
+                 'd_ij is NOT min-imaged (06_known_issues)', dims=(2,)),
+        ),
+    ),
+    MethodAxis(
+        name='boundary_rule', title='Topological boundary detection',
+        group='dual geometry (reported)', default='boundary_from_simplices',
+        explicit=False,
+        control='HC._simplices present -> boundary_from_simplices, else HC.boundary(); '
+                'dual_only carries the previous bV',
+        options=(
+            _opt('boundary_from_simplices', 'Faces belonging to exactly one top '
+                 'simplex', 'validated', 'hyperct/ddg/_boundary.py:boundary_from_simplices'),
+            _opt('HC.boundary', 'Legacy hyperct vertex-hull test', 'opt-in',
+                 'hyperct/_complex.py:Complex.boundary'),
+            _opt('carried_bV', 'skip_triangulation: reuse the previous (possibly '
+                 'filtered) bV; 3D failed fans are promoted and stay boundary',
+                 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize'),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # execution
+    # ------------------------------------------------------------------
+    MethodAxis(
+        name='backend', title='batch_e_star compute backend', group='execution',
+        default=None,
+        control='backend= integrator kwarg (only reaches batch_e_star; compute_vd '
+                'always runs numpy)',
+        options=(
+            _opt(None, 'numpy', 'validated', 'hyperct/_backend.py'),
+            _opt('torch', 'PyTorch CPU tensors', 'opt-in', 'hyperct/_backend.py',
+                 'test_gpu_backend.py'),
+            _opt('gpu', 'PyTorch CUDA (auto-detect)', 'opt-in', 'hyperct/_backend.py'),
+            _opt('multiprocessing', 'parallel CPU', 'experimental', 'hyperct/_backend.py'),
+        ),
+    ),
+    MethodAxis(
+        name='workers', title='dudt evaluation workers', group='execution',
+        default=None, kind='int',
+        control='workers= integrator kwarg (_compute_accel fork pool)',
+        options=(
+            _opt(None, 'Sequential', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_compute_accel'),
+            _opt('n>1', 'fork pool over dudt_fn (Linux only). Safe when the force '
+                 'has no side effects (pressure_model=None); with an EOS bound '
+                 'into dudt_fn the v.p / v.rho writes of _resolve_pressure happen '
+                 'in the children and are LOST in the parent', 'experimental',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_compute_accel',
+                 'audit 2026-09-25 §0.5; used by Hagen_Poiseuile 2D (20) / 3D (8) '
+                 'where pressure_model is None'),
+        ),
+    ),
+]
+
+AXES: dict[str, MethodAxis] = {a.name: a for a in _AXES}
+
+# sanity: every group used is declared
+for _a in _AXES:
+    if _a.group not in AXIS_GROUPS:
+        raise RuntimeError(f"axis {_a.name} uses undeclared group {_a.group!r}")

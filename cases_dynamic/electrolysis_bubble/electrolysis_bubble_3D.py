@@ -41,8 +41,8 @@ from cases_dynamic.electrolysis_bubble.src._plot_helpers import (
     compute_diagnostics, plot_radius_history, plot_centroid_history,
 )
 
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 
 
@@ -56,6 +56,11 @@ def main():
     dim = 3
     os.makedirs(_FIG, exist_ok=True)
     os.makedirs(_SNAPSHOTS, exist_ok=True)
+
+    # Solver methods (METHODS.md): per-step Delaunay, per-phase mass
+    # redistribution, no remap.  Unstable as shipped (audit 2026-09-25).
+    methods = PRESETS['electrolysis_bubble_3D']
+    print(methods.describe())
 
     print("=" * 60)
     print("3D Electrolysis Hydrogen Bubble -- proof of concept")
@@ -73,7 +78,7 @@ def main():
     print(f"Initial Laplace jump     = {dP_lap:.2f} Pa")
 
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_electrolysis_bubble(
             dim=dim, R0=R0, L_domain=L_domain,
             nucleation_frac=nucleation_frac,
@@ -83,6 +88,7 @@ def main():
             g=g, P0=P0,
             refinement_outer=n_refine_outer_3d,
             refinement_droplet=n_refine_drop_3d,
+            redistribute_mass=methods.redistribute_mass,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -150,13 +156,17 @@ def main():
                       f"dz={dz*1e3:+.3f} mm **")
 
     print("\nRunning simulation...")
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
     record(t_final)
+    record_methods(
+        os.path.join(_RESULTS, 'methods_3D.json'), methods, HC,
+        extra={'dt': dt, 'n_steps': n_steps, 't_final': t_final,
+               'refinement_outer': n_refine_outer_3d,
+               'refinement_droplet': n_refine_drop_3d},
+    )
     print(f"\nSimulation finished at t = {t_final:.4f} s "
           f"(n_snapshots = {history.n_snapshots})")
     if detached_step[0] is None:

@@ -179,6 +179,7 @@ def run_a5b(
     redistribute_mass: bool = False,
     curvature_path: str = 'integrated',
     displacement_eps: float | None = None,
+    methods=None,
 ) -> dict:
     """A.5.b — retopology ON, velocity forced to zero every step.
 
@@ -191,13 +192,32 @@ def run_a5b(
         (Phase 1 of the 2026-04-28 stabilisation plan — diagnoses
         whether neighbour-count majority-vote on cross-phase reconnection
         is the dominant retopology bug in 3D).
+    methods : ddgclib.methods.SolverMethods or None
+        Reproducibility path (2026-09-25): when given, the retopology
+        policy, ``split_method``, ``redistribute_mass`` and
+        ``displacement_eps`` are taken from the config (the explicit
+        kwargs above are ignored for those axes) and the run goes through
+        ``methods.integrate``; the returned dict carries
+        ``methods.to_dict()``.  Use ``PRESETS['static_droplet_floor_2D']``
+        / ``['static_droplet_floor_3D']`` (``integrator='euler'``) for the
+        pinned floors.  ``curvature_path`` still only selects the
+        MEASUREMENT stencil (``_max_interface_force``), never the force in
+        the run.
     """
+    if methods is not None:
+        if methods.dim != dim:
+            raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+        split_method = methods.split_method
+        redistribute_mass = methods.redistribute_mass
+        displacement_eps = methods.displacement_eps
     print(f"\n{'=' * 70}")
     print(f"A.5.b ({dim}D) — retopology ON, u forced to 0 every step "
           f"({n_steps} steps), split_method={split_method!r}, "
           f"redistribute_mass={redistribute_mass}, "
           f"curvature_path={curvature_path!r}, "
-          f"displacement_eps={displacement_eps!r}")
+          f"displacement_eps={displacement_eps!r}"
+          + (f", methods={methods.label or methods.connectivity!r}"
+             if methods is not None else ''))
     print('=' * 70)
 
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
@@ -276,14 +296,20 @@ def run_a5b(
                   f"nV={step_n_verts[-1]}  nI={step_n_iface[-1]}")
 
     t0 = time.perf_counter()
-    euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=zero_u_callback,
-        retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
-        displacement_eps=displacement_eps,
-    )
+    if methods is not None:
+        methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+            bc_set=bc_set, callback=zero_u_callback, mps=mps,
+        )
+    else:
+        euler(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
+            bc_set=bc_set, callback=zero_u_callback,
+            retopologize_fn=retopo_fn,
+            remesh_mode=params['remesh_mode'],
+            remesh_kwargs=params['remesh_kwargs'],
+            displacement_eps=displacement_eps,
+        )
     wall = time.perf_counter() - t0
 
     max_F_arr = np.array(step_max_F)
@@ -320,6 +346,7 @@ def run_a5b(
         'split_method': split_method,
         'redistribute_mass': redistribute_mass,
         'displacement_eps': displacement_eps,
+        'methods': methods.to_dict() if methods is not None else None,
         'max_abs_F_peak': maxF_overall,
         'max_abs_F_end': maxF_end,
         'mean_abs_F_end': meanF_end,

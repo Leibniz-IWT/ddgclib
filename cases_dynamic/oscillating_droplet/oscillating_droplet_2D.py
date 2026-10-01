@@ -20,8 +20,6 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from functools import partial
-
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
     L_domain, n_refine_outer, n_refine_droplet, beta_2d, t_end_2d,
@@ -43,8 +41,8 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
 from cases_dynamic.oscillating_droplet.src._metrics import (
     oscillation_score, save_score, add_two_fluid_reference,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,12 +50,26 @@ _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results')
 _SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 
+# Retopology policy string (src/_params.py) -> solver-method preset
+# (ddgclib.methods.PRESETS; every axis of each preset is documented in
+# METHODS.md at the repo root).
+_POLICY_PRESETS = {
+    'delaunay_remap': 'oscillating_droplet_2D',
+    'dual_only': 'oscillating_droplet_2D_dual_only',
+    'delaunay': 'oscillating_droplet_2D_bare_delaunay',
+    'delaunay_remap_p2': 'oscillating_droplet_2D_projection2',
+}
+
 
 def main():
     dim = 2
     print("=" * 60)
     print("2D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
+
+    # -- Solver methods (single source of truth for every method switch) --
+    methods = PRESETS[_POLICY_PRESETS[retopo_policy_2d]]
+    print(methods.describe())
 
     omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim, rho_outer=rho_o)
     beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
@@ -68,36 +80,29 @@ def main():
 
     # -- Setup --
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    # split_method / redistribute_mass MUST match between setup and the
+    # runtime retopology (see setup docstring); the preset owns both.
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            split_method=methods.split_method,
+            redistribute_mass=methods.redistribute_mass,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
     print(f"Mesh: {n_verts} vertices, {n_iface} interface")
 
-    # -- Retopology policy (lane-5 sweep + lane-E adoption, see
-    # src/_params.py) --
-    # 'delaunay_remap' (default): per-step FULL Delaunay reconnection
-    # kept thermodynamically neutral by the lane-D conservative remap
-    # (pressure structure restored bit-exactly across each rebuild,
-    # per-phase EOS volume gauge, p_ref-style level anchor).  Scores
-    # l2 0.17479 / tail 0.99990 on this run while retopology stays
-    # honestly active.
-    # 'dual_only' (opt-in): keep the interface-conforming builder
-    # connectivity for the whole run; refresh duals / per-phase split /
-    # mass redistribution / EOS pressures every step (l2 0.17857 /
-    # tail 0.99925).  Bare per-step Delaunay without the remap pumps
-    # spurious KE (~5e4x physical; l2 0.490, tail 1.725).
-    if retopo_policy_2d == 'dual_only':
-        retopo_fn = partial(retopo_fn, skip_triangulation=True)
-    elif retopo_policy_2d == 'delaunay_remap':
-        retopo_fn = partial(retopo_fn, retopo_remap='conservative')
-    print(f"Retopo policy: {retopo_policy_2d}")
+    # -- Retopology policy: lane-5 sweep + lane-E adoption + lane-H
+    # cadence opt-in, all documented in src/_params.py and METHODS.md.
+    # The preset builds the same partial(_retopologize_multiphase, ...)
+    # the policy dispatch used to build by hand (bit-identical, see
+    # ddgclib/tests/test_methods.py).
+    print(f"Retopo policy: {retopo_policy_2d} -> preset "
+          f"{_POLICY_PRESETS[retopo_policy_2d]}")
 
     # -- CFL timestep --
     c_s = np.sqrt(K_d / rho_d)
@@ -145,15 +150,11 @@ def main():
 
     # -- Run --
     print("\nRunning simulation...")
-    # remesh_mode / remesh_kwargs must be passed through the integrator:
-    # _do_retopologize inspects retopo_fn's signature and, if it accepts
-    # `remesh_mode`, forwards the integrator's value — so pre-binding
-    # via functools.partial alone does not work.
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
+    # methods.integrate builds retopologize_fn + every integrator-level
+    # retopology kwarg (remesh_mode, remesh_kwargs, ...) from the preset.
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
 
     record(t_final)
@@ -191,7 +192,17 @@ def main():
         beta_energy=beta_tf_energy,
     )
     score_path = os.path.join(_RESULTS, 'score.json')
-    save_score(score_path, score)
+    save_score(score_path, score, methods=methods)   # self-describing score
+    # Methods actually used (requested config + implicit choices resolved
+    # on the final mesh + git state), next to the score.
+    record_methods(
+        os.path.join(_RESULTS, 'methods.json'), methods, HC,
+        extra={'retopo_policy': retopo_policy_2d, 'dt': dt,
+               'n_steps': n_steps, 't_end': t_end,
+               'refinement_outer': n_refine_outer,
+               'refinement_droplet': n_refine_droplet,
+               'K_d': K_d, 'K_o': K_o},
+    )
     # Raw diagnostic series alongside (scalar fields only — 'com' is an
     # ndarray), so future reference changes can re-score without
     # re-running the case.

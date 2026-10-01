@@ -136,6 +136,14 @@ K_o = rho_o * c_s**2             # bulk modulus (outer)
 # unattainable for a faithful run; the current default passes it only
 # because the every-call projection reshapes KE onto that envelope.
 # Recalibrate the score references before revisiting adoption.
+#
+# Policy strings map to solver-method presets in ddgclib.methods.PRESETS
+# (oscillating_droplet_2D.py:_POLICY_PRESETS); every method axis of each
+# preset, its status and evidence are tabulated in METHODS.md:
+#   'delaunay_remap'    -> 'oscillating_droplet_2D'              (default)
+#   'dual_only'         -> 'oscillating_droplet_2D_dual_only'
+#   'delaunay'          -> 'oscillating_droplet_2D_bare_delaunay' (measured worse)
+#   'delaunay_remap_p2' -> 'oscillating_droplet_2D_projection2'  (laneH opt-in)
 retopo_policy_2d = 'delaunay_remap'
 
 # Retopology policy for the 3D dynamic oscillation runner
@@ -166,6 +174,8 @@ retopo_policy_2d = 'delaunay_remap'
 # 3D-bookkeeping caveat is real (droplet vol_corr gauge reaches 0.9696
 # within 20 steps; outer-phase EOS pressure clips fire on the Delaunay
 # path).  Keep 'dual_only'; see laneE-adoption-defaults.md.
+# Presets (ddgclib.methods.PRESETS, METHODS.md): 'dual_only' ->
+# 'oscillating_droplet_3D', 'delaunay' -> 'oscillating_droplet_3D_delaunay'.
 retopo_policy_3d = 'dual_only'
 
 # Domain size (outer box should be ≥ 5× droplet radius)

@@ -55,7 +55,6 @@ Would you like me to switch Hagen_Poiseuile_2D.py to the Eulerian euler_velocity
 import os
 import pickle
 import numpy as np
-from functools import partial
 
 from hyperct import Complex
 from hyperct.ddg import compute_vd
@@ -78,8 +77,7 @@ from ddgclib.initial_conditions import (
 
 from ddgclib.geometry._complex_operations import extrude
 
-from ddgclib.operators.stress import dudt_i
-from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.data import StateHistory, save_state
 
 # Local parameters
@@ -258,8 +256,12 @@ print(f"ICs applied: plug flow u_x={U_avg:.3f} m/s, P gradient G={G:.5f} Pa/m")
 # position using the NEW velocity.  This is a Lagrangian scheme —
 # vertices move with the flow.
 
-# Bind physics parameters via partial (avoids HC keyword conflict)
-dudt_fn = partial(dudt_i, dim=d, mu=mu, HC=HC)
+# Solver methods (METHODS.md): Lagrangian symplectic Euler, per-step
+# Delaunay, walls frozen through boundary_filter, 20 dudt workers
+# (safe: pressure_model=None, no EOS side effects).
+methods = PRESETS['hagen_poiseuille_2D']
+print(methods.describe())
+dudt_fn = methods.dudt_fn(HC, mu=mu)
 
 # Time stepping parameters
 dt = 0.01
@@ -274,16 +276,17 @@ print(f"\nRunning: dt={dt}, n_steps={n_steps}, t_final={dt*n_steps:.2f}")
 print(f"Recording every {record_every} steps ({n_steps // record_every} snapshots)")
 print(f"Saving state to {_RESULTS}/ every {save_every} steps")
 HC.plot_complex()
-t_final = symplectic_euler(
-    HC, bV, dudt_fn,
-    dt=dt, n_steps=n_steps, dim=d,
+t_final = methods.integrate(
+    HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
     bc_set=bc_set,
     boundary_filter=wall_criterion,  # only freeze wall vertices, not inlet/outlet
     callback=history.callback,
     save_every=save_every,
     save_dir=_RESULTS,
-    workers=20
 )
+record_methods(os.path.join(_RESULTS, 'methods.json'), methods, HC,
+               extra={'dt': dt, 'n_steps': n_steps, 'mu': mu, 'G': G,
+                      'boundary_filter': 'wall_criterion (|y|<1e-10 or |y-D|<1e-10)'})
 
 print(f"Simulation complete: t = {t_final:.4f}")
 
