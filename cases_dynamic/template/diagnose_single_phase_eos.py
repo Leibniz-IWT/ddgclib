@@ -583,7 +583,12 @@ def main_hydro(out, n_tac=8.0, variant='case'):
     Section 3 (the loop body is copied verbatim) with instrumentation.
     variant 'case' = as shipped; 'exact' = rebuild the simplex cache so the
     per-step volumes are the exact barycentric ones from the start;
-    'nogravity' = case setup, g=0 (pure box with a free top)."""
+    'nogravity' = case setup, g=0 (pure box with a free top).
+    Since laneS the builder mesh carries the simplex cache, so 'case' IS
+    'exact'.  A variant with 'fallback' in its name ('fallback',
+    'nogravity_fallback_seed') drops the cache after setup, so the loop
+    runs on the 2D fallback hyperct dual_cell_area_2d (what 'case' did
+    before laneS; the fallback itself was fixed in laneS)."""
     os.makedirs(out, exist_ok=True)
     from cases_dynamic.Hydrostatic_column.src._setup import (
         setup_hydrostatic_column, make_gravity_dudt)
@@ -600,9 +605,10 @@ def main_hydro(out, n_tac=8.0, variant='case'):
     # exact barycentric volumes on the (never changing) builder
     # connectivity, computed on the side for the fallback-vs-exact monitor
     from hyperct.ddg import rebuild_simplex_cache_2d as _rb
+    builder_cache = HC._simplices
     _rb(HC)
     tris = list(HC._simplices)
-    HC._simplices = None
+    HC._simplices = None if 'fallback' in variant else builder_cache
 
     def exact_vols():
         out = {v: 0.0 for v in HC.V}

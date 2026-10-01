@@ -201,8 +201,10 @@ PRESETS: dict[str, SolverMethods] = {
         dim=3, phases='single', integrator='symplectic_euler',
         connectivity='custom', workers=8,
         label=_HP + '_3D/Hagen_Poiseuile_3D.py (retopologize_cylinder)',
-        notes='Case-local filtered Delaunay for the cylinder (never updates '
-              'HC._simplices; freezes every hull vertex incl. the inlet cap, '
+        notes='Case-local filtered Delaunay for the cylinder (drops the '
+              'builder simplex cache and never re-populates HC._simplices, so '
+              'duals and volumes stay on the 1-skeleton fallbacks, laneS; '
+              'freezes every hull vertex incl. the inlet cap, '
               'audit M2). STALLED: no interior vertices near mid-tube after '
               '3000 steps.',
     ),

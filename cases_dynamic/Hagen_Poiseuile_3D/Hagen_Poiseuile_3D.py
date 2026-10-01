@@ -193,12 +193,18 @@ def retopologize_cylinder(HC, bV, dim):
         6. Recompute barycentric dual mesh
         7. Cache dual volumes via batch_e_star
     """
-    from hyperct.ddg import compute_vd
+    from hyperct.ddg import compute_vd, invalidate_simplex_cache
     from scipy.spatial import Delaunay as _Delaunay
 
     verts = list(HC.V)
     if len(verts) < dim + 1:
         return
+
+    # The connectivity is rebuilt by hand below and this function keeps
+    # no simplex list.  Since laneS the builder mesh arrives with
+    # HC._simplices populated; left in place it would describe the OLD
+    # tetrahedra and compute_vd would build the duals from them.
+    invalidate_simplex_cache(HC)
 
     # 1. Merge near-duplicate vertices (prevents accumulation from inlet)
     HC.V.merge_all(cdist=1e-9)

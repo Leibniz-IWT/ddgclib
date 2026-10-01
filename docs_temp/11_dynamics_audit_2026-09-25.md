@@ -179,7 +179,7 @@ surface tension against a frozen pressure, not the EOS response. Same in
 `cube2droplet/diagnostic_no_retopo.py`. Now recorded as
 `connectivity='custom'` in the run's `methods.json`.
 
-### F12. Cases that bypass the library integrators — MECHANISM CLOSED by lane K (2026-09-25): single-phase + EOS blows up under Delaunay because a flip changes a dual volume by 33-100 % (read as 3e4-5e4 Pa); stable under `dual_only`; the Hydrostatic column fails separately because the setup-time `dual_cell_area_2d` fallback undercounts corner / free-surface volumes (0 flips). Prototype single-phase conservative remap is stable; lanes R (library remap) and S (exact setup volumes) are the follow-ups, then P (port the hand-rolled loops). Original finding follows.
+### F12. Cases that bypass the library integrators — MECHANISM CLOSED by lane K (2026-09-25): single-phase + EOS blows up under Delaunay because a flip changes a dual volume by 33-100 % (read as 3e4-5e4 Pa); stable under `dual_only`; the Hydrostatic column fails separately because the setup-time `dual_cell_area_2d` fallback undercounts corner / free-surface volumes (0 flips). Prototype single-phase conservative remap is stable; lanes R (library remap) and S (exact setup volumes) are the follow-ups, then P (port the hand-rolled loops). Lane S SHIPPED 2026-10-01: builders cache their simplices, the fallback is fixed, and the unmodified `Hydrostatic_2D.py` settles over 100 acoustic times (laneS log). Original finding follows.
 Hydrostatic_column (all four), capillary_rise (all four, incl. dynCA),
 dynamic_caprise_tube and liquid_bridge_approach use hand-rolled loops around
 `_recompute_duals`/`compute_vd` (no `_retopologize`, no `batch_e_star`, no

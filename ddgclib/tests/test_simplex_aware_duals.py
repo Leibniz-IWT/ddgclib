@@ -202,10 +202,18 @@ class TestDomainBuildersRetopologize:
 
     def test_rectangle_retopologize_populates_simplices(self):
         from ddgclib.geometry.domains import rectangle
-        # Default behaviour: no simplex cache.
+        # Default behaviour (laneS, was "no simplex cache"): the cache
+        # holds the triangles of the structured connectivity the builder
+        # made; nothing is re-triangulated.
         r0 = rectangle(L=2.0, h=1.0, refinement=2)
-        assert r0.HC._simplices is None
-        # Opt-in: cache populated.
+        assert r0.HC._simplices is not None
+        cached_edges = {frozenset((id(a), id(b)))
+                        for s in r0.HC._simplices for a in s for b in s
+                        if a is not b}
+        mesh_edges = {frozenset((id(v), id(nb)))
+                      for v in r0.HC.V for nb in v.nn}
+        assert cached_edges == mesh_edges
+        # Opt-in: Delaunay connectivity, cache populated.
         r1 = rectangle(L=2.0, h=1.0, refinement=2, retopologize=True)
         assert r1.HC._simplices is not None
         assert len(r1.HC._simplices) > 0

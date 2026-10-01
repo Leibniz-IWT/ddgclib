@@ -62,7 +62,7 @@ os.makedirs(_RESULTS, exist_ok=True)
 # hyperct.Complex by hand (Complex.triangulate + refine_all), import an
 # external mesh, or discretise a level set.
 from ddgclib.geometry.domains import rectangle
-from hyperct.ddg import compute_vd, rebuild_simplex_cache_2d
+from hyperct.ddg import compute_vd
 from ddgclib.operators.stress import cache_dual_volumes
 
 d = 2
@@ -76,11 +76,9 @@ walls = bV
 # Duals are needed BEFORE any volume-averaged initial condition and
 # before the first force evaluation.  The integrator rebuilds them every
 # step according to the connectivity policy chosen in step 4.
-# The simplex cache makes the setup dual volumes exact (they tile the
-# domain, corners included), i.e. the same measure every later
-# retopology uses; without it the 2D fallback undercounts corner cells
-# 4x and the EOS starts from a wrong density there (lane K).
-rebuild_simplex_cache_2d(HC)
+# The builder already cached the mesh triangles (HC._simplices), so
+# these setup dual volumes are the exact ones (they tile the domain,
+# corners included): the same measure every later retopology uses.
 compute_vd(HC, method='barycentric')
 cache_dual_volumes(HC, d)
 

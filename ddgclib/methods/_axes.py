@@ -210,7 +210,11 @@ _AXES: list[MethodAxis] = [
                  'Cannot follow large deformation (dam break NaN-aborts, laneF). '
                  'laneK: single-phase + EOS is stable here without any remap '
                  '(pressure force = exact volume gradient to 1e-10; '
-                 'symplectic_euler stable to dt c_s/dx = 1.5)',
+                 'symplectic_euler stable to dt c_s/dx = 1.5). laneS: on a builder '
+                 'mesh it now reads simplex_exact volumes and runs with free '
+                 '(untagged) surface vertices, which raised IndexError before: '
+                 'free-surface box, g = 0, 1e-6 m/s seed decays 1.5e-6 -> 2.0e-9 '
+                 'over 8 acoustic times (test_builder_simplex_cache.py)',
                  dims=(2, 3)),
             _opt('dual_only_bare', 'Frozen connectivity, boundary retagged from '
                  'HC.boundary(), compute_vd + cache_dual_volumes (half-cell '
@@ -503,7 +507,9 @@ _AXES: list[MethodAxis] = [
     MethodAxis(
         name='dual_path', title='Dual construction path', group='dual geometry (reported)',
         default='simplex_aware', explicit=False,
-        control='presence of HC._simplices (connect_and_cache_simplices)',
+        control='presence of HC._simplices (connect_and_cache_simplices at every '
+                'Delaunay retopology; rebuild_simplex_cache_2d / _3d of the built '
+                'connectivity in every domain builder, DomainResult.__post_init__)',
         options=(
             _opt('simplex_aware', 'Top-simplex cache drives compute_vd, '
                  'boundary_from_simplices, exact volumes', 'validated',
@@ -525,22 +531,38 @@ _AXES: list[MethodAxis] = [
                  '(hyperct.ddg.simplex_dual_volumes / vertex_dual_volume)',
                  'validated',
                  'hyperct/ddg/_dual_volume.py',
-                 '3D switch ON 2026-07-29 (laneA), floor re-pinned 7.274172e-05'),
+                 '3D switch ON 2026-07-29 (laneA), floor re-pinned 7.274172e-05. '
+                 'laneS (2026-10-01): the domain builders cache the simplices of '
+                 'the connectivity they build, so SETUP reads this source too '
+                 '(rectangle total 0.96875 -> 1.0, box 0.9167 -> 1.0, no volume '
+                 'jump at the first retopology; test_builder_simplex_cache.py). '
+                 'Shipped Hydrostatic_2D then settles (100 t_ac, |u| 3.0e-4) '
+                 'instead of reaching 10 c0 at 6.9 t_ac; every pinned number is '
+                 'bit-identical (the droplet meshes already carried a Delaunay '
+                 'cache)'),
             _opt('fan_walk_3d', 'batch_e_star / v_star tetra fan sum; undercounts '
                  '1-4% interior, ~20% boundary', 'measured-worse',
                  'hyperct/ddg/_operators.py:batch_e_star(compute_volumes=True)',
-                 'docs_temp/audit/dual-volume-3d.md', dims=(3,)),
+                 'docs_temp/audit/dual-volume-3d.md. laneS: no builder mesh '
+                 'reaches it any more (it gave the box builder 0.9167 of its '
+                 'volume at setup); left for hand-built 3D complexes without a '
+                 'simplex cache and for circumcentric duals', dims=(3,)),
             _opt('dual_cell_area_2d', 'Shoelace area of the 2D dual polygon '
-                 '(circumcentric or no simplex cache, i.e. every 2D mesh at '
-                 'SETUP before the first retopology)', 'broken',
+                 '(circumcentric duals, or a hand-built 2D complex without a '
+                 'simplex cache; builder meshes no longer reach it)', 'opt-in',
                  'hyperct/ddg/_dual_cell.py:dual_cell_area_2d',
-                 'laneK: undercounts the four corner cells 4x (rectangle total '
-                 '0.96875 instead of 1.0 = the old "2-4 % single-phase volume '
-                 'leak") and credits a moving free-surface vertex with 1/4 of its '
-                 'own volume change (0.0104 vs exact 0.0417): Hydrostatic_2D '
-                 'grows exponentially from roundoff with 0 flips, and decays 8 '
-                 'orders with exact simplex volumes. Populate HC._simplices at '
-                 'setup (lane S)', dims=(2,)),
+                 'Was broken until laneS (laneK: boundary polygon without the '
+                 'vertex itself, so the four corner cells were 4x too small, '
+                 'rectangle total 0.96875, and a moving free-surface vertex got '
+                 '1/4 of its own volume change; Hydrostatic_2D blew up with 0 '
+                 'flips). FIXED in hyperct 2026-10-01: the half cell of a '
+                 'boundary vertex is walked as an open chain and closed through '
+                 'the vertex; it now equals the simplex rule at every vertex of '
+                 'a kinked boundary to 1e-11 (hyperct test_dual_volume.py) and '
+                 'the Hydrostatic loop run on it (driver variant fallback) '
+                 'matches the simplex_exact run. Degenerate fans still use the '
+                 'angular sort (no vertex point); circumcentric boundary cells '
+                 'are not validated (laneK P14/P15)', dims=(2,)),
             _opt('interval_1d', 'Distance between the two dual vertices', 'validated',
                  'ddgclib/operators/stress.py:dual_volume', dims=(1,)),
         ),
