@@ -1,5 +1,4 @@
-# Folfer level ignores
-data/*
+# Folder level ignores
 fig/*
 surface_evolver
 shgo
