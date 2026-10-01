@@ -2,15 +2,19 @@
 # coding: utf-8
 
 import copy
-import sys
 import numpy as np
 import polyscope as ps
 
 # Local library imports
+# Allow for relative imports from main library:
+import sys
+import os
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
 from ddgclib import *
 from ddgclib._curvatures import HC_curvatures_sessile
 from hyperct import *
-from ddgclib._sphere import *
+#from ddgclib._sphere import *
 from ddgclib._sessile import *
 from ddgclib._capillary_rise_flow import *  # plot_surface, curvature
 from ddgclib._eos import *
@@ -763,7 +767,7 @@ minEdge = 0.1 * RadFoot
 maxEdge = 2 * minEdge
 maxMove = 0.5 * minEdge**2 / RadFoot
 print(f'RadFoot = {RadFoot}')
-tInit = 1500
+tInit = 300
 t = tInit
 if tInit == 0:
     HC, bV = cone_init(RadFoot, Volume, NFoot=6)

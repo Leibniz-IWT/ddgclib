@@ -26,7 +26,7 @@ from matplotlib.widgets import Slider
 import polyscope as ps
 from ddgclib._misc import *  # coldict is neeeded
 from ddgclib._misc import coldict
-from ddgclib.operators.gradient import velocity_laplacian as du
+#from ddgclib.operators.gradient import velocity_laplacian as du
 
 plt.rcdefaults()
 plt.rcParams.update({"text.usetex": True,'font.size' : 14,})
