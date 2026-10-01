@@ -22,7 +22,7 @@ ddgclib/__pycache__
 *.ini
 ddgclib/.idea/*
 .idea/*
-.gitignore
+#.gitignore
 .idea/*
 
 dev*.py
