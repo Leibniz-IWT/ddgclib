@@ -16,10 +16,11 @@ from ddgclib.geometry._parametric_surfaces import (
     rotation_matrix_align,
 )
 from ddgclib.geometry._complex_operations import translate, extrude
-from ddgclib.geometry._retriangulation import (
-    connect_and_cache_simplices,
-    invalidate_simplex_cache,
-)
+#IC 2026 Oct 1: this is not in hyperct 3.6
+#from ddgclib.geometry._retriangulation import (
+#    connect_and_cache_simplices,
+#    invalidate_simplex_cache,
+#)
 from ddgclib.geometry._interface_subcomplex import (
     extract_interface,
     validate_closure,

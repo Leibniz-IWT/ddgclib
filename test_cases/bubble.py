@@ -6,7 +6,7 @@ import numpy as np
 import polyscope as ps
 
 # Local library imports
-# Allow for relative imports from main library:
+#IC 2026 Oct 1: ddgclib is one dir up 
 import sys
 import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -767,7 +767,7 @@ minEdge = 0.1 * RadFoot
 maxEdge = 2 * minEdge
 maxMove = 0.5 * minEdge**2 / RadFoot
 print(f'RadFoot = {RadFoot}')
-tInit = 300
+tInit = 250
 t = tInit
 if tInit == 0:
     HC, bV = cone_init(RadFoot, Volume, NFoot=6)
@@ -784,8 +784,9 @@ fname = '../data/vol.txt'
 with open(fname, "a") as vol_txt:
     print('saving', fname)
     # Surface energy minimisation
-    while t <= tInit + 300:
+    while t <= tInit + 500:
         if t % 10 == 0:
+            #plot_polyscope(HC)
             save_vert_positions(t)
         E_0 = get_energy(HC)
         print('t', t, 'nVerts', len(list(HC.V)), 'maxMove', maxMove)
@@ -818,6 +819,5 @@ with open(fname, "a") as vol_txt:
                 HC.V.move(v, tuple(v.x_a + normFor))
         if t % 10 == 0:
             save_vert_positions(str(t) + 'uncor')
-    # plot_polyscope(HC) is assumed to open a window via polyscope
 plot_polyscope(HC)
 plt.show()
