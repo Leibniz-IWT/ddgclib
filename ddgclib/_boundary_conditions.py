@@ -292,6 +292,51 @@ class ShearingPlateBC(BoundaryCondition):
         return count
 
 
+class FreeSlipWallBC(BoundaryCondition):
+    """Free-slip (symmetry) wall: no flow through it, free motion along it.
+
+    Each step the target vertices get their wall-normal velocity zeroed
+    and their wall-normal coordinate put back on ``wall_coord``; the
+    tangential components are left to the integrator.  The target
+    vertices must NOT be members of ``bV``: they are integrated like
+    interior vertices.  The wall reaction this BC stands for is the
+    wall-normal part of the force on their open dual cell, so only that
+    component is discarded.
+
+    Always register it with its wall vertices
+    (``bc_set.add(FreeSlipWallBC(0, 0.0), wall_vertices)``): every target
+    vertex is put on the wall, so the ``BoundaryConditionSet`` default
+    (all of ``bV``) would pull the frozen vertices onto it.  The target
+    set is only iterated, never used for membership tests (a vertex hash
+    changes when the vertex moves).
+
+    Parameters
+    ----------
+    wall_axis : int
+        Coordinate axis normal to the wall.
+    wall_coord : float
+        Position of the wall along that axis.
+    """
+
+    def __init__(self, wall_axis: int, wall_coord: float):
+        super().__init__(axis=int(wall_axis))
+        self.wall_coord = float(wall_coord)
+
+    def apply(self, mesh, dt, target_vertices=None):
+        if target_vertices is None:
+            raise ValueError("FreeSlipWallBC needs its wall vertices "
+                             "(target_vertices)")
+        count = 0
+        for v in list(target_vertices):
+            v.u[self.axis] = 0.0
+            if v.x_a[self.axis] != self.wall_coord:
+                new_x = list(v.x)
+                new_x[self.axis] = self.wall_coord
+                mesh.V.move(v, tuple(new_x))
+            count += 1
+        return count
+
+
 class DirichletVelocityBC(BoundaryCondition):
     """Fixed velocity on boundary vertices.
 

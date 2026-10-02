@@ -7,11 +7,10 @@ bit-identical to the pre-wrapper hand-written partials by
 policy string it corresponds to; the ``notes`` carry the pinned numbers
 and the lane log or audit entry that justify it.
 
-Cases whose runners are hand-rolled loops (Hydrostatic_column,
-capillary_rise, dynamic_caprise_tube, liquid_bridge_approach) have NO
-preset on purpose: a preset would describe the nearest library-equivalent
-configuration, not what runs.  They are listed in ``METHODS.md`` §4 with
-status "hand-rolled".
+Cases whose runners are hand-rolled loops (capillary_rise,
+dynamic_caprise_tube, liquid_bridge_approach) have NO preset on purpose: a
+preset would describe the nearest library-equivalent configuration, not
+what runs.  They are listed in ``METHODS.md`` §4 with status "hand-rolled".
 """
 from __future__ import annotations
 
@@ -24,6 +23,7 @@ _DB = 'cases_dynamic/dam_break/'
 _EB = 'cases_dynamic/electrolysis_bubble/'
 _SP = 'cases_dynamic/shearing_plate_droplet/'
 _HP = 'cases_dynamic/Hagen_Poiseuile'
+_HY = 'cases_dynamic/Hydrostatic_column/'
 
 PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
@@ -207,6 +207,64 @@ PRESETS: dict[str, SolverMethods] = {
               'freezes every hull vertex incl. the inlet cap, '
               'audit M2). STALLED: no interior vertices near mid-tube after '
               '3000 steps.',
+    ),
+    # ------------------------------------------------------------------
+    # Hydrostatic column (single phase, EOS, free surface)
+    # ------------------------------------------------------------------
+    'hydrostatic_1D': SolverMethods(
+        dim=1, phases='single', integrator='symplectic_euler',
+        connectivity='delaunay',
+        label=_HY + 'Hydrostatic_1D.py',
+        notes='1D rebuild = sorted chain (no flips; equal to round-off to the '
+              'hand-rolled loop it replaces). boundary_filter = bottom vertex, '
+              'top vertex free, Tait n = 1, c0 = 10 sqrt(g H), gravity as '
+              'body_force, mu = 0.5 rho c0 dx. 33 vertices, 200 t_ac: from '
+              'uniform density the column rings at its fundamental mode, KE '
+              'decay 0.0389 / t_ac (viscous theory 0.0386), max|u| 0.89 -> '
+              '1.7e-2 (envelope of the last 4 t_ac; last sample 1.44e-2); '
+              'from the equilibrium masses 2.8e-6 -> 7.0e-8, '
+              'integrated L2 0.28 Pa. Error against refinement 3..6: 1.04 / '
+              '0.220 / 0.0448 / 0.0094 Pa (laneP).',
+    ),
+    'hydrostatic_2D': SolverMethods(
+        dim=2, phases='single', integrator='symplectic_euler',
+        connectivity='dual_only',
+        label=_HY + 'Hydrostatic_2D.py',
+        notes='No-slip bottom and side walls (boundary_filter), free surface. '
+              '145 vertices, 200 t_ac: max|u| 0.248 -> 1.1e-4 from uniform '
+              'density (integrated L2 49.9 Pa = 5.1e-3 rho g H, interior 5.8 '
+              'Pa), 7.0e-6 -> 4.2e-9 from the equilibrium masses (L2 48.6, '
+              'interior 0.23). L2 against refinement 2..4: 136 / 48.6 / 17.2 '
+              'Pa. Reconnecting arm = .replace(connectivity=delaunay_material, '
+              'remap=conservative, redistribute_mass=True): stable, 1.2e-4 / '
+              'noise floor 2.3e-6. Needs the artificial viscosity: with the '
+              'viscosity of water the drop exceeds c0 at 64 t_ac (laneP).',
+    ),
+    'hydrostatic_2D_periodic': SolverMethods(
+        dim=2, phases='single', integrator='symplectic_euler',
+        connectivity='dual_only',
+        label=_HY + 'Hydrostatic_2D_periodic.py (free-slip side walls)',
+        notes='NOT periodic connectivity (measured unusable for a single-phase '
+              'EOS column, see the periodic option): the side vertices slide '
+              'on FreeSlipWallBC, only the bottom is frozen, so the solution '
+              'is one-dimensional. 145 vertices, 200 t_ac: max|u| 0.256 -> '
+              '1.1e-6 from uniform density (KE decay 0.126 / t_ac, viscous '
+              'theory 0.125), 6.6e-6 -> 3.4e-11 from the equilibrium masses; '
+              'L2 against refinement 2..4: 144 / 49.8 / 17.4 Pa, interior '
+              '0.90 / 0.22 / 0.051 (laneP).',
+    ),
+    'hydrostatic_3D': SolverMethods(
+        dim=3, phases='single', integrator='symplectic_euler',
+        connectivity='dual_only_bare',
+        label=_HY + 'Hydrostatic_3D.py',
+        notes='dual_only_bare, not dual_only: the 3D branch of dual_only '
+              'zeroes the dual volume of frozen vertices, so wall cells would '
+              'read P0 (measured L2 1.5e4 Pa). Here: wall half cells, p_ij '
+              'dual faces, boundary_filter = walls, free top. 189 vertices, '
+              '100 t_ac: max|u| 0.144 -> 2.4e-4 from uniform density, 3.2e-5 '
+              '-> 5.4e-7 from the equilibrium masses (integrated L2 0.99 Pa; '
+              'refinement 1: 2.15 Pa). 3D cell integrals of ddgclib.analytical '
+              'are point value x volume (laneP).',
     ),
 }
 

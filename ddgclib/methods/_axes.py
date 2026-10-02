@@ -136,7 +136,25 @@ _AXES: list[MethodAxis] = [
             _opt('single', 'One fluid; v.p from pressure_model or held; '
                  'forces from operators.stress.stress_force', 'validated',
                  'ddgclib/operators/stress.py:stress_force',
-                 'Hagen-Poiseuille / hydrostatic machine-precision equilibria'),
+                 'Hagen-Poiseuille / hydrostatic machine-precision equilibria '
+                 '(for NODAL pressures: with dual-cell averages the wall half '
+                 'cells break the linear precision, 2D static residual 1.9075 '
+                 'm/s^2 at every refinement, laneP). laneP: with an EOS and '
+                 'gravity the discrete hydrostatic equilibrium is a saddle of '
+                 'the discrete energy: slow modes grow at 1.13 g/c0 (0.353 1/s '
+                 'on the 2D column; the same in a closed box, where the stiffness '
+                 'matrix is symmetric to 5e-10; 1.01 g/c0 at refinement 2, so it '
+                 'does not refine away), followed in a real run (amplitude x4.816 '
+                 'at 200 acoustic times, cosh(sigma t) 4.816). Viscosity turns the growth into '
+                 'creep (rate ~ 1/mu: 1.2e-4 1/s at mu = 0.5 rho c0 dx); with '
+                 'the viscosity of water the no-slip drop exceeds c0 at 64 t_ac. '
+                 'FREE SURFACE: the open-fan force is not an energy gradient '
+                 '(stiffness asymmetry 11 to 16 %, closed fans symmetric to '
+                 '5e-10); without viscosity the no-slip column flutters at '
+                 'refinement 2 (0.75 1/s, x61 in a real run against x59 '
+                 'predicted) and 4 (1.22 1/s), not at 3 and never with a closed '
+                 'lid; 0.05 rho c0 dx of viscosity removes it '
+                 '(cases_dynamic/Hydrostatic_column/diagnose_column.py)'),
             _opt('multi', 'Sharp-interface n-phase model on MultiphaseSystem; '
                  'per-phase summed stress + surface tension', 'validated',
                  'ddgclib/operators/multiphase_stress.py:multiphase_stress_force',
@@ -198,8 +216,66 @@ _AXES: list[MethodAxis] = [
                  'SINGLE-PHASE + EOS without remap: measured unstable in every '
                  'laneK arm (a flip changes a dual volume by 33-100 %, read as '
                  '3e4-5e4 Pa; blows up at CFL 0.01, c_s 10 or 100, n 1 or 7.15, '
-                 'redistribution on or off); use remap=conservative (laneR)',
+                 'redistribution on or off); use remap=conservative (laneR). '
+                 'FREE SURFACE (laneP): the rebuild triangulates the convex hull '
+                 'of the cloud, so the gap between a moved free surface and the '
+                 'hull is filled with near-degenerate simplices. Even WITH '
+                 'remap=conservative the 2D hydrostatic column reaches 42 m/s at '
+                 '3 t_ac, the total volume stays pinned to the hull and the '
+                 'column carries half the hydrostatic head (integrated L2 4.9e3 '
+                 'Pa = rho g H / 2); from the equilibrium masses it exceeds c0 '
+                 'at 95 t_ac; 3D 7.1 m/s. Use delaunay_material. In 1D the '
+                 'rebuild is the sorted chain and equals a non-reconnecting loop '
+                 'to round-off (hydrostatic_1D preset)',
                  dims=(1, 2, 3)),
+            _opt('delaunay_material', 'Per-step Delaunay rebuild that keeps the '
+                 'fluid domain: the boundary of the previous connectivity is '
+                 'material, the simplices Delaunay adds between a free surface '
+                 'and the convex hull are removed again (geometric test: winding '
+                 'number of the simplex centroid about the old boundary; exposed '
+                 'flat wall simplices are dropped). 2D: domain kept to round-off. '
+                 '3D: kept up to the slivers of free-surface diagonal flips (no '
+                 'facet recovery); the relative volume change is returned and '
+                 'warned above domain_tol. Half-cell boundary volumes, no '
+                 'edge-area cache (2D shared dual vertices, 3D p_ij ring). Single '
+                 'phase; with remap=conservative it runs the single-phase remap '
+                 'around the rebuild', 'opt-in',
+                 'ddgclib/methods/_retopo.py:retopologize_material_delaunay',
+                 'laneP 2026-10-01, with remap=conservative on the hydrostatic '
+                 'column (free surface). 2D: 200 t_ac from uniform density max|u| '
+                 'envelope 1.24e-4 m/s (dual_only 1.14e-4), from the equilibrium '
+                 'masses bounded at a reconnection noise floor of 2.3e-6 m/s '
+                 '(dual_only decays to 4.2e-9); mass drift below 3e-14; largest '
+                 'offset K (s - 1) of the mass rescale 0.99 Pa; domain volume '
+                 'change 0 to round-off in every call. 3D (189 vertices): '
+                 '100 t_ac envelope 5.6e-4 to 5.7e-4 m/s in two processes '
+                 '(dual_only_bare 2.4e-4), from the equilibrium masses a floor '
+                 'of 9.9e-7 (dual_only_bare 5.4e-7); '
+                 'domain change at most 1.2e-6 per call (the four corner squares '
+                 'at the first rebuild), 1.6e-6 summed over 185 calls, offset 2.4 '
+                 'Pa; after about 10 t_ac the 3D drop run is reproducible between '
+                 'processes to 2 digits only (cospherical mesh, Delaunay ties). '
+                 'A 0.004 bowl pushed into the builder surface in one go changes '
+                 'the 3D domain by 9.8e-5. Interior integrated pressure error '
+                 '(2D) 36 to 42 Pa against 0.23 Pa on the builder mesh: that is '
+                 'the offset between cell centroid and vertex on the Delaunay '
+                 'cells (attribution run: 31.3 Pa integrated, rho g x rms offset '
+                 '31.1 Pa, error against the nodal value 0.20 Pa, builder mesh '
+                 '0.18). REVIEW FIX: the first peel was topological (a simplex '
+                 'went when it exposed a facet that was not an old boundary '
+                 'facet) and removed FLUID in 3D, where the diagonals of planar '
+                 'wall squares change between rebuilds: lattice cube total '
+                 'volume down to 0.790, 41.7 % lost in one call on the coarsest '
+                 'lattice; with the geometric test the volume is 1 to 1e-15 and '
+                 'every 1D / 2D number is bit-identical. Re-deriving the '
+                 'boundary orientation at each call is a DO-NOT (a thin surface '
+                 'simplex inverts during the step: winding numbers 0.5, 3D '
+                 'domain flicker 8e-5 per call, peak 0.185 instead of 0.157 m/s). '
+                 'WITHOUT the remap it is the laneK instability (128 m/s). '
+                 'Needs HC._simplices before the first call; no merge step, no '
+                 'inlet / outlet BCs, backend not applied. '
+                 'test_material_delaunay.py (18), test_case_hydrostatic.py',
+                 dims=(2, 3), phases='single'),
             _opt('dual_only', 'skip_triangulation=True: keep builder connectivity, '
                  'refresh v.boundary tags, duals, dual volumes (and per-phase '
                  'split / redistribution / EOS for multiphase) every step',
@@ -214,17 +290,33 @@ _AXES: list[MethodAxis] = [
                  'mesh it now reads simplex_exact volumes and runs with free '
                  '(untagged) surface vertices, which raised IndexError before: '
                  'free-surface box, g = 0, 1e-6 m/s seed decays 1.5e-6 -> 2.0e-9 '
-                 'over 8 acoustic times (test_builder_simplex_cache.py)',
+                 'over 8 acoustic times (test_builder_simplex_cache.py). laneP: '
+                 'hydrostatic_2D / hydrostatic_2D_periodic presets (200 t_ac: '
+                 'max|u| envelope 1.1e-4 / 1.1e-6 m/s from uniform density, '
+                 '4.2e-9 / 3.4e-11 from the equilibrium masses). 3D SINGLE '
+                 'PHASE + EOS: do not use, the 3D branch zeroes the dual volume '
+                 'of every frozen vertex, so wall cells read P0: hydrostatic 3D '
+                 'column max|u| 3.9e-2 m/s and integrated L2 1.5e4 Pa (1.5 '
+                 'rho g H) at 100 t_ac even from the equilibrium masses; use '
+                 'dual_only_bare',
                  dims=(2, 3)),
             _opt('dual_only_bare', 'Frozen connectivity, boundary retagged from '
                  'HC.boundary(), compute_vd + cache_dual_volumes (half-cell '
                  'boundary volumes, no edge-area cache) + per-phase split; NO '
-                 'mps.refresh, NO redistribution, NO EOS update (pressure '
-                 'frozen at its setup value)', 'validated',
+                 'mps.refresh, NO redistribution. Multiphase: no EOS update '
+                 '(p_phase frozen at its setup value). Single phase: the EOS in '
+                 'dudt_fn reads the refreshed dual volumes, so the pressure is '
+                 'live', 'validated',
                  'ddgclib/methods/_retopo.py:bare_dual_refresh',
                  'static_droplet_2D pin 1.1847162859108737e-03 (was the '
                  'case-local _dual_only_retopo closure; audit F11: validates '
-                 'surface tension against a FROZEN pressure field)',
+                 'surface tension against a FROZEN pressure field). laneP: the '
+                 'integrator boundary_filter is honoured (default None = whole '
+                 'hull frozen, unchanged). Single phase the EOS in dudt_fn is '
+                 'live, so this is the fixed-connectivity path with wall half '
+                 'cells and p_ij faces in 3D: hydrostatic_3D preset, 100 t_ac '
+                 'max|u| envelope 2.4e-4 m/s (uniform density start) / 5.4e-7 '
+                 '(equilibrium masses), integrated L2 0.99 Pa = 1.0e-4 rho g H',
                  dims=(2, 3)),
             _opt('frozen', 'retopologize_fn=False: NO topology or dual refresh at '
                  'all. Surface meshes / A.5.a static probes only', 'opt-in',
@@ -249,7 +341,16 @@ _AXES: list[MethodAxis] = [
                  'periodic path ignores skip_triangulation/remesh/backend; '
                  'shearing_plate_droplet 2D is unstable (interface lost by '
                  't=0.044 s), 3D crashes in setup; domain_bounds is a build-time '
-                 'argument (geometry), periodic_axes the method field',
+                 'argument (geometry), periodic_axes the method field. laneP, '
+                 'single phase + EOS: not usable. After ONE retopologize_periodic '
+                 'of periodic_rectangle (unit square, refinement 3) the total '
+                 'dual volume is 2.488 (exact 1.0; seam simplices are measured '
+                 'with raw coordinates), the cache holds 287 simplices instead '
+                 'of 256, 45 of 136 vertices fail dual-face closure (29 of them '
+                 'interior) and 6 interior vertices are tagged boundary; the '
+                 'hydrostatic column exceeds c0 at 0.66 t_ac (diagnose_column.py '
+                 'periodic). The Hydrostatic_2D_periodic runner therefore uses '
+                 'free-slip walls on dual_only',
                  dims=(2, 3)),
             _opt('custom', 'User-supplied retopologize_fn callable (e.g. '
                  'static_droplet_2D bare dual-only, Hagen_Poiseuile_3D cylinder)',
@@ -292,7 +393,15 @@ _AXES: list[MethodAxis] = [
                  '(laneK prototype, laneR library): box + EOS stable where bare '
                  'Delaunay blows up at any CFL / c_s / n; final KE within 0.2 % of '
                  'dual_only; pinned by test_single_phase_remap.py. Interior-only '
-                 'or stale-v.p variants are measured DO-NOTs (laneK P2, P3)',
+                 'or stale-v.p variants are measured DO-NOTs (laneK P2, P3). '
+                 'laneP: the uniform offset K (s - 1) of the mass rescale '
+                 '(laneR known limit) is NOT what breaks a free-surface column: '
+                 'without the rescale the convex-hull arm is worse (59.4 against '
+                 '42.1 m/s, mass drift +1.5 %, total volume 1.03; '
+                 'diagnose_column.py remap), and once the hull fill is removed '
+                 '(connectivity=delaunay_material) the offset stays below 1 Pa '
+                 '(convex arm: up to 2.7e3 Pa per rebuild) and the run with and '
+                 'without the rescale agree to 3 digits. No gauge was added',
                  dims=(2, 3)),
         ),
     ),
@@ -484,7 +593,11 @@ _AXES: list[MethodAxis] = [
                  'ddgclib/operators/stabilisation.py:density_diffusion_step',
                  'capillary_rise dynCA smoke (water R 0.5 mm, after the corner '
                  'fix): L2 0.26 -> 0.075 (delta 0.05) / 0.13 (0.1); 0.2-0.3 '
-                 'over-smooth (capillary_rise_energy_grad README Section 5)',
+                 'over-smooth (capillary_rise_energy_grad README Section 5). '
+                 'laneP: it does not cure the slow instability of the inviscid '
+                 'hydrostatic column (no-slip 2D drop with the viscosity of '
+                 'water exceeds c0 at 63 / 57 t_ac for delta 0.05 / 0.1, 64 '
+                 'without)',
                  phases='single'),
         ),
     ),
@@ -571,17 +684,22 @@ _AXES: list[MethodAxis] = [
         name='boundary_dual_vol', title='Boundary-vertex dual volume convention',
         group='dual geometry (reported)', default='half_cell', explicit=False,
         control='dim: 3D retopology zeroes boundary dual_vol (batch_e_star path); '
-                '1D/2D/periodic/setup keep the truncated half cell',
+                '1D/2D/periodic/setup keep the truncated half cell, and so do '
+                'connectivity=dual_only_bare and delaunay_material in 3D',
         options=(
             _opt('zeroed', 'v.dual_vol = 0 on every vertex in bV after retopology',
                  'validated',
                  'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize step 5b',
-                 'measured 2026-09-25: 3D box boundary dual_vol 0.0', dims=(3,)),
+                 'measured 2026-09-25: 3D box boundary dual_vol 0.0. laneP: '
+                 'with a single-phase EOS a zero-volume wall cell reads the '
+                 'reference pressure P0, which breaks any case whose wall '
+                 'pressure is not P0 (hydrostatic 3D)', dims=(3,)),
             _opt('half_cell', 'Boundary vertices keep the truncated dual cell '
                  '(cache_dual_volumes path)', 'validated',
                  'ddgclib/operators/stress.py:cache_dual_volumes',
                  'measured 2026-09-25: 2D rectangle max boundary dual_vol 0.0156, '
-                 'total 1.0', dims=(1, 2)),
+                 'total 1.0. Also 3D under connectivity=dual_only_bare and '
+                 'delaunay_material (laneP)', dims=(1, 2, 3)),
         ),
     ),
     MethodAxis(

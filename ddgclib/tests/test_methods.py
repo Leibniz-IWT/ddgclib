@@ -150,6 +150,13 @@ class TestValidation:
              redistribute_mass=False, projection_every=2),
         dict(dim=2, phases='multi', connectivity='frozen',
              redistribute_mass=True, projection_every=2),
+        # delaunay_material (laneP): single phase, 2D / 3D, no merge step,
+        # redistribution only as part of the remap
+        dict(dim=2, phases='multi', connectivity='delaunay_material'),
+        dict(dim=1, connectivity='delaunay_material'),
+        dict(dim=2, connectivity='delaunay_material', merge_cdist=1e-3),
+        dict(dim=2, connectivity='delaunay_material', redistribute_mass=True),
+        dict(dim=2, connectivity='delaunay_material', backend='torch'),
     ])
     def test_invalid_combinations_raise(self, kw):
         with pytest.raises(ValueError):
@@ -173,6 +180,9 @@ class TestValidation:
                       periodic_axes=(0, 2), redistribute_mass=True)
         SolverMethods(dim=2, phases='multi', connectivity='dual_only_bare')
         SolverMethods(dim=3, phases='multi', connectivity='frozen')
+        SolverMethods(dim=2, connectivity='delaunay_material')
+        SolverMethods(dim=3, connectivity='delaunay_material',
+                      remap='conservative', redistribute_mass=True)
 
     def test_broken_status_warns(self):
         """Constructing a config with a 'broken' option warns.  No field
@@ -266,6 +276,60 @@ class TestSinglePhaseBuilders:
             # single-phase reconnection + EOS
             SolverMethods(dim=2, remap='conservative', redistribute_mass=True
                           ).dudt_fn(object(), mu=1.0, pressure_model=eos)
+            # laneP: in 1D the 'delaunay' rebuild is the sorted chain, it
+            # cannot flip (equal to round-off to a loop that never
+            # reconnects, test_case_hydrostatic.py)
+            SolverMethods(dim=1).dudt_fn(object(), mu=1.0, pressure_model=eos)
+            SolverMethods(dim=2, connectivity='delaunay_material',
+                          remap='conservative', redistribute_mass=True
+                          ).dudt_fn(object(), mu=1.0, pressure_model=eos)
+        with pytest.warns(UserWarning, match='UNSTABLE'):
+            SolverMethods(dim=2, connectivity='delaunay_material').dudt_fn(
+                object(), mu=1.0, pressure_model=eos)
+
+    def test_delaunay_material_builder(self):
+        """laneP: one library function; the remap is bound in a partial
+        and the integrator forwards pressure_model / redistribute_mass /
+        boundary_filter to it by name."""
+        import inspect
+        from ddgclib.eos import TaitMurnaghan
+        from ddgclib.methods._retopo import retopologize_material_delaunay
+        eos = TaitMurnaghan(rho0=1000.0, P0=0.0, K=1e5, n=1)
+        m = SolverMethods(dim=2, connectivity='delaunay_material')
+        assert m.retopologize_fn() is retopologize_material_delaunay
+        assert m.integrator_kwargs()['skip_triangulation'] is False
+        r = m.replace(remap='conservative', redistribute_mass=True)
+        fn = r.retopologize_fn()
+        assert fn.func is retopologize_material_delaunay
+        assert fn.keywords == {'retopo_remap': 'conservative'}
+        kw = r.integrator_kwargs(pressure_model=eos)
+        assert kw['pressure_model'] is eos and kw['redistribute_mass'] is True
+        params = inspect.signature(retopologize_material_delaunay).parameters
+        for name in ('boundary_filter', 'pressure_model', 'redistribute_mass'):
+            assert name in params
+        assert r.status_of('connectivity') == AXES['connectivity'].option(
+            'delaunay_material').status
+
+    def test_dual_only_bare_boundary_filter(self):
+        """laneP: the bare refresh freezes the whole hull by default; the
+        integrator's boundary_filter narrows it (free-surface vertices
+        stay free)."""
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _do_retopologize,
+        )
+        from ddgclib.geometry.domains import rectangle
+        result = rectangle(L=1.0, h=1.0, refinement=1)
+        HC = result.HC
+        hull = set(HC.boundary())
+        bottom = {v for v in hull if v.x_a[1] < 1e-12}
+        fn = SolverMethods(dim=2, connectivity='dual_only_bare').retopologize_fn()
+        bV: set = set()
+        _do_retopologize(HC, bV, 2, retopologize_fn=fn)
+        assert bV == hull
+        _do_retopologize(HC, bV, 2, retopologize_fn=fn,
+                         boundary_filter=lambda v: v in bottom)
+        assert bV == bottom and 0 < len(bottom) < len(hull)
+        assert all(v.boundary == (v in hull) for v in HC.V)
 
     def test_single_phase_remap_builder(self):
         """laneR: single-phase remap = the library _retopologize with

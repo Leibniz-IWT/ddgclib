@@ -53,7 +53,7 @@ _MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path')
 
 # Connectivity values whose retopology function runs the multiphase
 # redistribution block (so remap / projection_every can apply).
-_RECONNECTING = ('delaunay', 'adaptive')
+_RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material')
 
 
 @dataclass(frozen=True)
@@ -165,6 +165,25 @@ class SolverMethods:
                 raise ValueError("connectivity='dual_only_bare' re-splits with "
                                  "the default split_method only")
 
+        if self.connectivity == 'delaunay_material':
+            # One retopology function, single phase only; it has no merge
+            # step and offers redistribution only as part of the remap.
+            if multi:
+                raise ValueError("connectivity='delaunay_material' is "
+                                 "single-phase only")
+            if self.merge_cdist is not None:
+                raise ValueError("merge_cdist is not applied by "
+                                 "connectivity='delaunay_material'")
+            if self.backend is not None:
+                raise ValueError("backend is not applied by "
+                                 "connectivity='delaunay_material' (its "
+                                 "dual refresh is numpy only)")
+            if self.redistribute_mass and self.remap != 'conservative':
+                raise ValueError(
+                    "connectivity='delaunay_material' redistributes mass "
+                    "only as part of remap='conservative' (redistribution "
+                    "against the stale v.p is a measured DO-NOT, laneK)")
+
         if self.remap == 'conservative':
             if not self.redistribute_mass:
                 raise ValueError("remap='conservative' requires "
@@ -172,8 +191,8 @@ class SolverMethods:
             if self.connectivity not in _RECONNECTING:
                 raise ValueError(
                     f"remap='conservative' is a silent no-op under "
-                    f"connectivity={self.connectivity!r}; use 'delaunay' or "
-                    f"'adaptive', or set remap=None")
+                    f"connectivity={self.connectivity!r}; use 'delaunay', "
+                    f"'adaptive' or 'delaunay_material', or set remap=None")
         if self.projection_every > 1:
             if not self.redistribute_mass:
                 raise ValueError("projection_every > 1 requires "
@@ -215,7 +234,12 @@ class SolverMethods:
         """Measured-unstable single-phase + EOS combinations (lane K,
         docs_temp/debug_session/laneK-single-phase-eos-instability.md).
         Warnings, not errors: a lane may re-try them on purpose."""
-        if self.connectivity in _RECONNECTING and self.remap != 'conservative':
+        # dim 1: the 'delaunay' rebuild is the sorted chain, which cannot
+        # flip (laneP: equal to a loop that never reconnects up to the
+        # summation order of the force, 3e-17 in u after 128 steps).  Until
+        # laneP this warning was also raised in 1D.
+        if (self.dim > 1 and self.connectivity in _RECONNECTING
+                and self.remap != 'conservative'):
             warnings.warn(
                 f"SolverMethods: single-phase connectivity="
                 f"{self.connectivity!r} with an EOS in dudt_fn and no remap is "
@@ -313,6 +337,8 @@ class SolverMethods:
         - ``'frozen'``          -> ``False``
         - ``'custom'``          -> *custom* (required)
         - ``'dual_only_bare'``  -> ``partial(bare_dual_refresh, mps=mps)``
+        - ``'delaunay_material'``-> ``retopologize_material_delaunay`` (a
+          partial binding ``retopo_remap`` when the remap is on)
         - ``'periodic'`` + multi-> ``partial(retopologize_multiphase_periodic, ...)``
           (*domain_bounds* required)
         - single-phase + remap  -> ``partial(_retopologize, retopo_remap=...)``
@@ -335,6 +361,12 @@ class SolverMethods:
         if self.connectivity == 'dual_only_bare':
             from ddgclib.methods._retopo import bare_dual_refresh
             return partial(bare_dual_refresh, mps=mps)
+        if self.connectivity == 'delaunay_material':
+            from ddgclib.methods._retopo import retopologize_material_delaunay
+            if self.remap is None:
+                return retopologize_material_delaunay
+            return partial(retopologize_material_delaunay,
+                           retopo_remap=self.remap)
         if self.phases == 'single':
             if self.remap is None:
                 return None

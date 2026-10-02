@@ -10,6 +10,7 @@ from ddgclib._boundary_conditions import (
     BoundaryConditionSet,
     DirichletPressureBC,
     DirichletVelocityBC,
+    FreeSlipWallBC,
     NeumannBC,
     NoSlipWallBC,
     OutletDeleteBC,
@@ -89,6 +90,39 @@ class TestNoSlipWallBC:
         for v in HC.V:
             if v not in bV:
                 assert v.u[0] == 1.0  # Unchanged
+
+
+class TestFreeSlipWallBC:
+    def test_zeroes_normal_velocity_and_keeps_tangential(self, mesh_2d):
+        HC, _ = mesh_2d
+        left = [v for v in HC.V if abs(v.x_a[0]) < 1e-14]
+        n = FreeSlipWallBC(wall_axis=0, wall_coord=0.0).apply(
+            HC, dt=0.01, target_vertices=left)
+        assert n == len(left) > 0
+        for v in left:
+            npt.assert_array_equal(v.u, [0.0, 0.5])
+        for v in HC.V:
+            if v not in left:
+                npt.assert_array_equal(v.u, [1.0, 0.5])
+
+    def test_puts_a_drifted_vertex_back_on_the_wall(self, mesh_2d):
+        HC, _ = mesh_2d
+        left = [v for v in HC.V if abs(v.x_a[0]) < 1e-14]
+        y_new = {}
+        for v in left:                 # the integrator moved them
+            y_new[id(v)] = v.x_a[1] + 0.01
+            HC.V.move(v, (0.003, y_new[id(v)]))
+        FreeSlipWallBC(wall_axis=0, wall_coord=0.0).apply(
+            HC, dt=0.01, target_vertices=left)
+        for v in left:
+            assert v.x_a[0] == 0.0
+            assert v.x_a[1] == y_new[id(v)]      # tangential motion kept
+            assert v.x == (0.0, y_new[id(v)])    # cache key updated
+
+    def test_needs_its_wall_vertices(self, mesh_2d):
+        HC, _ = mesh_2d
+        with pytest.raises(ValueError, match='wall vertices'):
+            FreeSlipWallBC(wall_axis=0, wall_coord=0.0).apply(HC, dt=0.01)
 
 
 class TestDirichletVelocityBC:
