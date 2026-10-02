@@ -49,11 +49,15 @@ def disk(
     # Shift to requested center
     if center != (0.0, 0.0):
         cx, cy = center
+        # NOTE(laneL): one move_all, not a loop of moves (a shifted vertex
+        # can land on the key of one not yet shifted).
+        moves = []
         for v in list(HC.V):
             pos = v.x_a.copy()
             pos[0] += cx
             pos[1] += cy
-            HC.V.move(v, tuple(pos))
+            moves.append((v, tuple(pos)))
+        HC.V.move_all(moves)
 
     bV = bV_wall
     groups = {'walls': bV_wall}
@@ -122,11 +126,14 @@ def annulus(
     # Shift to requested center
     cx, cy = center
     if center != (0.0, 0.0):
+        # NOTE(laneL): one move_all, not a loop of moves (see disk()).
+        moves = []
         for v in list(HC.V):
             pos = v.x_a.copy()
             pos[0] += cx
             pos[1] += cy
-            HC.V.move(v, tuple(pos))
+            moves.append((v, tuple(pos)))
+        HC.V.move_all(moves)
 
     # Remove vertices strictly inside R_inner
     to_remove = []

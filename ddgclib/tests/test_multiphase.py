@@ -74,6 +74,40 @@ class TestPhaseAssignment(unittest.TestCase):
             elif r > 0.5:
                 self.assertEqual(v.phase, 0)
 
+    def test_tied_simplex_vote_goes_to_the_lower_phase(self):
+        """A triangle with one bulk vertex of each phase (and one interface
+        vertex) is a tie.  It must go to the lower phase ID whatever the
+        order in which the triangle lists its vertices: in 2D that order
+        is ``id()`` order, which differs between interpreters (the
+        shearing-plate setup has 10 such triangles and gave other phase
+        labels in some processes until lane L)."""
+        from itertools import permutations
+        for dim, labels in ((2, (0, 1, INTERFACE_PHASE)),
+                            (3, (0, 0, 1, 1))):
+            winners = set()
+            for perm in set(permutations(labels)):
+                HC = Complex(dim, domain=[(0.0, 1.0)] * dim)
+                corners = [tuple(float(i == k) for i in range(dim))
+                           for k in range(dim)] + [(0.0,) * dim]
+                simplex = tuple(HC.V[x] for x in corners)
+                for v, phase in zip(simplex, perm):
+                    v.phase = phase
+                    for w in simplex:
+                        if w is not v:
+                            v.connect(w)
+                if dim == 3:
+                    HC._simplices = [simplex]
+                mps = MultiphaseSystem(phases=[
+                    PhaseProperties(eos=TaitMurnaghan(rho0=1000), mu=0.1,
+                                    rho0=1000, name="a"),
+                    PhaseProperties(eos=TaitMurnaghan(rho0=800), mu=0.5,
+                                    rho0=800, name="b"),
+                ])
+                mps.assign_simplex_phases_from_vertices(HC, dim)
+                self.assertEqual(len(mps.simplex_phase), 1)
+                winners.update(mps.simplex_phase.values())
+            self.assertEqual(winners, {0}, msg=f"dim {dim}")
+
 
 class TestInterfaceIdentification(unittest.TestCase):
     """Tests for MultiphaseSystem.identify_interface."""

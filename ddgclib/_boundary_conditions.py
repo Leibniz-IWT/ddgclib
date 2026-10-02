@@ -677,22 +677,32 @@ class PeriodicInletBC(BoundaryCondition):
 
         return clone
 
-    def _reset_ghost(self):
-        """Shift ghost so its leading face is exactly one period upstream."""
-        shift = self.inlet_pos - self.period
+    def _shift_ghost(self, dx):
+        """Translate the whole ghost by *dx* along the flow axis.
+
+        NOTE(laneL): one ``move_all``, not a loop of ``move`` calls.  The
+        reset shifts the ghost by one period, which puts its downstream
+        face on the keys its upstream face still holds; the loop lost one
+        ghost vertex per such collision (13 -> 12 on the 2D channel unit
+        mesh, so one wall never received an injected vertex; audit
+        2026-09-25 F10 C2).
+        """
+        moves = []
         for v in list(self.ghost.V):
             pos = v.x_a.copy()
-            pos[self.axis] += shift
-            self.ghost.V.move(v, tuple(pos))
+            pos[self.axis] += dx
+            moves.append((v, tuple(pos)))
+        self.ghost.V.move_all(moves)
+
+    def _reset_ghost(self):
+        """Shift ghost so its leading face is exactly one period upstream."""
+        self._shift_ghost(self.inlet_pos - self.period)
 
     def apply(self, mesh, dt, target_vertices=None):
         dx = self.velocity * dt
 
         # Move ghost forward
-        for v in list(self.ghost.V):
-            pos = v.x_a.copy()
-            pos[self.axis] += dx
-            self.ghost.V.move(v, tuple(pos))
+        self._shift_ghost(dx)
 
         # Inject vertices that just crossed the inlet (strict >
         # so that ghost vertices exactly at the inlet boundary
@@ -700,8 +710,20 @@ class PeriodicInletBC(BoundaryCondition):
         entered = []
         for gv in list(self.ghost.V):
             if gv.x_a[self.axis] > self.inlet_pos:
-                new_v = mesh.V[tuple(gv.x_a)]
+                key = tuple(gv.x_a)
+                occupied = key in mesh.V.cache
+                new_v = mesh.V[key]
                 entered.append((gv, new_v))
+                if occupied:
+                    # NOTE(laneL): a mesh vertex already sits exactly
+                    # here.  Every ghost column enters at the same
+                    # position, inlet_pos + velocity * dt, so this is the
+                    # vertex an earlier column left there and that did
+                    # not move since: a frozen wall vertex.  It keeps its
+                    # state; copying the ghost fields reset a no-slip
+                    # vertex to the inlet velocity once per column
+                    # (audit 2026-09-25 F10 C3).  Edges are still copied.
+                    continue
                 # Copy field values from ghost vertex to new mesh vertex
                 for f in self.fields:
                     val = getattr(gv, f, None)
@@ -809,11 +831,15 @@ class MeshAdvancer:
         dx = self.velocity * dt
         self.time += dt
 
-        # 1. Advect main mesh
+        # 1. Advect main mesh (NOTE(laneL): one move_all, not a loop of
+        #    moves: a step of exactly one column spacing puts every vertex
+        #    on the key of the next column)
+        moves = []
         for v in list(self.mesh.V):
             pos = v.x_a.copy()
             pos[self.axis] += dx
-            self.mesh.V.move(v, tuple(pos))
+            moves.append((v, tuple(pos)))
+        self.mesh.V.move_all(moves)
 
         # 2. Apply boundary conditions
         outflow_count = self.outlet.apply(self.mesh, dt)

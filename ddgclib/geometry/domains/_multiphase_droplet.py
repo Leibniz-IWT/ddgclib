@@ -229,11 +229,17 @@ def droplet_in_box_2d(
     HC_outer = outer_result.HC
 
     # Shift to center at droplet
+    # NOTE(laneL): this loop shifts the box by half its width, so some
+    # targets are keys that vertices still hold until their own turn.
+    # Each such collision LOSES one outer vertex (refinement 3: 6 of them,
+    # the (L, L) corner included).  Every pinned droplet number was
+    # produced on that mesh, so the old eviction is requested explicitly;
+    # the repair is ``HC_outer.V.move_all(...)`` plus a re-pin.
     for v in list(HC_outer.V):
         pos = v.x_a.copy()
         pos[0] += cx - L
         pos[1] += cy - L
-        HC_outer.V.move(v, tuple(pos))
+        HC_outer.V.move(v, tuple(pos), on_collision='evict')
 
     # -- Step 2: Create droplet domain --
     drop_result = disk(R=R, center=center, refinement=refinement_droplet,
@@ -350,12 +356,15 @@ def droplet_in_box_3d(
                        refinement=refinement_outer)
     HC_outer = outer_result.HC
 
+    # NOTE(laneL): as in droplet_in_box_2d, this shift loses outer
+    # vertices to key collisions (refinement 2: 3 of them, the (L, L, L)
+    # corner included) and the pinned 3D numbers depend on it.
     for v in list(HC_outer.V):
         pos = v.x_a.copy()
         pos[0] += cx - L
         pos[1] += cy - L
         pos[2] += cz - L
-        HC_outer.V.move(v, tuple(pos))
+        HC_outer.V.move(v, tuple(pos), on_collision='evict')
 
     # -- Step 2: Create droplet domain --
     drop_result = ball(R=R, center=center, refinement=refinement_droplet,

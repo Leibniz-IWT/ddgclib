@@ -114,13 +114,25 @@ PRESETS: dict[str, SolverMethods] = {
     'dam_break_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
         connectivity='delaunay', remap='conservative',
-        redistribute_mass=True,
+        frozen_set='membership', redistribute_mass=True,
         label=_DB + 'dam_break_2D.py',
         notes='laneF: remap ON survives reconnection (plain Delaunay blows up '
               'at the first flip, KE x28). Hydrostatic per-phase mass '
               'preload IC, alpha_art 0.3 baked into PhaseProperties.mu, '
               'gravity via the setup closure. Open blocker: air sliver-cell '
-              'F/m ejection.',
+              'F/m ejection. laneL: frozen_set=membership. On the shipped '
+              'run (1585 steps) the final state is bit-identical to '
+              '.replace(frozen_set="hull") (no vertex leaves the tank). In '
+              'the two ejection configurations (alpha_art 0.2; alpha_art '
+              '0.5 to t = 0.45 s) the arms are bit-identical until the first '
+              'vertex leaves the tank (step 1267 / 3002). Then hull releases '
+              'the walls in the next step (all 32 move) and aborts after '
+              '1280 / 3022 steps; membership keeps the 32 wall vertices '
+              'frozen and in place, but the fluid still blows up and the '
+              'run aborts with the same QhullError after 1303 / 3030 steps '
+              '(numbers of fix round 1, where the tied simplex vote became '
+              'deterministic; equal in every process). The walls are not '
+              'what fails there.',
     ),
     'dam_break_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
@@ -182,12 +194,21 @@ PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
     'hagen_poiseuille_2D': SolverMethods(
         dim=2, phases='single', integrator='symplectic_euler',
-        connectivity='delaunay', workers=20,
+        connectivity='delaunay', frozen_set='membership', workers=20,
         label=_HP + '/Hagen_Poiseuile_2D.py',
-        notes='Lagrangian channel with boundary_filter=walls (passed at build '
-              'time), PositionalNoSlipWallBC + OutletBufferedDeleteBC + '
-              'PeriodicInletBC. pressure_model=None so workers>1 is safe. '
-              'UNSTABLE: wall collapse by hull re-tagging (audit C1/M4).',
+        notes='Lagrangian channel, boundary_filter=walls (passed at build '
+              'time). BCs from src/_setup.py:setup_poiseuille_2d_lagrangian: '
+              'OutletBufferedDeleteBC, PeriodicInletBC, PositionalNoSlipWallBC '
+              '(the wall BC last, so an injected wall-row vertex is frozen in '
+              'the same pass). pressure_model=None so workers>1 is safe. '
+              'laneL: frozen_set=membership. Shipped run (3000 steps, dt '
+              '0.01): 62 wall vertices, 62 still frozen, 0 moved. With '
+              '.replace(frozen_set="hull") the walls are released at step '
+              '1262 (two outlet buffer vertices drift past the wall lines): '
+              '2 of 62 still frozen, 60 moved, largest displacement 3.46 '
+              '(audit C1). NOT validated against the Poiseuille profile '
+              '(U_max 0.29 against 0.20 at t = 30), and nothing keeps a fluid '
+              'vertex inside: one is 5.1e-3 above the top wall at t = 30.',
     ),
     'hagen_poiseuille_2D_eulerian': SolverMethods(
         dim=2, phases='single', integrator='euler_velocity_only',

@@ -66,6 +66,9 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
 
     rng = np.random.default_rng()  # reproducible if seeded later if needed
 
+    # NOTE(laneL): one move_all, not a loop of moves (a translated vertex
+    # can land on the key of one not yet translated).
+    moves = []
     for v in list(HC.V):
         new_pos = v.x_a.copy()
         new_pos[axis] += d
@@ -74,7 +77,8 @@ def translate(HC, axis=0, d=0.0, copy_complex=True, jitter=0.0):
         if jitter > 0:
             new_pos += rng.uniform(-jitter/2, jitter/2, size=HC.dim)
 
-        HC.V.move(v, tuple(new_pos))
+        moves.append((v, tuple(new_pos)))
+    HC.V.move_all(moves)
 
     return HC
 

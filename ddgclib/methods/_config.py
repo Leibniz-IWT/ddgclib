@@ -55,6 +55,14 @@ _MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path')
 # redistribution block (so remap / projection_every can apply).
 _RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material')
 
+# Connectivity values for which frozen_set='membership' is implemented:
+# bV is rebuilt from the hull of a NEW connectivity inside _retopologize
+# and nothing else creates, moves or removes wall vertices.  'adaptive'
+# also rebuilds the hull but is excluded: hyperct.remesh splits wall edges
+# into vertices that are not members and collapses / smooths members that
+# are off the hull (measured, laneL fix round 1).
+_HULL_REBUILDING = ('delaunay',)
+
 
 @dataclass(frozen=True)
 class SolverMethods:
@@ -72,6 +80,7 @@ class SolverMethods:
     integrator: str = 'symplectic_euler'
     connectivity: str = 'delaunay'
     remap: str | None = None
+    frozen_set: str = 'hull'
     projection_every: int = 1
     redistribute_mass: bool = False
     split_method: str = 'neighbour_count'
@@ -97,6 +106,7 @@ class SolverMethods:
         self._check_choice('integrator', self.integrator)
         self._check_choice('connectivity', self.connectivity)
         self._check_choice('remap', self.remap)
+        self._check_choice('frozen_set', self.frozen_set)
         self._check_choice('split_method', self.split_method)
         self._check_choice('curvature_path', self.curvature_path)
         self._check_choice('pressure_flux', self.pressure_flux)
@@ -183,6 +193,17 @@ class SolverMethods:
                     "connectivity='delaunay_material' redistributes mass "
                     "only as part of remap='conservative' (redistribution "
                     "against the stale v.p is a measured DO-NOT, laneK)")
+
+        if (self.frozen_set == 'membership'
+                and self.connectivity not in _HULL_REBUILDING):
+            raise ValueError(
+                f"frozen_set='membership' is not applied under "
+                f"connectivity={self.connectivity!r}: it is implemented for "
+                f"{', '.join(_HULL_REBUILDING)} only. 'dual_only', "
+                f"'dual_only_bare' and 'frozen' never rebuild the hull, so "
+                f"their bV is persistent already; 'adaptive' creates wall "
+                f"vertices that are not members and remeshes members that "
+                f"are off the hull")
 
         if self.remap == 'conservative':
             if not self.redistribute_mass:
@@ -347,6 +368,11 @@ class SolverMethods:
           the policy is carried by :meth:`integrator_kwargs`)
         - other multiphase      -> ``partial(_retopologize_multiphase, ...)``
           with exactly the keywords the case runners bind by hand.
+
+        ``frozen_set='membership'`` adds ``frozen_set=`` to the single-phase
+        or multiphase partial (a single-phase config then always gets a
+        ``partial(_retopologize, ...)``); the default ``'hull'`` binds
+        nothing, so the objects above are unchanged.
         """
         if self.connectivity == 'frozen':
             return False
@@ -367,13 +393,19 @@ class SolverMethods:
                 return retopologize_material_delaunay
             return partial(retopologize_material_delaunay,
                            retopo_remap=self.remap)
+        membership = self.frozen_set != AXES['frozen_set'].default
         if self.phases == 'single':
-            if self.remap is None:
+            if self.remap is None and not membership:
                 return None
             from ddgclib.dynamic_integrators._integrators_dynamic import (
                 _retopologize,
             )
-            return partial(_retopologize, retopo_remap=self.remap)
+            kw_s: dict[str, Any] = {}
+            if self.remap is not None:
+                kw_s['retopo_remap'] = self.remap
+            if membership:
+                kw_s['frozen_set'] = self.frozen_set
+            return partial(_retopologize, **kw_s)
         if mps is None:
             raise ValueError("multiphase configs need mps=MultiphaseSystem")
         if self.connectivity == 'periodic':
@@ -401,6 +433,8 @@ class SolverMethods:
             kw['retopo_remap'] = self.remap
         if self.projection_every != 1:
             kw['projection_every'] = self.projection_every
+        if membership:
+            kw['frozen_set'] = self.frozen_set
         return partial(_retopologize_multiphase, **kw)
 
     def integrator_kwargs(self, mps=None, custom: Callable | None = None,

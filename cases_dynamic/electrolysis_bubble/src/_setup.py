@@ -147,11 +147,13 @@ def _build_offcenter_bubble_box_2d(
         refinement=refinement_outer, flow_axis=0,
     )
     HC_outer = outer_res.HC
+    # NOTE(laneL): shift by half the box width; key collisions lose outer
+    # vertices (see droplet_in_box_2d).  Old behaviour kept explicitly.
     for v in list(HC_outer.V):
         pos = v.x_a.copy()
         pos[0] -= L_domain
         pos[1] -= L_domain
-        HC_outer.V.move(v, tuple(pos))
+        HC_outer.V.move(v, tuple(pos), on_collision='evict')
 
     # Bubble disk centred at the desired offset.
     drop_res = disk(

@@ -191,8 +191,12 @@ def setup_shearing_plate_droplet(
                 new_pos = v.x_a.copy()
                 new_pos[:dim] = v.x_a[:dim] * scale
                 moved.append((v, tuple(new_pos)))
+        # NOTE(laneL): the rescale can put an outer vertex on a key that
+        # another vertex still holds (shipped 2D setup: 1 collision here,
+        # 22 more in the droplet_in_box_2d shift; each loses a vertex).
+        # Old behaviour kept explicitly until the case is repaired.
         for v, new_pos in moved:
-            HC.V.move(v, new_pos)
+            HC.V.move(v, new_pos, on_collision='evict')
 
     # -- Classify walls into plates + periodic faces --
     # Must be done *after* the rescale because HC.V.move mutates the

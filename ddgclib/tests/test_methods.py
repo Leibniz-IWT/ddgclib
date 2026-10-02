@@ -507,9 +507,16 @@ class TestMultiphaseBuilders:
         case_fn = partial(partial(_retopologize_multiphase, mps=mps,
                                   redistribute_mass=True),
                           retopo_remap='conservative')
-        wrap_fn = PRESETS['dam_break_2D'].retopologize_fn(mps=mps)
+        # laneL: the shipped preset freezes by membership (bit-identical
+        # final state on the shipped run); its frozen_set='hull' arm is the
+        # hand-written partial.
+        assert PRESETS['dam_break_2D'].frozen_set == 'membership'
+        wrap_fn = PRESETS['dam_break_2D'].replace(
+            frozen_set='hull').retopologize_fn(mps=mps)
         assert wrap_fn.func is case_fn.func
         assert {**case_fn.keywords, 'split_method': 'neighbour_count'} == wrap_fn.keywords
+        assert PRESETS['dam_break_2D'].retopologize_fn(mps=mps).keywords == {
+            **wrap_fn.keywords, 'frozen_set': 'membership'}
         # 3D: the runner passed skip_triangulation=True at INTEGRATOR level
         # (forwarded by name); the wrapper binds it in the partial.
         wrap3 = PRESETS['dam_break_3D'].retopologize_fn(mps=mps)

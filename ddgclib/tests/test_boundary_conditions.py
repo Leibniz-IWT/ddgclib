@@ -15,6 +15,7 @@ from ddgclib._boundary_conditions import (
     NoSlipWallBC,
     OutletDeleteBC,
     OutletBufferedDeleteBC,
+    PeriodicInletBC,
     identify_boundary_vertices,
     identify_cube_boundaries,
 )
@@ -333,3 +334,96 @@ class TestBoundaryConditionSet:
         bc_set.apply_all(HC, bV, dt=0.01)
         for v in bV:
             npt.assert_array_equal(v.u, np.zeros(2))
+
+
+# Periodic inlet: coordinate-key collisions (laneL, audit F10 C2 / C3)
+
+class TestPeriodicInletBC:
+    @staticmethod
+    def _unit(u_inlet=0.25):
+        """Unit cell [0, 1]^2: 13 vertices, columns at x = 0, 1/4, 1/2,
+        3/4, 1 with 3, 2, 3, 2, 3 vertices."""
+        HC = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
+        HC.triangulate()
+        HC.refine_all()
+        for v in HC.V:
+            v.u = np.array([u_inlet, 0.0])
+            v.p = 7.0
+            v.m = 1.0
+        return HC
+
+    def test_ghost_reset_keeps_every_vertex(self):
+        """The reset shifts the ghost by one period, i.e. its x = 1 face
+        onto the keys of its x = 0 face.  A loop of single moves lost a
+        vertex there (13 -> 12)."""
+        unit = self._unit()
+        bc = PeriodicInletBC(unit, velocity=0.25, axis=0, inlet_pos=0.0,
+                             cdist=1e-10, period=1.0)
+        xs = sorted(v.x for v in bc.ghost.V)
+        assert len(xs) == 13
+        assert xs == sorted((v.x[0] - 1.0, v.x[1]) for v in unit.V)
+        # edges survive the shift
+        assert (sum(len(v.nn) for v in bc.ghost.V)
+                == sum(len(v.nn) for v in unit.V))
+
+    def test_advance_by_exactly_one_column_spacing(self):
+        """velocity * dt equal to the column spacing: every ghost vertex
+        moves onto the key its downstream neighbour holds."""
+        mesh = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
+        bc = PeriodicInletBC(self._unit(), velocity=0.25, axis=0,
+                             inlet_pos=0.0, cdist=1e-10, period=1.0)
+        entered = []
+        for _ in range(4):
+            # the flow carries the columns that are already in the mesh on
+            mesh.V.move_all([(v, (v.x[0] + 0.25, v.x[1])) for v in mesh.V])
+            entered.append(bc.apply(mesh, dt=1.0))
+        # x = 0, -1/4, -1/2, -3/4 columns enter one per step; the x = -1
+        # column reaches the inlet plane and waits (strict >)
+        assert entered == [3, 2, 3, 2]
+        assert len(mesh.V) == 10
+        assert sorted(v.x for v in bc.ghost.V) == [(0.0, 0.0), (0.0, 0.5),
+                                                  (0.0, 1.0)]
+
+    def test_injection_on_an_occupied_key_keeps_the_resident_state(self):
+        """Every ghost column enters at inlet_pos + velocity * dt.  A
+        frozen wall vertex left there by an earlier column must not be
+        reset to the inlet velocity by the next one."""
+        mesh = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
+        bc = PeriodicInletBC(self._unit(), velocity=0.25, axis=0,
+                             inlet_pos=0.0, cdist=1e-10, period=1.0)
+        dt = 0.5                       # dx = 1/8: one column every 2 steps
+        assert bc.apply(mesh, dt) == 3
+        wall = mesh.V[(0.125, 0.0)]    # no-slip: stays where it entered
+        wall.u = np.zeros(2)
+        wall.p = -1.0
+        fluid = mesh.V[(0.125, 0.5)]   # advected away by the integrator
+        mesh.V.move(fluid, (0.25, 0.5))
+        n = len(mesh.V)
+        for _ in range(4):             # x = -1/4 (2 vertices), then -1/2 (3)
+            bc.apply(mesh, dt)
+        assert mesh.V[(0.125, 0.0)] is wall
+        npt.assert_array_equal(wall.u, np.zeros(2))
+        assert wall.p == -1.0
+        # the x = -1/2 column: (0.125, 0) and (0.125, 1) were occupied,
+        # only (0.125, 0.5) is new
+        assert len(mesh.V) == n + 2 + 1
+        npt.assert_array_equal(mesh.V[(0.125, 0.5)].u, np.array([0.25, 0.0]))
+
+    def test_mesh_advancer_step_of_one_column_spacing(self):
+        """MeshAdvancer advects the whole mesh; a step of exactly one
+        column spacing puts every vertex on the key of the next column."""
+        from ddgclib._boundary_conditions import MeshAdvancer
+        mesh = self._unit()
+        inlet = PeriodicInletBC(self._unit(), velocity=0.25, axis=0,
+                                inlet_pos=0.0, cdist=1e-10, period=1.0)
+        adv = MeshAdvancer(mesh, inlet, OutletDeleteBC(outlet_pos=10.0, axis=0),
+                           velocity=0.25)
+        assert adv.step(dt=1.0) == 0
+        # the 13 vertices are all still there, one spacing downstream (a
+        # loop of single moves raises on the first one).  The ghost's
+        # leading column enters on the keys of the mesh's former x = 0
+        # column (the seam is in both), so it adds nothing.
+        assert len(mesh.V) == 13
+        assert sorted({v.x[0] for v in mesh.V}) == [0.25, 0.5, 0.75, 1.0, 1.25]
+        assert sum(len(v.nn) for v in mesh.V) == sum(
+            len(v.nn) for v in self._unit().V)

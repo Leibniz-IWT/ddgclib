@@ -454,6 +454,83 @@ _AXES: list[MethodAxis] = [
                  'DO-NOT wire into multiphase without per-phase ledger (laneF)'),
         ),
     ),
+    MethodAxis(
+        name='frozen_set', title='Frozen (wall) vertex set',
+        group='connectivity', default='hull',
+        control='frozen_set= in _retopologize / _retopologize_multiphase, '
+                'bound into the retopology partial by '
+                'SolverMethods.retopologize_fn()',
+        notes='Which vertices the integrators do not move (bV). The tag '
+              'v.boundary that compute_vd needs for half cells follows the '
+              'topological boundary under both values. boundary_filter '
+              '(build-time argument) narrows either set.',
+        options=(
+            _opt('hull', 'bV is rebuilt at every retopology from the '
+                 'topological boundary of the new connectivity, narrowed by '
+                 'boundary_filter. A vertex is frozen because it is on the '
+                 'hull and released when it is not', 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize '
+                 '(step 6)',
+                 'every pin (all droplet, hydrostatic and electrolysis presets '
+                 'run on it). FAILS when one vertex steps past a straight wall: '
+                 'the wall vertices next to it leave the hull, are released and '
+                 'integrated, and nothing re-captures them (audit 2026-09-25 '
+                 'F10 C1). Measured by laneL: Hagen_Poiseuile_2D, 3000 steps: '
+                 'walls released at step 1262 (two outlet buffer vertices '
+                 'drift past the wall lines), 2 of 62 wall vertices still '
+                 'frozen, 60 moved, largest displacement 3.46; dam_break_2D '
+                 'in its two ejection configurations (alpha_art 0.2; 0.5 to '
+                 't = 0.45 s): one step after the first vertex leaves the '
+                 'tank the walls are released and all 32 wall vertices move '
+                 '(test_frozen_set.py, '
+                 'cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py)'),
+            _opt('membership', 'bV is persistent: a retopology keeps the '
+                 'members that are still in the complex (and pass '
+                 'boundary_filter), never adds a vertex because it is on the '
+                 'hull and never drops one because it is not. A hull vertex '
+                 'that is not a member (inlet, outlet, free surface, a vertex '
+                 'that left through a wall) is tagged, gets a half cell and '
+                 'is integrated; a member off the hull stays frozen with a '
+                 'closed cell; capture at a wall is left to the BC that holds '
+                 'bV (PositionalNoSlipWallBC)', 'opt-in',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize '
+                 '(step 6)',
+                 'laneL 2026-10-01. Hagen_Poiseuile_2D (preset), 3000 steps, past '
+                 'the former collapse: 62 wall vertices, 62 still frozen, 0 '
+                 'moved. dam_break_2D (preset): shipped run (1585 steps) final '
+                 'state bit-identical to hull; in the two ejection '
+                 'configurations 32 of 32 walls stay frozen and in place, but '
+                 'the fluid still blows up and the run aborts with the same '
+                 'QhullError 23 / 8 steps later than under hull (after 1303 '
+                 'against 1280 steps; 3030 against 3022; the same in every '
+                 'process since the tied simplex vote is deterministic, fix '
+                 'round 1): the walls are not what fails there. Bit-identical '
+                 'to hull while no vertex leaves the hull: 2D droplet with '
+                 'remap (100 steps), electrolysis 2D (6330 steps, the shipped '
+                 'horizon), electrolysis 3D (300 steps). CONNECTIVITY: '
+                 'implemented for delaunay only. With adaptive it RAISES (in '
+                 'SolverMethods and in both retopology functions): '
+                 'hyperct.remesh protects vertices by v.boundary, not by bV. '
+                 'Measured on a channel: one adaptive retopology left the 8 '
+                 'wall vertices created by wall-edge splits unfrozen (10 of '
+                 '18 against 18 of 18 under hull; integrated, they leave the '
+                 'wall), and with 7 members off the hull adaptive_remesh '
+                 'moved up to 7 of them (smoothing, up to 0.17) and removed '
+                 'up to 5 (collapse). LIMITS: impenetrability is not '
+                 'enforced (HP2D: one fluid vertex 5.1e-3 outside the top wall '
+                 'at t = 30); a wall-row vertex injected by an inlet is frozen '
+                 'only when PositionalNoSlipWallBC runs AFTER the inlet BC '
+                 '(under hull the next retopology captured it); 3D: a vertex '
+                 'whose dual fan fails is tagged and zero-volumed but not '
+                 'frozen (0 occurrences in a jittered box and a 3D droplet); '
+                 'merge_cdist can merge a member into a mobile vertex; not '
+                 'implemented for periodic, delaunay_material and custom '
+                 'retopology (SolverMethods raises), not needed for dual_only '
+                 '/ dual_only_bare / frozen (their bV never changes). '
+                 'test_frozen_set.py (31)',
+                 dims=(2, 3)),
+        ),
+    ),
     # ------------------------------------------------------------------
     # thermodynamics / mass bookkeeping
     # ------------------------------------------------------------------

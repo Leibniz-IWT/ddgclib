@@ -284,7 +284,14 @@ class MultiphaseSystem:
                 # Majority vote among bulk vertices.
                 from collections import Counter
                 counts = Counter(bulk_phases)
-                winner = counts.most_common(1)[0][0]
+                # NOTE(laneL): a tie goes to the lower phase ID, as the
+                # docstring says.  ``most_common`` returned the phase of
+                # the first bulk vertex of the simplex, and in 2D the
+                # vertex order of ``iter_triangles_2d`` is ``id()`` order,
+                # i.e. memory addresses: the shearing-plate setup (10 tied
+                # triangles) gave other phase labels in some interpreters.
+                top = max(counts.values())
+                winner = min(p for p, c in counts.items() if c == top)
             else:
                 # All vertices are interface — use interface_phases
                 # from any vertex as fallback.

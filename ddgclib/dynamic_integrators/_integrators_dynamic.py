@@ -46,12 +46,26 @@ from scipy.integrate import solve_ivp
 
 # Helpers
 
+# NOTE(laneL): measured on a channel (rectangle(L=2, h=1), walls y = 0, 1).
+# One adaptive retopology splits wall edges and the 8 new wall-line
+# vertices are not members (10 of 18 frozen against 18 of 18 under 'hull');
+# with 7 members off the hull, adaptive_remesh moved up to 7 of them
+# (Laplacian smoothing, up to 1.7e-01) and removed up to 5 (edge collapse).
+_MEMBERSHIP_ADAPTIVE_MSG = (
+    "frozen_set='membership' is not implemented with remesh_mode='adaptive': "
+    "hyperct.remesh protects vertices by the topological tag v.boundary, "
+    "not by bV, so a vertex created by splitting a wall edge is not a "
+    "member (it is integrated and leaves the wall) and a member that is "
+    "off the hull is collapsed and smoothed like an interior vertex"
+)
+
+
 def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   periodic_axes=None, domain_bounds=None, backend=None,
                   skip_triangulation=False,
                   pressure_model=None, redistribute_mass=False,
                   remesh_mode='delaunay', remesh_kwargs=None,
-                  retopo_remap=None):
+                  retopo_remap=None, frozen_set='hull'):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -135,6 +149,46 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         True; not available on the periodic path.  The multiphase
         counterpart is ``_retopologize_multiphase(retopo_remap=...)``.
         See docs_temp/debug_session/laneK-single-phase-eos-instability.md.
+    frozen_set : {'hull', 'membership'}
+        Which vertices end up in *bV*, the set the integrators do not
+        move (method axis ``frozen_set``).
+
+        - ``'hull'`` (default: previous behaviour, bit-identical): *bV*
+          is rebuilt from the topological boundary of this call's
+          connectivity, narrowed by *boundary_filter*.  Nothing keeps a
+          vertex behind a wall, and one vertex that steps past a straight
+          wall takes the wall vertices next to it off the hull, i.e. out
+          of *bV*: the wall is integrated and collapses (audit
+          2026-09-25, F10 C1).
+        - ``'membership'``: *bV* is persistent.  This call keeps the
+          members that are still in the complex and, if *boundary_filter*
+          is given, pass it (that is how a runner's initial "whole hull"
+          set is narrowed to the walls).  It never adds a vertex because
+          it is on the hull and never drops one because it is not.
+          ``v.boundary``, which ``compute_vd`` needs for the half cells,
+          still follows the topological boundary, so the two sets are
+          no longer the same:
+
+          * a hull vertex that is not a member (inlet, outlet, free
+            surface, a vertex that left through a wall) is tagged, gets
+            a half cell and is integrated;
+          * a member that the hull no longer contains stays frozen and
+            gets a closed dual cell;
+          * a vertex that reaches a wall is not captured here.  That is
+            the decision of a BC that holds *bV*
+            (``PositionalNoSlipWallBC(bV=bV)`` adds what meets its
+            criterion, and the addition now persists).
+
+          With *skip_triangulation* the boundary tag is read from the
+          kept connectivity instead of being carried in *bV*.  In 3D a
+          vertex whose dual fan fails is tagged and zero-volumed as
+          before but not frozen.  Not available on the periodic path
+          and not with ``remesh_mode='adaptive'`` (both raise):
+          ``hyperct.remesh`` knows the topological tag ``v.boundary``
+          only, so a vertex it creates by splitting a wall edge is not
+          a member, and a member off the hull is collapsed and
+          smoothed like an interior vertex.
+          See docs_temp/debug_session/laneL-frozen-set-membership.md.
 
     Steps:
         0. (Optional) Merge close vertices via ``HC.V.merge_all``
@@ -150,6 +204,18 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             f"retopo_remap must be None or 'conservative', "
             f"got {retopo_remap!r}"
         )
+    if frozen_set not in ('hull', 'membership'):
+        raise ValueError(
+            f"frozen_set must be 'hull' or 'membership', got {frozen_set!r}"
+        )
+    membership = frozen_set == 'membership'
+    if membership and periodic_axes:
+        raise ValueError(
+            "frozen_set='membership' is not implemented on the periodic "
+            "retopology path"
+        )
+    if membership and remesh_mode == 'adaptive' and not skip_triangulation:
+        raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
     remap_active = retopo_remap == 'conservative' and not skip_triangulation
     if remap_active:
         if periodic_axes:
@@ -263,6 +329,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                 dV = boundary_from_simplices(HC, dim)
             else:
                 dV = HC.boundary()
+    elif membership:
+        # NOTE(laneL): bV is the frozen set here, not the boundary, so
+        # the boundary of the kept connectivity is read, not carried.
+        if getattr(HC, '_simplices', None) is not None:
+            from hyperct.ddg import boundary_from_simplices
+            dV = boundary_from_simplices(HC, dim)
+        else:
+            dV = HC.boundary()
     else:
         # skip_triangulation: keep existing connectivity,
         # use current bV as the boundary set
@@ -332,7 +406,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     # 6. Populate bV — controls which vertices are frozen (excluded
     #    from integration).  When boundary_filter is set, only matching
     #    vertices (e.g. walls) are frozen; the rest remain interior.
-    if boundary_filter is not None:
+    if membership:
+        # NOTE(laneL): persistent wall membership.  The hull of this
+        # rebuild decides v.boundary (above) but not who is frozen: a
+        # member stays frozen when it is off the hull, and a hull vertex
+        # that is not a member is integrated.
+        dV = {v for v in bV if HC.V.cache.get(v.x) is v
+              and (boundary_filter is None or boundary_filter(v))}
+    elif boundary_filter is not None:
         dV = {v for v in dV if boundary_filter(v)}
     bV.clear()
     bV.update(dV)
@@ -543,7 +624,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              remesh_mode='delaunay', remesh_kwargs=None,
                              split_method='neighbour_count',
                              retopo_remap=None,
-                             projection_every=1):
+                             projection_every=1,
+                             frozen_set='hull'):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -646,12 +728,20 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         Requires *mps* and ``redistribute_mass=True`` when > 1.  The
         call counter lives on ``mps._projection_call_idx`` (the first
         call always projects).
+    frozen_set : {'hull', 'membership'}
+        Forwarded to every :func:`_retopologize` call of this function
+        (default ``'hull'``: previous behaviour).  See its docstring.
+        ``'membership'`` with ``remesh_mode='adaptive'`` raises.
     """
     if retopo_remap not in (None, 'conservative'):
         raise ValueError(
             f"retopo_remap must be None or 'conservative', "
             f"got {retopo_remap!r}"
         )
+    if (frozen_set == 'membership' and remesh_mode == 'adaptive'
+            and not skip_triangulation):
+        # Refuse before the remap's first stage touches anything.
+        raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
     remap_active = (retopo_remap == 'conservative'
                     and not skip_triangulation and mps is not None)
     if remap_active and not redistribute_mass:
@@ -708,7 +798,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         # positions do not move inside this call), which the level
         # anchor below folds into the per-phase volume targets.
         _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
-                      backend=backend, skip_triangulation=True)
+                      backend=backend, skip_triangulation=True,
+                      frozen_set=frozen_set)
         mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
         _vol_mid = phase_volume_totals(HC, mps.n_phases)
         if not project_now:
@@ -731,7 +822,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                   merge_cdist=merge_cdist, backend=backend,
                   skip_triangulation=skip_triangulation,
                   remesh_mode=remesh_mode,
-                  remesh_kwargs=remesh_kwargs)
+                  remesh_kwargs=remesh_kwargs,
+                  frozen_set=frozen_set)
 
     # Refresh multiphase state
     if mps is not None:

@@ -342,11 +342,20 @@ def diff_baselines(baseline_path: str | Path, current_path: str | Path) -> dict:
     mb, mc = base.get('methods'), curr.get('methods')
     _doc_fields = ('label', 'notes')   # documentation, not method choices
     if mb is not None and mc is not None:
+        # A score written before an axis existed reads as that axis'
+        # default (laneL: else every new axis reports a difference).
+        from ddgclib.methods import AXES
+
+        def _get(m, k):
+            return m[k] if k in m else (AXES[k].default if k in AXES
+                                        else None)
+
         changed = sorted(k for k in set(mb) | set(mc)
-                         if k not in _doc_fields and mb.get(k) != mc.get(k))
+                         if k not in _doc_fields
+                         and _get(mb, k) != _get(mc, k))
         if changed:
             print(f"\n!! SOLVER METHODS DIFFER from the baseline on: "
-                  + ', '.join(f"{k}: {mb.get(k)!r} -> {mc.get(k)!r}"
+                  + ', '.join(f"{k}: {_get(mb, k)!r} -> {_get(mc, k)!r}"
                               for k in changed))
             print("!! (a different method, not a regression of the same one)")
     elif mb is None or mc is None:
