@@ -16,6 +16,8 @@ from ddgclib._boundary_conditions import (
     OutletDeleteBC,
     OutletBufferedDeleteBC,
     PeriodicInletBC,
+    PeriodicInletBufferedBC,
+    PositionalNoSlipWallBC,
     identify_boundary_vertices,
     identify_cube_boundaries,
 )
@@ -427,3 +429,147 @@ class TestPeriodicInletBC:
         assert sorted({v.x[0] for v in mesh.V}) == [0.25, 0.5, 0.75, 1.0, 1.25]
         assert sum(len(v.nn) for v in mesh.V) == sum(
             len(v.nn) for v in self._unit().V)
+
+
+# Periodic inlet with an upstream buffer of prescribed motion (laneH)
+
+class TestPeriodicInletBufferedBC:
+    U = 0.25
+
+    @classmethod
+    def _unit(cls):
+        """Unit cell [0, 1]^2: columns at x = 0, 1/4, 1/2, 3/4, 1 with
+        3, 2, 3, 2, 3 vertices; walls y = 0 and y = 1."""
+        HC = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
+        HC.triangulate()
+        HC.refine_all()
+        for v in HC.V:
+            v.u = np.array([cls.U, 0.0])
+            v.m = 1.0
+        return HC
+
+    @staticmethod
+    def _wall(v):
+        return v.x[1] == 0.0 or v.x[1] == 1.0
+
+    @classmethod
+    def _channel(cls):
+        """Mesh on [-1, 2] x [0, 1] (buffer [-1, 0]), frozen walls, inlet
+        BC then wall BC."""
+        from ddgclib.geometry._complex_operations import extrude
+        mesh = extrude(cls._unit(), 3.0, axis=0, cdist=1e-10)
+        mesh.V.move_all([(v, (v.x[0] - 1.0, v.x[1])) for v in list(mesh.V)])
+        for v in mesh.V:
+            v.u = np.array([cls.U, 0.0])
+            v.m = 1.0
+        bV = {v for v in mesh.V if cls._wall(v)}
+        inlet = PeriodicInletBufferedBC(
+            cls._unit(), velocity=cls.U, buffer_width=1.0, axis=0,
+            inlet_pos=0.0, cdist=1e-10, fields=['u', 'm'], period=1.0, bV=bV)
+        walls = PositionalNoSlipWallBC(cls._wall, dim=2, bV=bV)
+        inlet.apply(mesh, 0.0)
+        walls.apply(mesh, 0.0)
+        return mesh, bV, inlet, walls
+
+    def test_ghost_has_no_leading_face(self):
+        """The downstream face of the ghost is the periodic image of the
+        upstream face of the copy before it: 13 - 3 vertices, the last
+        column one spacing upstream of the injection plane."""
+        _, _, inlet, _ = self._channel()
+        xs = sorted({v.x[0] for v in inlet.ghost.V})
+        assert len(inlet.ghost.V) == 10
+        assert xs == [-2.0, -1.75, -1.5, -1.25]
+
+    def test_the_initial_buffer_is_registered(self):
+        mesh, bV, inlet, _ = self._channel()
+        free_upstream = {v for v in mesh.V if v.x[0] <= 0.0 and v not in bV}
+        assert inlet.buffer_vertices == free_upstream
+        assert len(free_upstream) == 7      # 1 + 2 + 1 + 2 + 1 fluid vertices
+        assert not inlet.buffer_vertices & bV
+
+    def test_buffer_motion_is_prescribed(self):
+        """Whatever the integrator did to a buffer vertex, the BC puts it
+        on its kinematic position with the inlet velocity."""
+        mesh, _, inlet, _ = self._channel()
+        v = mesh.V[(-0.5, 0.5)]
+        mesh.V.move(v, (-0.43, 0.61))          # a contaminated step
+        v.u = np.array([-3.0, 2.0])
+        inlet.apply(mesh, dt=0.1)
+        npt.assert_allclose(v.x, (-0.5 + self.U * 0.1, 0.5), atol=1e-15)
+        npt.assert_array_equal(v.u, np.array([self.U, 0.0]))
+        assert v in inlet.buffer_vertices
+
+    def test_release_at_the_inlet_plane(self):
+        """A buffer vertex that crosses inlet_pos is released on its
+        kinematic position and is left to the integrator from then on."""
+        mesh, _, inlet, _ = self._channel()
+        v = mesh.V[(0.0, 0.5)]
+        assert v in inlet.buffer_vertices
+        inlet.apply(mesh, dt=0.1)
+        assert v not in inlet.buffer_vertices
+        npt.assert_allclose(v.x, (self.U * 0.1, 0.5), atol=1e-15)
+        mesh.V.move(v, (0.3, 0.52))
+        v.u = np.array([0.4, 0.01])
+        inlet.apply(mesh, dt=0.1)
+        assert v.x == (0.3, 0.52)
+        npt.assert_array_equal(v.u, np.array([0.4, 0.01]))
+
+    def test_frozen_vertices_are_left_alone(self):
+        mesh, bV, inlet, _ = self._channel()
+        before = {v: v.x for v in bV}
+        for _ in range(5):
+            inlet.apply(mesh, dt=0.1)
+        assert all(v.x == x for v, x in before.items())
+        assert all(np.all(v.u == 0.0) for v in bV)
+
+    def test_plug_flow_keeps_the_column_spacing(self):
+        """Two periods of plug flow (released vertices carried on at the
+        inlet velocity): one column per spacing, none injected twice, the
+        buffer holds the same number of vertices throughout, and each
+        wall gets exactly one extra vertex, one advection step from the
+        upstream corner."""
+        mesh, bV, inlet, walls = self._channel()
+        n_walls = len(bV)
+        dt = 0.5                               # dx = 1/8: half a spacing
+        dx = self.U * dt
+        n_buffer = []
+        for _ in range(16):                    # two periods
+            free = [v for v in mesh.V if v not in bV
+                    and v not in inlet.buffer_vertices]
+            mesh.V.move_all([(v, (v.x[0] + dx, v.x[1])) for v in free])
+            inlet.apply(mesh, dt)
+            walls.apply(mesh, dt)
+            n_buffer.append(len(inlet.buffer_vertices))
+        columns = sorted({round(v.x[0], 9) for v in mesh.V if v not in bV})
+        npt.assert_allclose(np.diff(columns), 0.25, atol=1e-9)
+        assert columns[0] <= -1.0 + 0.25 and columns[-1] == 4.0
+        # 7 fluid vertices per period plus the column on the release plane
+        assert set(n_buffer) <= {6, 7, 8}
+        extra = sorted(v.x for v in bV if v.x[0] == -1.0 + dx)
+        assert extra == [(-1.0 + dx, 0.0), (-1.0 + dx, 1.0)]
+        assert len(bV) == n_walls + 2
+
+    def test_one_extra_wall_vertex_whatever_the_step(self):
+        """``U dt`` does not divide the column spacing (0.0925 against
+        0.25).  The wall rows are injected once and then dropped from the
+        ghost, so each wall still gets exactly one extra vertex, and the
+        fluid columns keep their spacing.  Before the fix round of laneH
+        every injected wall-row column left one more frozen vertex within
+        one advection step of the upstream corner (two per period and
+        wall here), without bound."""
+        mesh, bV, inlet, walls = self._channel()
+        n_walls = len(bV)
+        dt = 0.37
+        dx = self.U * dt
+        for _ in range(44):                    # four periods
+            free = [v for v in mesh.V if v not in bV
+                    and v not in inlet.buffer_vertices]
+            mesh.V.move_all([(v, (v.x[0] + dx, v.x[1])) for v in free])
+            inlet.apply(mesh, dt)
+            walls.apply(mesh, dt)
+        assert len(bV) == n_walls + 2
+        extra = sorted(v.x for v in bV if -1.0 < v.x[0] <= -1.0 + dx)
+        assert [x[1] for x in extra] == [0.0, 1.0]
+        assert not any(self._wall(gv) for gv in inlet.ghost.V)
+        columns = sorted({round(v.x[0], 9) for v in mesh.V if v not in bV})
+        npt.assert_allclose(np.diff(columns), 0.25, atol=1e-9)

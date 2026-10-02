@@ -194,21 +194,31 @@ PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
     'hagen_poiseuille_2D': SolverMethods(
         dim=2, phases='single', integrator='symplectic_euler',
-        connectivity='delaunay', frozen_set='membership', workers=20,
+        connectivity='delaunay', frozen_set='membership',
+        viscous_flux='simplex_gradient',
         label=_HP + '/Hagen_Poiseuile_2D.py',
-        notes='Lagrangian channel, boundary_filter=walls (passed at build '
-              'time). BCs from src/_setup.py:setup_poiseuille_2d_lagrangian: '
-              'OutletBufferedDeleteBC, PeriodicInletBC, PositionalNoSlipWallBC '
-              '(the wall BC last, so an injected wall-row vertex is frozen in '
-              'the same pass). pressure_model=None so workers>1 is safe. '
-              'laneL: frozen_set=membership. Shipped run (3000 steps, dt '
-              '0.01): 62 wall vertices, 62 still frozen, 0 moved. With '
-              '.replace(frozen_set="hull") the walls are released at step '
-              '1262 (two outlet buffer vertices drift past the wall lines): '
-              '2 of 62 still frozen, 60 moved, largest displacement 3.46 '
-              '(audit C1). NOT validated against the Poiseuille profile '
-              '(U_max 0.29 against 0.20 at t = 30), and nothing keeps a fluid '
-              'vertex inside: one is 5.1e-3 above the top wall at t = 30.',
+        notes='Developing Lagrangian channel flow on src/_setup.py:'
+              'setup_poiseuille_developing: pressure G (L - x) prescribed and '
+              're-imposed every step (DirichletPressureBC over HC.V, nodal), '
+              'OutletBufferedDeleteBC, PeriodicInletBufferedBC (upstream buffer '
+              'of prescribed plug motion), PositionalNoSlipWallBC; bV = walls. '
+              'laneH 2026-10-01, shipped run (Re_D 10, L 12, refinement 2, dt '
+              '0.05, 2400 steps = 11.8 t_dev): dual-volume weighted l2 from the '
+              'developed profile on 6 <= x <= 12 1.086e-2 (last quarter mean '
+              '1.089e-2, max 1.167e-2), u_max 0.15085 (0.15), largest '
+              'transverse velocity 5.9e-17 in the window and 1.1e-16 over all '
+              'free vertices at every step, 0 vertices outside the walls, 106 '
+              'of 106 wall vertices frozen and unmoved, 473 -> 478 vertices, '
+              'mass flux in / out 0.8333 / 0.8681 rho U D over 6 inlet periods. '
+              'What is left is resolution (7 fluid rows; the error falls by '
+              'about 3 per refinement). Arm '
+              'viscous_flux="two_point": l2 1.04, 26 vertices outside. '
+              'workers=None: serial is 2.2 times faster than 20 workers at 200 '
+              'vertices (38 against 86 ms per step). Pin: '
+              'test_case_hagen_poiseuille.py PIN_2D_L2 (L 3, refinement 1, 500 '
+              'steps). The laneL wall-collapse reproducer (test_frozen_set.py) '
+              'is this preset with viscous_flux="two_point" on the setup '
+              'before laneH (setup_poiseuille_2d_lagrangian).',
     ),
     'hagen_poiseuille_2D_eulerian': SolverMethods(
         dim=2, phases='single', integrator='euler_velocity_only',
@@ -220,14 +230,30 @@ PRESETS: dict[str, SolverMethods] = {
     ),
     'hagen_poiseuille_3D': SolverMethods(
         dim=3, phases='single', integrator='symplectic_euler',
-        connectivity='custom', workers=8,
-        label=_HP + '_3D/Hagen_Poiseuile_3D.py (retopologize_cylinder)',
-        notes='Case-local filtered Delaunay for the cylinder (drops the '
-              'builder simplex cache and never re-populates HC._simplices, so '
-              'duals and volumes stay on the 1-skeleton fallbacks, laneS; '
-              'freezes every hull vertex incl. the inlet cap, '
-              'audit M2). STALLED: no interior vertices near mid-tube after '
-              '3000 steps.',
+        connectivity='delaunay', frozen_set='membership',
+        pressure_flux='simplex_gradient', viscous_flux='simplex_gradient',
+        label=_HP + '_3D/Hagen_Poiseuile_3D.py',
+        notes='Developing Lagrangian pipe flow, same construction as the 2D '
+              'channel (cases_dynamic/Hagen_Poiseuile/src/_setup.py:'
+              'setup_poiseuille_developing with dim=3). Library per-step '
+              'Delaunay with walls frozen by membership replaces the case-local '
+              'retopologize_cylinder (laneH: it froze the whole hull, the inlet '
+              'cap included, and kept no simplex cache; audit M2). '
+              'pressure_flux=simplex_gradient because the centred flux reads '
+              'the batch_e_star area cache in 3D, which is not linearly '
+              'precise: radial velocity 6.3e-3 against 2.6e-18 (refinement 1, '
+              '600 steps; the same value in 9 processes, while the late l2 of '
+              'that arm is 0.0811 or 0.0821 depending on the process). laneH '
+              '2026-10-01, shipped run (Re_D 2, L 4, refinement 2 = 16-sided '
+              'pipe, dt 0.01, 1000 steps = 11.6 t_dev): l2 from the developed '
+              'profile of the circular pipe on 2 <= z <= 4 1.99e-2 (last '
+              'quarter mean 1.91e-2, max 2.11e-2), u_max 0.1977 (0.2), largest '
+              'transverse velocity 3.3e-17 in the window and 1.6e-15 over all '
+              'free vertices at every step, 0 vertices outside, 336 of 336 '
+              'wall vertices frozen and unmoved, 845 -> 928 vertices. Left: '
+              'resolution and the polygonal wall (cross-section 2.8 % below '
+              'pi R^2). Pin (slow): test_case_hagen_poiseuille.py PIN_3D_L2 '
+              '(L 2, refinement 1, 300 steps).',
     ),
     # ------------------------------------------------------------------
     # Hydrostatic column (single phase, EOS, free surface)

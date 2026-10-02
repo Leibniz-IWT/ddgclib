@@ -351,8 +351,13 @@ class TestMultiphaseMembership:
 # the case: Hagen_Poiseuile_2D (shortened channel, larger time step)
 # ---------------------------------------------------------------------------
 class TestHagenPoiseuille2D:
-    """``Hagen_Poiseuile_2D.py`` with L = 2 and dt = 0.05 (the shipped
-    L = 15, dt = 0.01 collapses at step 1248; this one at step 250)."""
+    """``Hagen_Poiseuile_2D.py`` as it was before laneH, with L = 2 and
+    dt = 0.05 (the shipped L = 15, dt = 0.01 collapsed at step 1248; this
+    one at step 250).  The reproducer of the wall collapse is the old
+    configuration: the setup ``setup_poiseuille_2d_lagrangian`` (hull
+    inlet, pressure advected with the vertices) and the two-point viscous
+    flux; the preset has moved on to ``viscous_flux='simplex_gradient'``
+    on the buffered setup (laneH), so that axis is pinned back here."""
 
     N_STEPS = 300
 
@@ -363,7 +368,7 @@ class TestHagenPoiseuille2D:
         )
         HC, bV, bc_set, wall, params = setup_poiseuille_2d_lagrangian(L=2.0)
         methods = PRESETS['hagen_poiseuille_2D'].replace(
-            frozen_set=frozen_set, workers=None)
+            frozen_set=frozen_set, viscous_flux='two_point', workers=None)
         start = wall_snapshot(HC, wall)
         n_on_wall = []
 

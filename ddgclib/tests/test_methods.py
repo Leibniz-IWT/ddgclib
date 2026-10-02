@@ -741,6 +741,49 @@ class TestEffectiveMethods:
         assert eff['dual_volume'] == 'simplex_exact'
         assert all(v.dual_vol == 0.0 for v in bV)
 
+    @pytest.mark.parametrize(
+        'name', [k for k in AXES['backend'].keys() if k is not None])
+    def test_3d_backend_axis_fills_the_same_edge_area_cache(self, name):
+        """The ``backend`` axis is a NAME and hyperct's batch_e_star needs
+        the instance.  Until the fix round of laneH every value but None
+        stopped the first 3D retopology with "'str' object has no
+        attribute 'batch_cross_areas'".  A backend that cannot be
+        imported raises; it does not fall back to the other volume and
+        edge-area source of the except branch."""
+        import importlib.util
+
+        from ddgclib.dynamic_integrators import _integrators_dynamic as mod
+        HC, bV = self._run_one_retopo(3)
+        ref = {i: {j: a.copy() for j, a in row.items()}
+               for i, row in HC._edge_area_cache.items()}
+        vol = {v.x: v.dual_vol for v in HC.V}
+        assert ref
+        if name == 'torch' and importlib.util.find_spec('torch') is None:
+            with pytest.raises(ImportError):
+                mod._retopologize(HC, bV, 3, backend=name)
+            return
+        try:
+            mod._retopologize(HC, bV, 3, backend=name)
+            instance = mod._BACKEND_INSTANCES[name]
+            assert hasattr(instance, 'batch_cross_areas')
+            mod._retopologize(HC, bV, 3, backend=name)
+            assert mod._BACKEND_INSTANCES[name] is instance     # one per name
+            mod._retopologize(HC, bV, 3, backend=instance)      # passes through
+        finally:
+            pool = getattr(mod._BACKEND_INSTANCES.pop('multiprocessing', None),
+                           'pool', None)
+            if pool is not None:
+                pool.terminate()
+        cache = HC._edge_area_cache
+        assert effective_methods(HC, 3)['edge_area_source'] == 'batch_e_star_cache'
+        assert {i: set(row) for i, row in cache.items()} == {
+            i: set(row) for i, row in ref.items()}
+        for i, row in ref.items():
+            for j, a in row.items():
+                np.testing.assert_allclose(cache[i][j], a, rtol=1e-12,
+                                           atol=1e-15)
+        assert {v.x: v.dual_vol for v in HC.V} == vol
+
     def test_dual_only_reports_carried_bv(self):
         HC, bV = self._run_one_retopo(2)
         m = SolverMethods(dim=2, connectivity='dual_only')

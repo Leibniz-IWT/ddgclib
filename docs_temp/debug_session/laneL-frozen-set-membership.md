@@ -535,6 +535,17 @@ and the setup-only probe one digest in 96 of 96.
     $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py electrolysis_3D --steps 300
     $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py droplet_2D --steps 100
     # section 3.2 (about 4 minutes each)
+    # NOTE (lane H, 2026-10-02): lane H rewrote this runner. The two
+    # commands below now run the lane H configuration (buffered inlet,
+    # viscous_flux='simplex_gradient', Re_D 10, L 12), NOT the L 15 run
+    # of section 3.2 (walls released at step 1262), which can no longer
+    # be reproduced from the runner. What is kept and still reproduces
+    # the release of the walls is the short reproducer:
+    # diagnose_frozen_set.py hp2d above (digests 62106841d3f841a9 hull,
+    # 47e12338835537f3 membership) and
+    # test_frozen_set.py::TestHagenPoiseuille2D, both pinned to the
+    # lane L configuration (setup_poiseuille_2d_lagrangian,
+    # viscous_flux='two_point').
     cd cases_dynamic/Hagen_Poiseuile
     $PY Hagen_Poiseuile_2D.py --headless
     $PY Hagen_Poiseuile_2D.py --headless --frozen-set hull --tag hull

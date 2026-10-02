@@ -806,8 +806,223 @@ def viscous_flux(
     return (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
 
 
+# ---------------------------------------------------------------------------
+# Simplex-gradient fluxes (piecewise-linear reconstruction on the primal
+# simplices, integrated over the barycentric dual cell)
+# ---------------------------------------------------------------------------
+
+# A simplex whose measure is below _SIMPLEX_FLAT_TOL * (shortest edge)**dim
+# is left out of the simplex-gradient viscous force: its gradient is not
+# defined (flat) or its stiffness, ~ 1 / thickness, is beyond an explicit
+# integrator (see viscous_force_simplex_gradient).
+_SIMPLEX_FLAT_TOL = 1e-3
+_FACTORIAL = {2: 2.0, 3: 6.0}
+
+
+def _vertex_simplices(HC) -> dict:
+    """``{id(v): [top simplices containing v]}`` for ``HC._simplices``.
+
+    Cached on ``HC._vertex_simplices`` together with the simplex list it
+    was built from.  ``HC._simplices`` is replaced, never edited in place,
+    whenever the connectivity changes, so the identity of the list says
+    whether the map is current.  Only the incidence is cached; positions
+    are read fresh by the caller.
+    """
+    simplices = getattr(HC, '_simplices', None)
+    if simplices is None:
+        raise ValueError(
+            "the 'simplex_gradient' fluxes need the top-simplex cache "
+            "HC._simplices (a Delaunay retopology or a domain builder "
+            "provides it); it is None")
+    cached = getattr(HC, '_vertex_simplices', None)
+    if cached is not None and cached[0] is simplices:
+        return cached[1]
+    incidence: dict = {}
+    for s in simplices:
+        for w in s:
+            incidence.setdefault(id(w), []).append(s)
+    HC._vertex_simplices = (simplices, incidence)
+    return incidence
+
+
+def _simplex_fan(v, HC, dim: int):
+    """Geometry of the top simplices at *v*: ``(verts, idx, X, vol, b)``.
+
+    *verts* are the other vertices of the ``n`` simplices that contain
+    *v* (each once), ``idx[t, k]`` is the position in *verts* of the
+    ``k``-th other vertex of simplex ``t``, ``X[t, k] = x_k - x_v``,
+    ``vol[t]`` the measure of the simplex and ``b[t, k] = |T|
+    grad(phi_k)`` with ``phi_k`` the barycentric coordinate of that
+    vertex.  ``-b[t, k]`` is the outward area vector of the face opposite
+    it divided by ``dim``; it is built from the adjugate of ``X`` (no
+    division), so it stays finite on a flat simplex.  ``None`` if no
+    simplex contains *v*.
+    """
+    simplices = _vertex_simplices(HC).get(id(v))
+    if not simplices:
+        return None
+    local: dict = {}
+    verts: list = []
+    idx = np.empty((len(simplices), dim), dtype=int)
+    for t, s in enumerate(simplices):
+        k = 0
+        for w in s:
+            if w is v:
+                continue
+            j = local.get(id(w))
+            if j is None:
+                j = local[id(w)] = len(verts)
+                verts.append(w)
+            idx[t, k] = j
+            k += 1
+    X = np.array([w.x_a[:dim] for w in verts])[idx] - v.x_a[:dim]
+    b = np.empty_like(X)
+    if dim == 2:
+        det = X[:, 0, 0] * X[:, 1, 1] - X[:, 0, 1] * X[:, 1, 0]
+        b[:, 0, 0] = X[:, 1, 1]
+        b[:, 0, 1] = -X[:, 1, 0]
+        b[:, 1, 0] = -X[:, 0, 1]
+        b[:, 1, 1] = X[:, 0, 0]
+    elif dim == 3:
+        b[:, 0] = np.cross(X[:, 1], X[:, 2])
+        b[:, 1] = np.cross(X[:, 2], X[:, 0])
+        b[:, 2] = np.cross(X[:, 0], X[:, 1])
+        det = np.einsum('tc,tc->t', X[:, 0], b[:, 0])
+    else:
+        raise NotImplementedError(
+            f"the 'simplex_gradient' fluxes support dim 2 and 3, got {dim}")
+    b *= (np.sign(det) / _FACTORIAL[dim])[:, None, None]
+    return verts, idx, X, np.abs(det) / _FACTORIAL[dim], b
+
+
+def viscous_force_simplex_gradient(v, HC, dim: int, mu: float,
+                                   flat_tol: float = _SIMPLEX_FLAT_TOL,
+                                   _fan=None) -> np.ndarray:
+    """Viscous force on the dual cell of *v* from the simplex gradients.
+
+    The flux through the barycentric dual faces of cell ``i`` with the
+    velocity gradient of the piecewise-linear interpolant on each primal
+    simplex ``T``::
+
+        F_v_i = mu * sum_{T contains i} G_T . a_iT
+        G_T   = sum_{k in T} u_k (x) grad(phi_k)        (constant on T)
+        a_iT  = -|T| grad(phi_i)                        (area vector of the
+                                                         dual face of i in T)
+
+    ``phi_k`` are the barycentric coordinates of ``T``.  ``a_iT`` is the
+    outward vector area of the part of the barycentric dual boundary of
+    cell ``i`` that lies inside ``T`` (it equals the outward area vector
+    of the face of ``T`` opposite ``i`` divided by ``dim``, whatever the
+    interior dual points are).  Written per edge this is
+    ``sum_j w_ij (u_j - u_i)`` with ``w_ij = -mu sum_T |T| grad(phi_i) .
+    grad(phi_j)``: the cotangent weights in 2D.
+
+    Properties, against the two-point form of :func:`viscous_flux`:
+
+    - LINEAR PRECISION: zero for a linear velocity field at every
+      interior vertex of any simplicial mesh.  The two-point form has
+      that property only on meshes whose edge stencil is symmetric; on a
+      sheared or jittered Delaunay mesh its error is O(|grad u| / h)
+      (laneH: residual of a linear field with the wall shear rate of a
+      Poiseuille profile 0.6 to 5 of the driving force ``G Vol``, growing
+      with refinement).
+    - Pairwise antisymmetric (``w_ij = w_ji``): momentum conserving.
+    - Negative semi-definite (energy never grows), but ``w_ij`` can be
+      negative on an edge whose opposite angles sum to more than 180
+      degrees (never on an interior edge of a 2D Delaunay mesh).
+    - A hull vertex gets the natural (zero normal gradient) condition.
+
+    Diffusion form (``mu`` Laplacian), like the two-point flux.
+
+    Simplices with ``|T| <= flat_tol * (shortest edge)**dim`` are left
+    out.  A flat simplex has no gradient (the coplanar tetrahedra qhull
+    returns on a structured mesh, 4 to 8 % of the simplices of a builder
+    cylinder), and a nearly flat one couples its vertices with a
+    stiffness ``~ 1 / thickness`` that an explicit integrator cannot
+    follow.  Leaving one out is a slit of zero width between simplices
+    that still share all its vertices: harmless on the hull (another
+    triangulation of the boundary), but between interior vertices the
+    dual cells no longer close and linear precision is lost at those
+    vertices.  Short edges are not filtered: the measure is relative to
+    the shortest edge, so a thin simplex between two close vertices is
+    kept.
+
+    Needs ``HC._simplices``.
+    """
+    F = np.zeros(dim)
+    fan = _simplex_fan(v, HC, dim) if _fan is None else _fan
+    if fan is None:
+        return F
+    verts, idx, X, vol, b = fan
+    # squared edge lengths: the dim edges at v and those among the others
+    l2 = np.einsum('tkc,tkc->tk', X, X).min(axis=1)
+    for i in range(dim):
+        for j in range(i + 1, dim):
+            e = X[:, i] - X[:, j]
+            l2 = np.minimum(l2, np.einsum('tc,tc->t', e, e))
+    keep = vol > flat_tol * l2 ** (0.5 * dim)
+    if not keep.any():
+        return F
+    # w[t, k] = -|T| grad(phi_k) . grad(phi_v), with b_v = -sum_k b_k
+    w = (np.einsum('tkc,tc->tk', b, b.sum(axis=1))
+         * (keep / np.where(keep, vol, 1.0))[:, None])
+    dU = np.array([nb.u[:dim] for nb in verts])[idx] - v.u[:dim]
+    return mu * np.einsum('tk,tkc->c', w, dU)
+
+
+def pressure_force_simplex_gradient(v, HC, dim: int, pressure_model=None,
+                                    _fan=None) -> np.ndarray:
+    """Pressure force on the dual cell of *v* from the simplex gradients.
+
+    Minus the integral over the barycentric dual cell of the gradient of
+    the piecewise-linear pressure (the cell owns ``1 / (dim + 1)`` of
+    every simplex at the vertex)::
+
+        F_p_i = - sum_{T contains i} |T| / (dim + 1) * grad(p)_T
+              = - 1 / (dim + 1) * sum_T sum_{k in T} (p_k - p_i) |T| grad(phi_k)
+
+    This is the volume form ``-int grad(p) dV``, not the surface form
+    ``-int p n dA`` of :func:`pressure_flux`:
+
+    - exact for a linear pressure on ANY simplicial mesh, in 2D and 3D,
+      and independent of the dual face areas (the 3D edge-area cache of
+      ``batch_e_star`` is not linearly precise, laneJ);
+    - zero for a uniform pressure at EVERY vertex, hull vertices
+      included.  An open cell therefore feels no ambient pressure: right
+      for a prescribed pressure field, wrong for a free surface that an
+      EOS pressure should push outwards;
+    - total momentum changes by the boundary integral of the
+      piecewise-linear pressure only, but the force is not a sum of
+      pairwise antisymmetric fluxes.
+
+    ``|T| grad(phi_k)`` is an area vector and stays finite on a flat
+    simplex, so nothing is filtered.  Needs ``HC._simplices``.
+    """
+    F = np.zeros(dim)
+    fan = _simplex_fan(v, HC, dim) if _fan is None else _fan
+    if fan is None:
+        return F
+    verts, idx, _, _, b = fan
+    dp = (np.array([_resolve_pressure(nb, pressure_model, HC, dim)
+                    for nb in verts])[idx]
+          - _resolve_pressure(v, pressure_model, HC, dim))
+    return -np.einsum('tk,tkc->c', dp, b) / (dim + 1)
+
+
+pressure_flux_methods.register("simplex_gradient",
+                               pressure_force_simplex_gradient)
+
+viscous_flux_methods = MethodRegistry("viscous_flux")
+viscous_flux_methods.register("two_point", viscous_flux)
+viscous_flux_methods.register("simplex_gradient", viscous_force_simplex_gradient)
+# stress_force takes the method KEY as a keyword named ``viscous_flux``
+# (as for ``pressure_flux`` above): keep an alias.
+_viscous_flux_two_point = viscous_flux
+
+
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
-                 pressure_model=None, pressure_flux: str = "centred") -> np.ndarray:
+                 pressure_model=None, pressure_flux: str = "centred",
+                 viscous_flux: str = "two_point") -> np.ndarray:
     """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
 
     For each dual flux plane between parcels i and j, the force has two
@@ -836,6 +1051,16 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
     The symmetric (transpose) term mu * grad(div u) is omitted because
     the rank-1 face gradient has spurious discrete compressibility.
 
+    With ``viscous_flux='simplex_gradient'`` the viscous part is
+    :func:`viscous_force_simplex_gradient` instead (same dual faces, the
+    gradient of the piecewise-linear velocity on each primal simplex):
+    linearly precise on any mesh, which the two-point form is not.  The
+    registry ``viscous_flux_methods`` lists the keys; the method axis
+    ``viscous_flux`` of :mod:`ddgclib.methods` records them.
+    ``pressure_flux='simplex_gradient'`` is the pressure counterpart
+    (:func:`pressure_force_simplex_gradient`, the volume form of the
+    pressure force).
+
     Total: F_i = sum_j (F_p_ij + F_v_ij)
 
     Parameters
@@ -857,9 +1082,13 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         - :class:`~ddgclib.eos.EquationOfState`: weakly compressible
           pressure from density ``rho = m / dual_vol``.  Updates ``v.p``
           and ``v.rho`` in-place.
-    pressure_flux : {'centred', 'acoustic-riemann'}
+    pressure_flux : {'centred', 'acoustic-riemann', 'simplex_gradient'}
         Pressure flux formulation (see above).  ``'acoustic-riemann'``
-        requires an EOS *pressure_model* (density and sound speed).
+        requires an EOS *pressure_model* (density and sound speed),
+        ``'simplex_gradient'`` requires ``HC._simplices``.
+    viscous_flux : {'two_point', 'simplex_gradient'}
+        Viscous flux formulation (see above).  ``'simplex_gradient'``
+        requires ``HC._simplices``.
 
     Returns
     -------
@@ -870,6 +1099,12 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         raise KeyError(
             f"unknown pressure_flux {pressure_flux!r}; available: "
             f"{pressure_flux_methods.available()}")
+    if viscous_flux not in viscous_flux_methods:
+        raise KeyError(
+            f"unknown viscous_flux {viscous_flux!r}; available: "
+            f"{viscous_flux_methods.available()}")
+    two_point = viscous_flux == "two_point"
+    simplex_p = pressure_flux == "simplex_gradient"
     riemann = pressure_flux == "acoustic-riemann"
     if riemann and not hasattr(pressure_model, "sound_speed"):
         raise ValueError("pressure_flux='acoustic-riemann' needs an "
@@ -887,6 +1122,18 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
     _vid = id(v) if _cache is not None else None
 
     F = np.zeros(dim)
+    if simplex_p or not two_point:
+        # NOTE(laneH): the simplex-gradient fluxes share the geometry of
+        # the simplices at v; with both selected no dual face is read.
+        fan = _simplex_fan(v, HC, dim)
+        if simplex_p:
+            F += pressure_force_simplex_gradient(v, HC, dim, pressure_model,
+                                                 _fan=fan)
+        if not two_point:
+            F += viscous_force_simplex_gradient(v, HC, dim, mu, _fan=fan)
+        if simplex_p and not two_point:
+            return F
+
     for v_j in v.nn:
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
@@ -901,9 +1148,10 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
             F += pressure_flux_riemann(p_i, p_j, rho_i, rho_j, c_i,
                                        float(pressure_model.sound_speed(rho_j)),
                                        u_i, v_j.u[:dim], A_ij)
-        else:
+        elif not simplex_p:
             F += _pressure_flux_centred(p_i, p_j, A_ij)
-        F += viscous_flux(mu, delta_u, d_ij, A_ij)
+        if two_point:
+            F += _viscous_flux_two_point(mu, delta_u, d_ij, A_ij)
 
     return F
 
@@ -915,6 +1163,7 @@ def stress_acceleration(
     HC=None,
     pressure_model=None,
     pressure_flux: str = "centred",
+    viscous_flux: str = "two_point",
 ) -> np.ndarray:
     """Acceleration from Cauchy stress: a_i = F_stress_i / m_i.
 
@@ -951,6 +1200,8 @@ def stress_acceleration(
         See :func:`stress_force`.
     pressure_flux : {'centred', 'acoustic-riemann'}
         See :func:`stress_force`.
+    viscous_flux : {'two_point', 'simplex_gradient'}
+        See :func:`stress_force`.
 
     Returns
     -------
@@ -959,7 +1210,8 @@ def stress_acceleration(
     """
     return stress_force(v, dim=dim, mu=mu, HC=HC,
                         pressure_model=pressure_model,
-                        pressure_flux=pressure_flux) / v.m
+                        pressure_flux=pressure_flux,
+                        viscous_flux=viscous_flux) / v.m
 
 
 # Simplified alias for use as dudt_fn in dynamic integrators

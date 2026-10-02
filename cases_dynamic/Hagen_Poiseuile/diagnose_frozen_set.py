@@ -56,8 +56,12 @@ def build_hp2d(args):
     kw = dict(dt=dt, n_steps=n_steps, bc_set=bc_set, boundary_filter=wall)
     # the outlet buffer reaches to L + 2
     box = [(0.0, args.L + 2.0), (0.0, params['D'])]
+    # The reproducer is the configuration before laneH: this setup (hull
+    # inlet, pressure advected with the vertices) with the two-point
+    # viscous flux.  The preset is on 'simplex_gradient' since laneH.
     return ('hagen_poiseuille_2D', HC, bV, kw, box, None,
-            dict(mu=params['mu']), f"_L{args.L:g}_dt{dt:g}_n{n_steps}")
+            dict(mu=params['mu'], replace=dict(viscous_flux='two_point')),
+            f"_L{args.L:g}_dt{dt:g}_n{n_steps}")
 
 
 def build_dam_break_2d(args):
@@ -162,7 +166,8 @@ def run_arm(case: str, arm: str, args) -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         preset, HC, bV, kw, box, in_phase, extra, label = BUILDERS[case](args)
-    methods = PRESETS[preset].replace(frozen_set=arm)
+    methods = PRESETS[preset].replace(frozen_set=arm,
+                                      **extra.get('replace', {}))
     if methods.workers:                 # serial: same numbers, no fork cost
         methods = methods.replace(workers=None)
     dim = methods.dim

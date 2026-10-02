@@ -55,7 +55,8 @@ class TestRiemannFlux:
     def test_registry(self):
         assert pressure_flux_methods["centred"] is pressure_flux
         assert pressure_flux_methods["acoustic-riemann"] is pressure_flux_riemann
-        assert set(pressure_flux_methods.available()) == {"centred", "acoustic-riemann"}
+        assert set(pressure_flux_methods.available()) == {
+            "centred", "acoustic-riemann", "simplex_gradient"}
 
     def test_reduces_to_centred_without_velocity_jump(self):
         A = np.array([0.3, -0.1])

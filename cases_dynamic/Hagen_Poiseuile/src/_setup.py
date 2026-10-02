@@ -213,6 +213,193 @@ def setup_poiseuille_2d_lagrangian(
     return HC, bV, bc_set, wall_criterion, params
 
 
+def setup_poiseuille_developing(
+    dim: int = 2,
+    L: float = 4.0,
+    D: float = 1.0,
+    U_avg: float = 0.1,
+    rho: float = 1.0,
+    mu: float = 0.1,
+    n_refine: int = 2,
+    inlet_buffer: float = 1.0,
+    outlet_buffer: float = 1.0,
+    cdist: float = 1e-10,
+    wall_tol: float = 1e-8,
+) -> tuple:
+    """Developing Lagrangian Poiseuille flow, 2D channel or 3D pipe (laneH).
+
+    Plug flow ``U_avg`` enters at the plane 0 of the flow axis and develops
+    under the prescribed pressure field ``P = G (L - x)`` between no-slip
+    walls.  2D: channel ``[0, L] x [0, D]``, flow along x.  3D: pipe of
+    radius ``D / 2``, flow along z.  ``G`` is the gradient whose developed
+    profile carries the inlet flux: ``12 mu U_avg / D**2`` (2D),
+    ``32 mu U_avg / D**2`` (3D), so ``U_max`` is ``1.5 U_avg`` and
+    ``2 U_avg``.
+
+    There is no pressure solve: the pressure is a function of position,
+    re-imposed on every vertex after every step (``DirichletPressureBC``
+    over ``HC.V``), and each fluid vertex relaxes to the Poiseuille
+    profile along its path line with the time constant
+    ``rho D**2 / (pi**2 mu)`` (2D).  Nodal values ``P(x_i)``, not dual
+    cell averages: the centred pressure flux is linearly precise for
+    nodal values (laneP).
+
+    Mesh: unit cells of length 1 from ``-inlet_buffer`` to ``L`` (both
+    must be whole numbers so that the cells are the period of the inlet
+    ghost).  BCs, in this order: ``OutletBufferedDeleteBC`` (buffer of
+    *outlet_buffer* behind ``L``), ``PeriodicInletBufferedBC`` (upstream
+    buffer ``[-inlet_buffer, 0]`` with prescribed plug motion, release at
+    0), ``PositionalNoSlipWallBC``, ``DirichletPressureBC``.  Every hull
+    vertex that is not a wall is therefore a buffer vertex.  Masses:
+    ``rho`` times the dual volume a vertex has in the periodic tiling of
+    unit cells, for the mesh and for the ghost alike.
+
+    Returns
+    -------
+    HC, bV, bc_set, wall_criterion, params
+        *bV* holds the wall vertices only; run with
+        ``frozen_set='membership'`` (preset ``hagen_poiseuille_2D`` /
+        ``_3D``).
+    """
+    from hyperct.ddg import compute_vd, rebuild_simplex_cache_2d
+    from scipy.spatial import cKDTree
+
+    from ddgclib._boundary_conditions import (
+        DirichletPressureBC,
+        OutletBufferedDeleteBC,
+        PeriodicInletBufferedBC,
+        PositionalNoSlipWallBC,
+    )
+    from ddgclib.geometry._complex_operations import extrude
+    from ddgclib.initial_conditions import HagenPoiseuille3D
+    from ddgclib.operators.stress import cache_dual_volumes
+
+    if dim not in (2, 3):
+        raise ValueError(f"dim must be 2 or 3, got {dim}")
+    n_cells = L + inlet_buffer
+    if (abs(L - round(L)) > 1e-12 or abs(inlet_buffer - round(inlet_buffer))
+            > 1e-12 or inlet_buffer < 1 or n_cells < 3):
+        raise ValueError("L and inlet_buffer must be whole numbers of unit "
+                         "cells, inlet_buffer >= 1 and L + inlet_buffer >= 3")
+    period = 1.0
+    axis = 0 if dim == 2 else 2
+    R = D / 2
+
+    if dim == 2:
+        G = 12 * mu * U_avg / D ** 2
+        U_max = 1.5 * U_avg
+        area = D
+
+        def unit():
+            HC_unit = Complex(dim, domain=[(0.0, period), (0.0, D)])
+            HC_unit.triangulate()
+            for _ in range(n_refine):
+                HC_unit.refine_all()
+            return HC_unit
+
+        HC = extrude(unit(), n_cells, axis=axis, cdist=1e-10)
+        rebuild_simplex_cache_2d(HC)
+        unit_mesh = unit()
+
+        def wall_criterion(v):
+            return abs(v.x_a[1]) < wall_tol or abs(v.x_a[1] - D) < wall_tol
+
+        analytical = PoiseuillePlanar(G=G, mu=mu, y_lb=0.0, y_ub=D,
+                                      flow_axis=0, normal_axis=1, dim=dim)
+    else:
+        from ddgclib.geometry.domains import cylinder_volume
+        G = 8 * mu * U_avg / R ** 2
+        U_max = 2 * U_avg
+        HC = cylinder_volume(R=R, L=n_cells, refinement=n_refine,
+                             flow_axis=axis).HC
+        unit_mesh = cylinder_volume(R=R, L=period, refinement=n_refine,
+                                    flow_axis=axis).HC
+
+        def wall_criterion(v):
+            return float(np.hypot(v.x_a[0], v.x_a[1])) >= R - wall_tol
+
+        analytical = HagenPoiseuille3D(U_max=U_max, R=R, flow_axis=axis,
+                                       dim=dim)
+
+    # The builders start at 0: put the release plane there.
+    HC.V.move_all([(v, tuple(np.where(np.arange(dim) == axis,
+                                      v.x_a - inlet_buffer, v.x_a)))
+                   for v in list(HC.V)])
+
+    hull = HC.boundary(HC.V) if dim == 2 else {v for v in HC.V if v.boundary}
+    for v in HC.V:
+        v.boundary = v in hull
+    compute_vd(HC, method="barycentric")
+    cache_dual_volumes(HC, dim)
+    if dim == 3:
+        area = sum(v.dual_vol for v in HC.V) / n_cells   # of the polygon
+
+    # Mass = rho * dual volume in the periodic tiling: read from the
+    # second unit cell of the mesh, whose cells are closed along the axis.
+    def pattern(x, origin):
+        """Position within the unit cell that starts at *origin*."""
+        y = np.array(x, dtype=float)
+        y[axis] = (y[axis] - origin) % period
+        if period - y[axis] < 1e-9:
+            y[axis] = 0.0
+        return y
+
+    x_in = -inlet_buffer                     # upstream end of the mesh
+    cell = [v for v in HC.V
+            if -1e-9 <= v.x_a[axis] - (x_in + period) < period - 1e-9]
+    tree = cKDTree(np.array([pattern(v.x_a, x_in) for v in cell]))
+
+    u_in = np.zeros(dim)
+    u_in[axis] = U_avg
+    for mesh, origin in ((HC, x_in), (unit_mesh, 0.0)):
+        for v in mesh.V:
+            dist, i = tree.query(pattern(v.x_a, origin))
+            if dist > 1e-8:
+                raise RuntimeError(f"no vertex of the unit cell at {v.x}")
+            v.m = rho * cell[i].dual_vol
+            v.u = u_in.copy()
+
+    bV = {v for v in HC.V if wall_criterion(v)}
+    # share of the mass of a unit cell that moves (is not in a wall cell)
+    fluid_fraction = (sum(v.m for v in cell if v not in bV)
+                      / sum(v.m for v in cell))
+
+    def pressure(v):
+        return G * (L - v.x_a[axis])
+
+    bc_set = BoundaryConditionSet()
+    bc_set.add(
+        OutletBufferedDeleteBC(outlet_pos=L, buffer_width=outlet_buffer,
+                               axis=axis, bV=bV),
+        None,
+    )
+    bc_set.add(
+        PeriodicInletBufferedBC(unit_mesh=unit_mesh, velocity=U_avg,
+                                buffer_width=inlet_buffer, axis=axis,
+                                inlet_pos=0.0, cdist=cdist,
+                                fields=['u', 'm'], period=period, bV=bV),
+        None,
+    )
+    bc_set.add(
+        PositionalNoSlipWallBC(criterion_fn=wall_criterion, dim=dim, bV=bV),
+        None,
+    )
+    bc_set.add(DirichletPressureBC(pressure), HC.V)   # every vertex
+    bc_set.apply_all(HC, bV, dt=0.0)
+
+    params = {
+        'dim': dim, 'L': L, 'D': D, 'R': R, 'U_avg': U_avg, 'rho': rho,
+        'mu': mu, 'G': G, 'U_max': U_max, 'n_refine': n_refine,
+        'inlet_buffer': inlet_buffer, 'outlet_buffer': outlet_buffer,
+        'flow_axis': axis, 'period': period, 'area': area,
+        'fluid_fraction': fluid_fraction,
+        'poiseuille_ic': analytical, 'pressure': pressure,
+        't_dev': rho * D ** 2 / (np.pi ** 2 * mu) if dim == 2
+        else rho * R ** 2 / (2.4048 ** 2 * mu),
+    }
+    return HC, bV, bc_set, wall_criterion, params
+
+
 def wall_snapshot(HC, wall_criterion) -> dict:
     """``{id(v): (v, position)}`` of the vertices on the walls now."""
     return {id(v): (v, v.x_a.copy()) for v in HC.V if wall_criterion(v)}

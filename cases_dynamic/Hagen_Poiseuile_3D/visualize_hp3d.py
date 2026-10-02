@@ -50,7 +50,8 @@ from Hagen_Poiseuile_3D import (
 
 
 _FIG = os.path.join(_HERE, 'fig')
-_RESULTS = os.path.join(_HERE, 'results')
+# outputs of Hagen_Poiseuile_3D.py (preset hagen_poiseuille_3D)
+_RESULTS = os.path.join(_HERE, 'results', 'hagen_poiseuille_3D')
 
 
 # ============================================================

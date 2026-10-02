@@ -629,7 +629,17 @@ _AXES: list[MethodAxis] = [
                  'face average of an alternating field is uniform)', 'validated',
                  'ddgclib/operators/stress.py:pressure_flux',
                  'every pinned case; capillary_rise static check: half-cell '
-                 'closure 4e-15 (run_free_surface_static_check.py)',
+                 'closure 4e-15 (run_free_surface_static_check.py). laneH: the '
+                 'linear precision is that of the face areas it reads (axis '
+                 'edge_area_source): exact in 2D where the dual cell closes, '
+                 'and with the 3D p_ij ring; with the 3D batch_e_star cache the '
+                 'force of a linear pressure is off by 0.4 % on the builder '
+                 'cylinder and by 1.3 % (median) / 21 % (max) on a jittered one, '
+                 'and the developing pipe picks up radial velocity (6.3e-3 = '
+                 '0.03 U_max in each of 9 processes; l2 0.0811 or 0.0821, '
+                 'depending on the process, against 0.0566 with '
+                 'simplex_gradient: diagnose_poiseuille.py arms3d, refinement '
+                 '1, 600 steps, results/laneH/arms3d*.json)',
                  phases='single'),
             _opt('acoustic-riemann', 'Lagrangian Godunov contact pressure '
                  'p* = 1/2 (p_i + p_j) - 1/2 rho_f c_f (u_j - u_i).n: momentum '
@@ -647,6 +657,94 @@ _AXES: list[MethodAxis] = [
                  'axis is the one to use. Unit tests: antisymmetry, rigid '
                  'translation, dissipativity (test_pressure_flux_stabilisation.py)',
                  phases='single'),
+            _opt('simplex_gradient', 'Volume form: minus the integral over the '
+                 'dual cell of the gradient of the piecewise-linear pressure, '
+                 'F_i = -sum_T |T| / (dim + 1) grad(p)_T. Exact for a linear '
+                 'pressure on any simplicial mesh and independent of the dual '
+                 'face areas; zero for a uniform pressure at every vertex, hull '
+                 'included (an open cell feels NO ambient pressure). Needs '
+                 'HC._simplices', 'opt-in',
+                 'ddgclib/operators/stress.py:pressure_force_simplex_gradient',
+                 'laneH 2026-10-01. Force of a linear pressure exact to 1e-15 at '
+                 'every vertex, hull included, on jittered Delaunay meshes in 2D '
+                 'and 3D (test_simplex_gradient_flux.py). Preset '
+                 'hagen_poiseuille_3D (prescribed pressure): largest radial '
+                 'velocity in the window 2.6e-18 against 6.3e-3 with centred '
+                 'on the e_star cache and 1.3e-5 to 3.6e-4 with centred on the '
+                 'p_ij ring (custom wrapper, 2.9x the wall time); l2 from the '
+                 'developed profile 0.0566 / 0.0811 to 0.0821 / 0.0566 '
+                 '(refinement 1, 600 steps, diagnose_poiseuille.py arms3d). '
+                 'The preset arm is bit-identical from process to process; '
+                 'the two centred arms are not (protocol rule 8): ranges over '
+                 '9 processes, each arm takes one of two values (cache: l2 '
+                 '0.08211 in 7, 0.08111 in 2; ring: radial velocity 1.26e-5 '
+                 'in 6, 3.65e-4 in 3). In 2D it reproduces centred '
+                 '(l2 1.1998e-2 in both arms). LIMITS: not run with an EOS; not '
+                 'for a free surface that the pressure should push outwards; '
+                 'not a sum of pairwise antisymmetric fluxes',
+                 dims=(2, 3), phases='single'),
+        ),
+    ),
+    MethodAxis(
+        name='viscous_flux', title='Viscous flux across the dual faces',
+        group='forces', default='two_point', applies_to='single',
+        control='viscous_flux= on dudt_i / stress_force (dudt partial); '
+                'registry operators.stress.viscous_flux_methods',
+        notes='Added 2026-10-01 (laneH). Same barycentric dual faces in both '
+              'values; they differ in the velocity gradient put on a face. The '
+              'multiphase force hard-codes the two-point flux.',
+        options=(
+            _opt('two_point', 'Face gradient from the two cell values along the '
+                 'edge: (mu / |d_ij|) (u_j - u_i) (d_hat . A_ij)', 'validated',
+                 'ddgclib/operators/stress.py:viscous_flux',
+                 'every pinned case; Poiseuille equilibrium residual 1e-13 on '
+                 'the symmetric refined-square mesh (test_stress.py). laneH '
+                 '2026-10-01: NOT linearly precise without a symmetric edge '
+                 'stencil. Residual of a LINEAR velocity field, in units of '
+                 'G Vol of the Poiseuille problem (median / max): 0.64 / 2.6 on '
+                 'a jittered sheared 2D Delaunay mesh at refinement 3, 1.41 / '
+                 '5.2 at refinement 4 (it grows like 1 / h), 0.20 on the '
+                 'unjittered 3D builder cylinder, 0.28 / 0.84 on a jittered one '
+                 '(diagnose_poiseuille.py static). Developing Poiseuille flow '
+                 'on the moving mesh does not reach the profile: 2D l2 0.26 '
+                 '(u_max 0.189 against 0.150; simplex_gradient 0.012), 3D 0.53 '
+                 '(0.276 against 0.200; 0.057); at Re 10 the transverse '
+                 'velocity grows from round-off (l2 1.0, 26 vertices outside '
+                 'the walls). Its edge weight d_ij . A_ij also inherits the '
+                 'orientation defect of the 2D area vector (edge_area_source '
+                 'shared_vd_2d)',
+                 phases='single'),
+            _opt('simplex_gradient', 'Gradient of the piecewise-linear velocity '
+                 'on each primal simplex, integrated over the dual faces: '
+                 'F_i = mu sum_T G_T . a_iT, a_iT = -|T| grad(phi_i) (the '
+                 'cotangent weights in 2D). Linearly precise on any simplicial '
+                 'mesh, pairwise antisymmetric, negative semi-definite. Needs '
+                 'HC._simplices', 'opt-in',
+                 'ddgclib/operators/stress.py:viscous_force_simplex_gradient',
+                 'laneH 2026-10-01. Residual of a linear velocity field 1e-15 '
+                 'on the meshes where two_point has 0.2 to 5; equal to the '
+                 'cotangent weights in 2D; momentum and dissipation tested '
+                 '(test_simplex_gradient_flux.py). Presets hagen_poiseuille_2D / '
+                 '_3D: the developing flow reaches the developed profile to l2 '
+                 '1.09e-2 (2D shipped run: Re 10, refinement 2, 478 vertices, '
+                 't = 120 s) and 1.99e-2 (3D: Re 2, refinement 2, 928 vertices, '
+                 '16-sided pipe). The 2D error falls by about 3 per refinement: '
+                 '1.08e-2, 3.6e-3, 1.34e-3 at refinement 1, 2, 3 on the regular '
+                 'rows (t = 10 s); 3.3e-2, 1.1e-2, 3.4e-3 on the sheared rows '
+                 '(t = 60 s). The nodal '
+                 'residual of the exact quadratic profile is NOT small on an '
+                 'irregular mesh (median 0.05 to 0.07 of G Vol: Galerkin P1, '
+                 'the solution error is what converges). LIMITS: a simplex '
+                 'with |T| <= 1e-3 l_min^dim is left out (flat simplices have '
+                 'no gradient), which breaks linear precision at its vertices '
+                 'if they are interior: none in the 2D run, in the 3D run a '
+                 'flat tetrahedron of four free vertices of equal radius (a '
+                 'planar rectangle between two cross-sections) in 2 of 600 '
+                 'steps; a hull vertex is coupled to whatever the convex-hull '
+                 'fill connects it to, so integrated vertices must not be on '
+                 'the hull (PeriodicInletBufferedBC); explicit stability as '
+                 'for two_point; not run with an EOS or multiphase',
+                 dims=(2, 3), phases='single'),
         ),
     ),
     MethodAxis(
@@ -825,7 +923,24 @@ _AXES: list[MethodAxis] = [
             _opt('shared_vd_2d', '2D: segment between the two dual vertices shared '
                  'by v_i and v_j, oriented outward', 'validated',
                  'ddgclib/operators/stress.py:dual_area_vector (2D branch)',
-                 'all 2D pins (batch_e_star raises for dim != 3)', dims=(2,)),
+                 'all 2D pins (batch_e_star raises for dim != 3). DEFECT found '
+                 'by laneH 2026-10-01, NOT fixed: the vector is oriented away '
+                 'from x_i as seen from the midpoint of the dual segment; when '
+                 'the barycentres of the two triangles at the edge subtend more '
+                 'than 180 degrees at x_i that points AGAINST the edge. On a '
+                 'jittered sheared Delaunay mesh 6 of 665 vectors are flipped, '
+                 'the closure residual of an interior cell is 0.23 and the '
+                 'centred force of a linear pressure is off by up to 17.6 V |g|; '
+                 'oriented by A_ij . d_ij > 0 both are exact (1e-14). Census of '
+                 'the test suite (counting probe): 2055 flipped vectors of 1.13e6 '
+                 '2D calls, in the laneL HP2D reproducer (737 / 431), the '
+                 'bare-Delaunay + EOS instability test of laneR (272), '
+                 'test_material_delaunay (9) and the buffer zones of the '
+                 'Poiseuille runs (no integrated vertex); none in a droplet, '
+                 'hydrostatic or dam-break pin. Strict xfail reproducer: '
+                 'test_simplex_gradient_flux.py::'
+                 'test_2d_dual_area_vectors_close_on_a_sheared_jittered_mesh',
+                 dims=(2,)),
             _opt('min_image_2d', '2D periodic: minimum-image rebuild of the dual '
                  'segment', 'experimental',
                  'ddgclib/operators/stress.py:dual_area_vector (periodic branch)',
@@ -855,14 +970,46 @@ _AXES: list[MethodAxis] = [
     MethodAxis(
         name='backend', title='batch_e_star compute backend', group='execution',
         default=None,
-        control='backend= integrator kwarg (only reaches batch_e_star; compute_vd '
-                'always runs numpy)',
+        control='backend= integrator kwarg, a NAME that _retopologize resolves '
+                'to a hyperct backend instance (_resolve_backend, one instance '
+                'per name). Only reaches the 3D batch_e_star (dual face areas '
+                'of the edge-area cache); not read in 1D / 2D, and compute_vd '
+                'always runs numpy',
+        notes='laneH fix round 2026-10-02: until then every value but None '
+              'stopped the first 3D retopology with "\'str\' object has no '
+              'attribute \'batch_cross_areas\'" (the name was handed to '
+              'batch_e_star, which calls methods of an instance). The axis '
+              'changes who computes the cached areas, not the method: a force '
+              'that does not read the cache (both fluxes simplex_gradient) is '
+              'unaffected to the bit.',
         options=(
             _opt(None, 'numpy', 'validated', 'hyperct/_backend.py'),
-            _opt('torch', 'PyTorch CPU tensors', 'opt-in', 'hyperct/_backend.py',
-                 'test_gpu_backend.py'),
-            _opt('gpu', 'PyTorch CUDA (auto-detect)', 'opt-in', 'hyperct/_backend.py'),
-            _opt('multiprocessing', 'parallel CPU', 'experimental', 'hyperct/_backend.py'),
+            _opt('torch', 'PyTorch tensors, on CUDA when available, else on the '
+                 'CPU. ImportError without PyTorch (no silent fallback)',
+                 'opt-in', 'hyperct/_backend.py',
+                 'test_gpu_backend.py (compute_vd). laneH fix round: the ddg '
+                 'environment has no PyTorch, so the fast suite covers this '
+                 'value by its ImportError only; run in environments with '
+                 'PyTorch 2.14 / 2.10 + CUDA (RTX 4090): the three backend '
+                 'tests of test_methods.py pass (edge-area cache equal to the '
+                 'numpy one to rtol 1e-12), run_cluster.py --backend torch '
+                 'reproduces the numpy l2 after 50 steps; with PyTorch 2.8 + '
+                 'CUDA and pressure_flux=centred the GPU areas move l2 in the '
+                 '16th digit after 40 steps (0.23195448845688516 against '
+                 '0.2319544884568851)'),
+            _opt('gpu', 'Auto-detect: PyTorch on CUDA, else PyTorch on the CPU, '
+                 'else numpy', 'opt-in', 'hyperct/_backend.py',
+                 'laneH fix round: test_methods.py::TestEffectiveMethods::'
+                 'test_3d_backend_axis_fills_the_same_edge_area_cache; preset '
+                 'hagen_poiseuille_3D with backend replaced gives the serial '
+                 'result to the bit (test_case_hagen_poiseuille.py::'
+                 'TestDeveloping3DBackendAxis); default of '
+                 'Hagen_Poiseuile_3D/run_cluster.py'),
+            _opt('multiprocessing', 'hyperct MultiprocessingBackend (owns a '
+                 'pool of 2 processes; its batch_cross_areas is the numpy one, '
+                 'so nothing is gained on this path)', 'experimental',
+                 'hyperct/_backend.py',
+                 'laneH fix round: same two tests as gpu'),
         ),
     ),
     MethodAxis(
@@ -877,8 +1024,11 @@ _AXES: list[MethodAxis] = [
                  'into dudt_fn the v.p / v.rho writes of _resolve_pressure happen '
                  'in the children and are LOST in the parent', 'experimental',
                  'ddgclib/dynamic_integrators/_integrators_dynamic.py:_compute_accel',
-                 'audit 2026-09-25 §0.5; used by Hagen_Poiseuile 2D (20) / 3D (8) '
-                 'where pressure_model is None'),
+                 'audit 2026-09-25 §0.5; used by Hagen_Poiseuile 2D (20) / 3D (8), '
+                 'where pressure_model is None, until laneH; both presets are '
+                 'serial since (2D at about 200 vertices: 38.2 ms per step '
+                 'serial against 85.5 with 20 workers) and --workers is an arm '
+                 '(default 8 in Hagen_Poiseuile_3D/run_cluster.py)'),
         ),
     ),
 ]

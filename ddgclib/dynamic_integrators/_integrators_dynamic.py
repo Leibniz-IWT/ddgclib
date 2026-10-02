@@ -60,6 +60,25 @@ _MEMBERSHIP_ADAPTIVE_MSG = (
 )
 
 
+# NOTE(laneH): the ``backend`` kwarg of the integrators (method axis
+# ``backend``) is a NAME, while hyperct's batch_e_star calls methods of a
+# backend INSTANCE: a name used to end in "'str' object has no attribute
+# 'batch_cross_areas'" at the first 3D retopology.  One instance per name,
+# because the multiprocessing backend owns a pool.
+_BACKEND_INSTANCES = {}
+
+
+def _resolve_backend(backend):
+    """Backend name -> ``hyperct._backend`` instance (cached).  ``None``
+    and instances pass through."""
+    if not isinstance(backend, str):
+        return backend
+    if backend not in _BACKEND_INSTANCES:
+        from hyperct._backend import get_backend
+        _BACKEND_INSTANCES[backend] = get_backend(backend)
+    return _BACKEND_INSTANCES[backend]
+
+
 def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   periodic_axes=None, domain_bounds=None, backend=None,
                   skip_triangulation=False,
@@ -98,6 +117,11 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         When set, delegates to :func:`retopologize_periodic`.
     domain_bounds : list[tuple[float, float]] or None
         Domain extent per axis.  Required when *periodic_axes* is set.
+    backend : str, backend instance or None
+        Backend of the 3D ``batch_e_star`` call that fills the edge-area
+        cache: a name of ``hyperct._backend.get_backend`` (``'torch'``,
+        ``'gpu'``, ``'multiprocessing'``), an instance, or ``None``
+        (numpy).  Not read in 1D / 2D.
     skip_triangulation : bool
         If True, skip the disconnect/retriangulate steps (1-2) and keep
         the existing connectivity.  Boundary tagging, dual mesh
@@ -352,6 +376,10 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
 
     # 5b. Cache dual volumes and oriented edge areas for FVM operators.
     #     Use batch_e_star when available (vectorized, supports GPU backend).
+    if dim == 3:
+        # outside the try: a backend that cannot be imported must raise,
+        # not fall back to the other volume / edge-area source below
+        backend = _resolve_backend(backend)
     try:
         from hyperct.ddg import batch_e_star
         interior = [v for v in HC.V if v not in dV]
