@@ -131,9 +131,12 @@ not appear there.
   pushed into the builder surface in one go. The function returns the
   relative change and warns above `domain_tol = 1e-3`
   (`diagnose_column.py remap`). The 3D `--arm remap` run from uniform
-  density is reproducible from process to process to about two digits
-  after 10 `t_ac` (Delaunay ties on a cospherical mesh); the presets are
-  not affected.
+  density is bit-identical in every process since lane T (2026-10-02;
+  before, to about two digits after 10 `t_ac`). It is still decided by
+  ties (cospherical mesh, free-surface edge areas): a 1e-15 shift of the
+  interior vertices moves its peak by 1.25e-03 relative
+  (`cases_dynamic/diagnose_determinism.py sweep pin_hydro3d_remap
+  --perturb 1e-15`).
 - **Do not use `dual_only` for the 3D column**: its 3D branch zeroes the
   dual volume of frozen vertices, so wall cells read the reference
   pressure.

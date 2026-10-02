@@ -78,9 +78,9 @@ class TestPhaseAssignment(unittest.TestCase):
         """A triangle with one bulk vertex of each phase (and one interface
         vertex) is a tie.  It must go to the lower phase ID whatever the
         order in which the triangle lists its vertices: in 2D that order
-        is ``id()`` order, which differs between interpreters (the
-        shearing-plate setup has 10 such triangles and gave other phase
-        labels in some processes until lane L)."""
+        was ``id()`` order until lane T, which differs between
+        interpreters (the shearing-plate setup has 10 such triangles and
+        gave other phase labels in some processes until lane L)."""
         from itertools import permutations
         for dim, labels in ((2, (0, 1, INTERFACE_PHASE)),
                             (3, (0, 0, 1, 1))):

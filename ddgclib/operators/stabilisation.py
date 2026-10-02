@@ -73,9 +73,14 @@ def density_diffusion_step(HC, verts, delta: float, c0: float, dt: float,
                            if closed[id(v)] else np.zeros(dim))
     dm: dict = {id(v): 0.0 for v in vs}
     n_pairs = n_unc = 0
+    # Each pair once, from its first endpoint in the order of ``vs`` (by
+    # ``id()`` the orientation of A and the order of the sums into ``dm``
+    # followed the memory addresses and differed between processes).
+    done: set = set()
     for v in vs:
+        done.add(id(v))
         for w in v.nn:
-            if w not in vset or id(w) <= id(v):
+            if w not in vset or id(w) in done:
                 continue
             A = dual_area_vector(v, w, HC, dim)
             An = float(np.linalg.norm(A))

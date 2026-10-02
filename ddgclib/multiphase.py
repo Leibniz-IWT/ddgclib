@@ -287,9 +287,10 @@ class MultiphaseSystem:
                 # NOTE(laneL): a tie goes to the lower phase ID, as the
                 # docstring says.  ``most_common`` returned the phase of
                 # the first bulk vertex of the simplex, and in 2D the
-                # vertex order of ``iter_triangles_2d`` is ``id()`` order,
-                # i.e. memory addresses: the shearing-plate setup (10 tied
-                # triangles) gave other phase labels in some interpreters.
+                # vertex order of ``iter_triangles_2d`` was ``id()`` order
+                # (memory addresses; ``HC.V`` order since lane T): the
+                # shearing-plate setup (10 tied triangles) gave other
+                # phase labels in some interpreters.
                 top = max(counts.values())
                 winner = min(p for p, c in counts.items() if c == top)
             else:

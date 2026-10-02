@@ -27,10 +27,10 @@ Usage (repo root)::
     ``G Vol`` while its solution error converges (``convergence``).
 ``arms2d`` / ``arms3d``
     The preset against its arms: profile error, transverse velocity,
-    vertices outside the walls.  The two ``pressure_flux='centred'`` arms
-    of ``arms3d`` are not reproducible from process to process (the
-    preset and two-point arms are, to the bit): quote them as a range
-    over at least two processes, ``arms3d --only centred --tag p2``.
+    vertices outside the walls.  Every arm is bit-identical from process
+    to process since lane T (2026-10-02); before, the two
+    ``pressure_flux='centred'`` arms of ``arms3d`` were not
+    (``results/laneH/arms3d_p*.json`` are those processes).
 ``convergence``
     2D profile error against refinement, at a fixed time and at the
     steady state of the mesh.
@@ -339,8 +339,8 @@ if __name__ == '__main__':
     ap.add_argument('--only', default=None,
                     help='arms3d: only the arms whose label contains this')
     ap.add_argument('--tag', default='',
-                    help='arms3d: write results/laneH/arms3d_<tag>.json (the '
-                         'two centred arms differ from process to process; '
-                         'repeat them with --only centred --tag p2, p3, ...)')
+                    help='arms3d: write results/laneH/arms3d_<tag>.json '
+                         '(until lane T the two centred arms differed from '
+                         'process to process: --only centred --tag p2, ...)')
     a = ap.parse_args()
     globals()[a.mode](a)

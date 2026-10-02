@@ -370,10 +370,20 @@ class TestColumn3D:
 
     @pytest.mark.slow
     def test_drop_settles_over_40_acoustic_times(self):
+        """The end-of-run value is pinned since lane T: until then
+        protocol rule 8 kept 3D pins to early peaks, because 3D runs on
+        fixed connectivity agreed between processes to 4e-09 only (the
+        refinement 2 column: 8 final states in 8 interpreters; this
+        refinement 1 run gave one in 6 before the lane as well).  A 1e-15
+        shift of the interior vertices moves the kinetic energy at 40
+        acoustic times by at most 6.1e-12 relative and the peak by
+        1.7e-13 (8 seeds,
+        ``diagnose_determinism.py sweep pin_hydro3d --perturb 1e-15``)."""
         col, res, err = _column_run('hydrostatic_3D', 1, 40.0, 'drop')
         assert _envelope(col, res, 36, 40) < 1e-2 * _envelope(col, res, 0, 4)
         assert float(res['umax'].max()) == pytest.approx(PIN_3D_UMAX_PEAK,
                                                          rel=1e-9)
+        assert float(res['ke'][-1]) == pytest.approx(PIN_3D_KE_40, rel=1e-9)
 
     @pytest.mark.slow
     def test_library_dual_only_cannot_hold_the_3d_column(self):
@@ -401,10 +411,18 @@ class TestColumn3D:
         first, topological peel) and the column compresses as on fixed
         connectivity.
 
-        The peak is early (0.87 acoustic times) and was identical in six
-        processes.  Later the 3D arm is not reproducible from process to
-        process beyond two digits (lane P log, section 11), so nothing
-        later is pinned."""
+        The peak is early (0.87 acoustic times).  Until lane T nothing
+        later was pinned: the reconnecting 3D arm was reproducible from
+        process to process to two digits only (lane P log, section 11).
+        It is bit-identical in every interpreter now, so the kinetic
+        energy at the end of the run is pinned too.  Both pins are
+        tie-decided numbers: the mesh is structured (cospherical points,
+        and the free-surface edge areas of the lane T log, section 6),
+        and a 1e-15 shift of the interior vertices moves the peak by up
+        to 1.25e-03 relative and the end value by 6.9e-04 (8 seeds,
+        ``diagnose_determinism.py sweep pin_hydro3d_remap --perturb
+        1e-15``).  A change of a summation order upstream may move them
+        by that much and no more (protocol rule 8)."""
         col, res, err = _column_run('hydrostatic_3D', 2, 2.0, 'drop', 'remap')
         col_p, res_p, _ = _column_run('hydrostatic_3D', 2, 2.0, 'drop')
         assert len(col.bV) == len(col_p.bV) == 89
@@ -416,6 +434,8 @@ class TestColumn3D:
         assert abs(err['mass_drift']) < 1e-13
         assert float(res['umax'].max()) == pytest.approx(
             PIN_3D_REMAP_UMAX_PEAK, rel=1e-6)
+        assert float(res['ke'][-1]) == pytest.approx(
+            PIN_3D_REMAP_KE_END, rel=1e-6)
 
 
 @pytest.mark.slow
@@ -477,3 +497,10 @@ PIN_2D_REMAP_KE_40 = 2.721558596123262e-06
 # (connectivity='delaunay_material', remap='conservative',
 # redistribute_mass=True), refinement 2, 2 acoustic times.
 PIN_3D_REMAP_UMAX_PEAK = 0.15658060026054665
+# Pinned 2026-10-02 (lane T): end-of-run values of the two 3D runs above,
+# possible since 3D runs are bit-identical between interpreters
+# (ddgclib/tests/test_determinism.py).  Kinetic energy of the free
+# vertices after 40 acoustic times (preset, refinement 1) and after 2
+# acoustic times (remap arm, refinement 2).
+PIN_3D_KE_40 = 6.206365156298652e-06
+PIN_3D_REMAP_KE_END = 0.5431445985762776

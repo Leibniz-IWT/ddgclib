@@ -98,15 +98,21 @@ refinement 1, 600 steps):
 | arm | l2 end | largest radial velocity |
 |---|---|---|
 | preset | 0.0566 | 2.6e-18 |
-| `pressure_flux='centred'` on the `batch_e_star` area cache (what `delaunay` builds) | 0.0811 to 0.0821 | 6.3e-03 |
-| `pressure_flux='centred'` on the `p_ij` ring (cache cleared by a custom wrapper, 2.9 times the wall time) | 0.0566 | 1.3e-05 to 3.6e-04 |
+| `pressure_flux='centred'` on the `batch_e_star` area cache (what `delaunay` builds) | 0.0821 | 6.3e-03 |
+| `pressure_flux='centred'` on the `p_ij` ring (cache cleared by a custom wrapper, 2.9 times the wall time) | 0.0566 | 1.26e-05 |
 | `viscous_flux='two_point'` | 0.530 | 3.5e-18 |
 
-The preset and the two-point arm are bit-identical from process to
-process. The two centred arms are not (their force reads dual face
-areas): the ranges are over 9 fresh processes, each arm takes one of two
-values (`results/laneH/arms3d*.json` in the 2D case directory; repeat
-with `diagnose_poiseuille.py arms3d --only centred --tag p2`).
+Every arm is bit-identical from process to process since lane T
+(2026-10-02; `cases_dynamic/diagnose_determinism.py sweep
+hp3d_centred_laneH,hp3d_ring_laneH`). Before, the two centred arms were
+not (their force reads dual face areas, and a boundary face barycentre
+was summed in the order of memory addresses): over 9 fresh processes the
+cache arm ended at l2 0.0811 or 0.0821 (0.1107 after other runs in the
+same process or on a fragmented heap) and the ring arm at radial
+velocity 1.3e-05 or 3.6e-04
+(`results/laneH/arms3d*.json` in the 2D case directory). The cache arm is
+chaotic all the same: a 1e-15 shift of the interior vertices moves its l2
+between 0.079 and 0.169 (8 seeds).
 
 Known limits: a flat tetrahedron between four free vertices of equal
 radius appears in a few steps (2 of 600 at refinement 1) and is left out of
