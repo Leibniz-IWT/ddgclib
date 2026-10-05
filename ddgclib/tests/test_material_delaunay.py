@@ -478,12 +478,18 @@ class TestColumnThroughTheIntegrator:
     def test_convex_arm_cannot_hold_the_column(self, runs):
         """The hull is pinned by the frozen top corners, so the convex
         rebuild keeps the total volume at 1: the column cannot compress
-        and the hydrostatic head never develops."""
+        and the hydrostatic head never develops.  Until laneO (2026-10-05)
+        this arm also read flipped dual area vectors (9 in 5 force
+        evaluations, ``area_orientation='dual_midpoint'``) and peaked at
+        0.6219 m/s = 3.19 times the fixed-connectivity arm; with the
+        correct orientation it peaks at 1.14 times (pinned below, the
+        legacy value is kept in test_area_orientation.py)."""
         u_c, vol_c, p_c, _ = runs['convex']
         u_d, _, p_d, _ = runs['dual_only']
         assert vol_c == pytest.approx(1.0, abs=1e-9)
-        assert u_c.max() > 2.0 * u_d.max()
-        assert p_c < 0.6 * RHO0 * G           # measured 0.4996 rho g H
+        assert u_c.max() == pytest.approx(PIN_CONVEX_UMAX, rel=1e-6)
+        assert u_c.max() > 1.1 * u_d.max()
+        assert p_c < 0.6 * RHO0 * G           # measured 0.4848 rho g H
 
     def test_material_arm_pinned(self, runs):
         u_m, vol_m, p_m, _ = runs['material']
@@ -496,3 +502,7 @@ class TestColumnThroughTheIntegrator:
 # redistribute_mass=True), refinement 2, 6 acoustic times.
 PIN_UMAX = 0.20282519399577198
 PIN_VOLUME = 0.995147730045464
+# Pinned 2026-10-05 (laneO): the same with connectivity='delaunay' (the
+# convex-hull arm).  Peak velocity; 0.6218859935218073 before laneO with
+# the flipped area vectors (area_orientation='dual_midpoint').
+PIN_CONVEX_UMAX = 0.22276943647536884

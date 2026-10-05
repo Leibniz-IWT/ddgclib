@@ -53,7 +53,13 @@ PRESETS: dict[str, SolverMethods] = {
         label=_OD + "oscillating_droplet_2D.py (retopo_policy_2d='delaunay')",
         notes='MEASURED WORSE for dynamics (per-step Delaunay KE pump: l2 '
               '0.48992 / tail 1.72505, lane5). Kept because the static '
-              'floor tests exercise exactly this path with u=0.',
+              'floor tests exercise exactly this path with u=0. laneO '
+              '(2026-10-05): this is the one droplet configuration whose '
+              'integrated vertices read flipped 2D area vectors (454 in 300 '
+              'steps at refinement 2); with the correct orientation the full '
+              'run gives l2 0.5038096226631333 / tail 1.2281376515706395 '
+              '(the pre-laneO library reproduces 0.48991833470391266 / '
+              '1.7250489596305962); still measured worse.',
     ),
     'oscillating_droplet_2D_projection2': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
@@ -218,7 +224,13 @@ PRESETS: dict[str, SolverMethods] = {
               'test_case_hagen_poiseuille.py PIN_2D_L2 (L 3, refinement 1, 500 '
               'steps). The laneL wall-collapse reproducer (test_frozen_set.py) '
               'is this preset with viscous_flux="two_point" on the setup '
-              'before laneH (setup_poiseuille_2d_lagrangian).',
+              'before laneH (setup_poiseuille_2d_lagrangian). laneO '
+              '(2026-10-05): the 2D area-vector orientation fix leaves the '
+              'preset, its pins and the pressure_flux="simplex_gradient" arm '
+              'bit-identical (the flipped vectors were at inlet-buffer '
+              'vertices only); pressure_flux stays "centred": the '
+              'simplex_gradient arm differs by 2e-8 in l2 and tail (better '
+              'l2, worse tail mean), no measured gain.',
     ),
     'hagen_poiseuille_2D_eulerian': SolverMethods(
         dim=2, phases='single', integrator='euler_velocity_only',
@@ -285,7 +297,11 @@ PRESETS: dict[str, SolverMethods] = {
               'Pa. Reconnecting arm = .replace(connectivity=delaunay_material, '
               'remap=conservative, redistribute_mass=True): stable, 1.2e-4 / '
               'noise floor 2.3e-6. Needs the artificial viscosity: with the '
-              'viscosity of water the drop exceeds c0 at 64 t_ac (laneP).',
+              'viscosity of water the drop exceeds c0 at 64 t_ac (laneP). '
+              'laneO (2026-10-05): the preset and the remap arm are '
+              'bit-identical under the 2D area-vector orientation fix; the '
+              'convex-hull arm (connectivity=delaunay + remap) reaches 111.7 '
+              'm/s at 2.2 t_ac instead of 42.1 at 3.0.',
     ),
     'hydrostatic_2D_periodic': SolverMethods(
         dim=2, phases='single', integrator='symplectic_euler',

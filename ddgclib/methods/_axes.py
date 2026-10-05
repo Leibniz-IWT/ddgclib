@@ -221,7 +221,10 @@ _AXES: list[MethodAxis] = [
                  'of the cloud, so the gap between a moved free surface and the '
                  'hull is filled with near-degenerate simplices. Even WITH '
                  'remap=conservative the 2D hydrostatic column reaches 42 m/s at '
-                 '3 t_ac, the total volume stays pinned to the hull and the '
+                 '3 t_ac (laneO 2026-10-05, with the correct orientation of the '
+                 '2D area vectors: 111.7 m/s at 2.2 t_ac, volume 1.037; the '
+                 'legacy rule area_orientation=dual_midpoint gives the 42.10 '
+                 'again), the total volume stays pinned to the hull and the '
                  'column carries half the hydrostatic head (integrated L2 4.9e3 '
                  'Pa = rho g H / 2); from the equilibrium masses it exceeds c0 '
                  'at 95 t_ac; 3D 7.1 m/s. Use delaunay_material. In 1D the '
@@ -416,7 +419,9 @@ _AXES: list[MethodAxis] = [
                  '(laneR known limit) is NOT what breaks a free-surface column: '
                  'without the rescale the convex-hull arm is worse (59.4 against '
                  '42.1 m/s, mass drift +1.5 %, total volume 1.03; '
-                 'diagnose_column.py remap), and once the hull fill is removed '
+                 'diagnose_column.py remap; both measured before laneO, with '
+                 'the correct 2D area orientation the convex arm with the '
+                 'rescale reaches 111.7 m/s), and once the hull fill is removed '
                  '(connectivity=delaunay_material) the offset stays below 1 Pa '
                  '(convex arm: up to 2.7e3 Pa per rebuild) and the run with and '
                  'without the rescale agree to 3 digits. No gauge was added',
@@ -732,9 +737,9 @@ _AXES: list[MethodAxis] = [
                  '(u_max 0.189 against 0.150; simplex_gradient 0.012), 3D 0.53 '
                  '(0.276 against 0.200; 0.057); at Re 10 the transverse '
                  'velocity grows from round-off (l2 1.0, 26 vertices outside '
-                 'the walls). Its edge weight d_ij . A_ij also inherits the '
-                 'orientation defect of the 2D area vector (edge_area_source '
-                 'shared_vd_2d)',
+                 'the walls). Its edge weight d_ij . A_ij inherited the '
+                 'orientation defect of the 2D area vector until laneO '
+                 '(axis area_orientation)',
                  phases='single'),
             _opt('simplex_gradient', 'Gradient of the piecewise-linear velocity '
                  'on each primal simplex, integrated over the dual faces: '
@@ -767,6 +772,77 @@ _AXES: list[MethodAxis] = [
                  'the hull (PeriodicInletBufferedBC); explicit stability as '
                  'for two_point; not run with an EOS or multiphase',
                  dims=(2, 3), phases='single'),
+        ),
+    ),
+    MethodAxis(
+        name='area_orientation', title='Sign rule of the 2D dual face vector',
+        group='forces', default='primal_edge',
+        control='area_orientation= on dudt_i / stress_force and '
+                'multiphase_dudt_i / multiphase_stress_force (dudt partial, '
+                'bound only when not the default) -> '
+                'stress.dual_area_vector(orientation=); 2D only, the 3D '
+                'sources and the 1D sign ignore it; operators that read '
+                'dual_area_vector outside the force (density_diffusion_step, '
+                'scalar_gradient_integrated, the csf_dual curvature path) '
+                'always use the default',
+        notes='Added 2026-10-05 (laneO). The 2D dual face of an edge is the '
+              'segment between the two dual vertices (barycentres, or '
+              'barycentre and edge midpoint on the hull) the endpoints share; '
+              'its normal has magnitude |segment| and the axis fixes its sign. '
+              'The defect was found by laneH (2026-10-01) and left in place '
+              'because the fix moves the pinned numbers of lanes L, R and P; '
+              'laneO fixed it and re-pinned them.',
+        options=(
+            _opt('primal_edge', 'A_ij . (x_j - x_i) > 0: the normal of the dual '
+                 'segment on the side of x_j. Exact for any valid pair of '
+                 'triangles (A_ij . d_ij = (2/3) (|T_left| + |T_right|)) and '
+                 'for a hull edge ((2/3) |T|); A_ij = -A_ji and the cell of an '
+                 'interior vertex closes on every mesh',
+                 'validated',
+                 'ddgclib/operators/stress.py:_orient_2d',
+                 'laneO 2026-10-05: on the laneH mesh (sheared 0.3, jitter 0.2, '
+                 'refinement 3, reconnected) 0 of 806 vectors against their '
+                 'edge, closure of every interior cell 2.8e-17, antisymmetry '
+                 'exact, equal to the simplex-cache reference '
+                 'simplex_area_vectors to 1e-16 (dual_midpoint: 6 flipped, '
+                 'closure 0.23, linear-pressure force off by 17.6 V |g|); '
+                 'also on the disk builder mesh (4 flipped at setup under '
+                 'dual_midpoint) and in the periodic branch. Every 2D pin that '
+                 'had a flipped vector was re-measured and re-pinned '
+                 '(test_frozen_set.py, test_single_phase_remap.py, '
+                 'test_material_delaunay.py, test_case_hagen_poiseuille.py '
+                 'two-point arm; see the laneO log for old -> new); the droplet, '
+                 'dam-break and hydrostatic pins never read a flipped vector '
+                 'and are bit-identical. Tests: test_area_orientation.py, '
+                 'test_simplex_gradient_flux.py (the former strict xfail)',
+                 dims=(1, 2, 3)),
+            _opt('dual_midpoint', 'The vector points away from x_i as seen from '
+                 'the midpoint of the dual segment (the rule before laneO). '
+                 'Flipped when the two triangles at the edge subtend more than '
+                 '180 degrees at x_i (x_i inside the triangle of the three '
+                 'other vertices): the vector then points AGAINST its edge, the '
+                 'cell does not close and the pressure and viscous fluxes of '
+                 'that face act backwards. Kept so that the numbers pinned '
+                 'before 2026-10-05 can be reproduced',
+                 'broken',
+                 'ddgclib/operators/stress.py:_orient_2d',
+                 'laneH 2026-10-01 (found), laneO 2026-10-05 (measured): census '
+                 'of the fast suite before the fix 2341 flipped vectors of '
+                 '1.17e6 2D calls in 8 tests (laneL HP2D reproducer 737 / 431, '
+                 'HP2D two-point arm 354, density-diffusion pair-order test 280, '
+                 'laneR bare-Delaunay instability test 272, HP2D preset pin 252 '
+                 'at inlet-buffer vertices only, test_material_delaunay convex '
+                 'arm 9, the xfail 6); along the runs: 2D droplet with remap, '
+                 'dual_only, dam break, electrolysis, hydrostatic 2D (fixed '
+                 'connectivity, remap, density diffusion): 0 flipped vectors; '
+                 'bare-Delaunay 2D droplet (refinement 2, 300 steps): 454 '
+                 'flipped vectors in 109 of 300 evaluations from step 168 on; '
+                 'laneR bare box: 272 from step 33, the KE had doubled at step '
+                 '1 already (the laneK instability does not come from it). '
+                 'Reproduces every pre-laneO pin through '
+                 'preset.replace(area_orientation="dual_midpoint") (tested in '
+                 'test_area_orientation.py)',
+                 dims=(2,)),
         ),
     ),
     MethodAxis(
@@ -956,30 +1032,42 @@ _AXES: list[MethodAxis] = [
                  'hyperct kernel, 3D re-pin and co-evaluation with the '
                  'redistribution-pump rework (laneG lever b)', dims=(3,)),
             _opt('shared_vd_2d', '2D: segment between the two dual vertices shared '
-                 'by v_i and v_j, oriented outward', 'validated',
+                 'by v_i and v_j, oriented outward by the axis area_orientation '
+                 '(A_ij . d_ij > 0 since laneO)', 'validated',
                  'ddgclib/operators/stress.py:dual_area_vector (2D branch)',
                  'all 2D pins (batch_e_star raises for dim != 3). DEFECT found '
-                 'by laneH 2026-10-01, NOT fixed: the vector is oriented away '
-                 'from x_i as seen from the midpoint of the dual segment; when '
-                 'the barycentres of the two triangles at the edge subtend more '
-                 'than 180 degrees at x_i that points AGAINST the edge. On a '
-                 'jittered sheared Delaunay mesh 6 of 665 vectors are flipped, '
-                 'the closure residual of an interior cell is 0.23 and the '
-                 'centred force of a linear pressure is off by up to 17.6 V |g|; '
-                 'oriented by A_ij . d_ij > 0 both are exact (1e-14). Census of '
-                 'the test suite (counting probe): 2055 flipped vectors of 1.13e6 '
-                 '2D calls, in the laneL HP2D reproducer (737 / 431), the '
-                 'bare-Delaunay + EOS instability test of laneR (272), '
-                 'test_material_delaunay (9) and the buffer zones of the '
-                 'Poiseuille runs (no integrated vertex); none in a droplet, '
-                 'hydrostatic or dam-break pin. Strict xfail reproducer: '
-                 'test_simplex_gradient_flux.py::'
-                 'test_2d_dual_area_vectors_close_on_a_sheared_jittered_mesh',
+                 'by laneH 2026-10-01, FIXED by laneO 2026-10-05 (axis '
+                 'area_orientation; the old rule is its broken value '
+                 'dual_midpoint): the vector was oriented away from x_i as seen '
+                 'from the midpoint of the dual segment; when the barycentres of '
+                 'the two triangles at the edge subtend more than 180 degrees at '
+                 'x_i that points AGAINST the edge. On a jittered sheared '
+                 'Delaunay mesh 6 of 806 vectors were flipped, the closure '
+                 'residual of an interior cell 0.23 and the centred force of a '
+                 'linear pressure off by up to 17.6 V |g|; oriented by '
+                 'A_ij . d_ij > 0 the vector equals the simplex-cache reference '
+                 '(stress.simplex_area_vectors) to 1e-14 on every mesh tried, '
+                 'cells close to round-off and A_ij = -A_ji exactly '
+                 '(test_area_orientation.py). Census of the fast suite before '
+                 'the fix: 2341 flipped vectors of 1.17e6 2D calls in 8 tests; '
+                 'the three pins that read one were re-measured and re-pinned '
+                 '(laneO log, section 3), every other 2D pin and the full 2D '
+                 'droplet baseline are bit-identical',
                  dims=(2,)),
             _opt('min_image_2d', '2D periodic: minimum-image rebuild of the dual '
-                 'segment', 'experimental',
+                 'segment, sign by the axis area_orientation', 'experimental',
                  'ddgclib/operators/stress.py:dual_area_vector (periodic branch)',
-                 'd_ij is NOT min-imaged (06_known_issues)', dims=(2,)),
+                 'd_ij is NOT min-imaged (06_known_issues). laneO 2026-10-05: '
+                 'the sign defect of shared_vd_2d was here too (64 vectors '
+                 'against the minimum-image edge in 10 steps of the 2D '
+                 'shearing plate; fixed by the same rule), and a defect of its '
+                 'own is NOT fixed: on a sheared, jittered periodic_rectangle '
+                 'after retopologize_periodic the two endpoints of 62 of 886 '
+                 'directed edges (61 crossing the seam) build DIFFERENT dual '
+                 'segments (the common neighbours are min-imaged about x_i, so '
+                 'the two sides can pick different periodic images) and 2 '
+                 'return a zero vector from one side only '
+                 '(test_area_orientation.py::TestPeriodicBranch)', dims=(2,)),
         ),
     ),
     MethodAxis(

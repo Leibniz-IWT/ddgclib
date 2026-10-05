@@ -305,19 +305,15 @@ class TestSolverMethods:
 
 # ---------------------------------------------------------------------------
 # Finding of laneH outside its brief: orientation of the 2D dual area vector
+# (a strict xfail until laneO, 2026-10-05, fixed it: axis area_orientation)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason=(
-    "laneH finding, not fixed (it would move the pinned behaviour of other "
-    "lanes): the 2D branch of dual_area_vector orients A_ij away from x_i as "
-    "seen from the midpoint of the dual segment.  When the barycentres of "
-    "the two triangles at an edge subtend more than 180 degrees at x_i that "
-    "points AGAINST the edge; the correct rule is A_ij . d_ij > 0.  See "
-    "docs_temp/debug_session/laneH-poiseuille-developing.md, section 7."))
 def test_2d_dual_area_vectors_close_on_a_sheared_jittered_mesh():
     """The dual cell of an interior vertex is closed: sum_j A_ij = 0, and
-    every A_ij points along its edge.  On this mesh 6 of 665 area vectors
-    point against their edge and the closure residual is 0.23."""
+    every A_ij points along its edge.  Under the legacy rule
+    ``area_orientation='dual_midpoint'`` 6 of 665 area vectors of this
+    mesh point against their edge and the closure residual is 0.23
+    (test_area_orientation.py keeps that count)."""
     from ddgclib.operators.stress import dual_area_vector
     rng = np.random.default_rng(0)
     res = rectangle(L=2.0, h=1.0, refinement=3, flow_axis=0)

@@ -51,7 +51,34 @@ from ddgclib.operators._registry import MethodRegistry
 # TODO: move dual_area_vector and dual_volume to hyperct.ddg (pure geometry)
 # ---------------------------------------------------------------------------
 
-def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
+#: Sign rules of the 2D dual face vector (method axis ``area_orientation``
+#: of :mod:`ddgclib.methods`).  ``'primal_edge'``: ``A_ij . (x_j - x_i) > 0``,
+#: exact for any pair of non-degenerate triangles (the dual segment crosses
+#: the primal edge, laneO).  ``'dual_midpoint'``: the rule before laneO,
+#: the vector points away from ``x_i`` as seen from the midpoint of the
+#: dual segment; wrong (flipped) when the two triangles at the edge subtend
+#: more than 180 degrees at ``x_i`` (status 'broken', kept so that the
+#: numbers pinned before the fix can be reproduced).
+AREA_ORIENTATIONS = ('primal_edge', 'dual_midpoint')
+
+
+def _orient_2d(A_ij: np.ndarray, x_i: np.ndarray, x_j: np.ndarray,
+               centroid: np.ndarray, orientation: str) -> np.ndarray:
+    """Sign of a 2D dual face vector so that it points outward from i."""
+    if orientation == 'primal_edge':
+        if np.dot(A_ij, x_j - x_i) < 0:
+            return -A_ij
+        return A_ij
+    if orientation == 'dual_midpoint':
+        if np.dot(A_ij, x_i - centroid) > 0:
+            return -A_ij
+        return A_ij
+    raise KeyError(f"unknown area orientation {orientation!r}; available: "
+                   f"{AREA_ORIENTATIONS}")
+
+
+def dual_area_vector(v_i, v_j, HC, dim: int = 3,
+                     orientation: str = 'primal_edge') -> np.ndarray:
     """Oriented dual area vector for the interface between parcels i and j.
 
     Computes A_ij, the total outward area vector of the dual face separating
@@ -63,7 +90,14 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
 
     In 2D the dual face is the line segment between the two shared dual
     vertices; A_ij is the outward-facing normal with magnitude equal to the
-    segment length.
+    segment length.  Its sign is fixed by *orientation* (see
+    :data:`AREA_ORIENTATIONS`): the default ``'primal_edge'`` takes the
+    normal on the side of ``x_j`` (``A_ij . d_ij > 0``, which is
+    ``(2/3) (|T_left| + |T_right|) > 0`` for the barycentric segment of any
+    valid pair of triangles, and ``(2/3) |T|`` for a hull edge), so that
+    ``A_ij = -A_ji`` and the cell of an interior vertex closes on every
+    mesh.  ``'dual_midpoint'`` is the legacy rule (broken on skewed meshes).
+    1D and 3D ignore *orientation*.
 
     In 3D the dual face is the DEC p_ij polygon: tet barycenters interleaved
     with face barycenters (x_i + x_j + x_k)/3.  This construction guarantees
@@ -80,6 +114,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         Simplicial complex with duals computed (``compute_vd``).
     dim : int
         Spatial dimension (1, 2, or 3).
+    orientation : {'primal_edge', 'dual_midpoint'}
+        2D sign rule (above).
 
     Returns
     -------
@@ -126,10 +162,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
                 midpt = 0.5 * (x_i + x_j)
                 dual_edge = bary - midpt
                 A_ij = np.array([-dual_edge[1], dual_edge[0]])
-                vec_to_i = x_i - 0.5 * (bary + midpt)
-                if np.dot(A_ij, vec_to_i) > 0:
-                    A_ij = -A_ij
-                return A_ij
+                return _orient_2d(A_ij, x_i, x_j, 0.5 * (bary + midpt),
+                                  orientation)
             # Interior edge: pick two triangles (one on each side of edge).
             # With ghost resolution, shared count can be >2. Use cross
             # product sign to find one neighbor on each side.
@@ -151,11 +185,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
             bary_r = (x_i + x_j + right) / 3.0
             dual_edge = bary_l - bary_r
             A_ij = np.array([-dual_edge[1], dual_edge[0]])
-            centroid = 0.5 * (bary_l + bary_r)
-            vec_to_i = x_i - centroid
-            if np.dot(A_ij, vec_to_i) > 0:
-                A_ij = -A_ij
-            return A_ij
+            return _orient_2d(A_ij, x_i, x_j, 0.5 * (bary_l + bary_r),
+                              orientation)
 
         # Standard (non-periodic) path
         vdnn = v_i.vd.intersection(v_j.vd)
@@ -168,11 +199,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         # Normal to dual edge: rotation of the dual edge direction vector
         A_ij = np.array([-dual_edge[1], dual_edge[0]])
         # Orient outward from v_i
-        centroid = 0.5 * (vd1.x_a[:2] + vd2.x_a[:2])
-        vec_to_i = v_i.x_a[:2] - centroid
-        if np.dot(A_ij, vec_to_i) > 0:
-            A_ij = -A_ij
-        return A_ij
+        return _orient_2d(A_ij, v_i.x_a[:2], v_j.x_a[:2],
+                          0.5 * (vd1.x_a[:2] + vd2.x_a[:2]), orientation)
 
     elif dim == 3:
         return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
@@ -895,6 +923,40 @@ def _simplex_fan(v, HC, dim: int):
     return verts, idx, X, np.abs(det) / _FACTORIAL[dim], b
 
 
+def simplex_area_vectors(v, HC, dim: int):
+    """Exact barycentric dual area vectors of the edges at *v*, from the
+    simplex cache: ``(verts, A)`` with ``A[k]`` the vector of the edge
+    ``(v, verts[k])``.
+
+    Inside a simplex ``T`` the face between the dual cells of ``i`` and
+    ``j`` has the area vector ``|T| (grad(phi_j) - grad(phi_i)) / (dim + 1)``
+    (outward from ``i``), so::
+
+        A_ij = 1 / (dim + 1) * sum_{T contains i, j} |T| (grad(phi_j) - grad(phi_i))
+
+    No dual vertex is read and no orientation is chosen: the sign comes
+    from the gradients.  Closed (``sum_j A_ij = 0``) at every vertex whose
+    simplices surround it, antisymmetric, and the half cell of a hull
+    vertex is closed by its hull faces.  An exactly flat simplex
+    contributes nothing.
+
+    This is the reference :func:`dual_area_vector` is tested against
+    (laneO: equal to the 2D segment and to the 3D ``p_ij`` ring of an
+    interior edge to round-off) and the per-vertex form of the registered
+    ``edge_area_source='p_ij_simplex'`` (laneJ); no force reads it.
+    Needs ``HC._simplices``.
+    """
+    fan = _simplex_fan(v, HC, dim)
+    if fan is None:
+        return [], np.zeros((0, dim))
+    verts, idx, _, _, b = fan
+    # |T| (grad(phi_k) - grad(phi_v)), with grad(phi_v) = -sum_k grad(phi_k)
+    piece = b + b.sum(axis=1)[:, None, :]
+    A = np.zeros((len(verts), dim))
+    np.add.at(A, idx, piece)
+    return verts, A / (dim + 1)
+
+
 def viscous_force_simplex_gradient(v, HC, dim: int, mu: float,
                                    flat_tol: float = _SIMPLEX_FLAT_TOL,
                                    _fan=None) -> np.ndarray:
@@ -1022,7 +1084,8 @@ _viscous_flux_two_point = viscous_flux
 
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
                  pressure_model=None, pressure_flux: str = "centred",
-                 viscous_flux: str = "two_point") -> np.ndarray:
+                 viscous_flux: str = "two_point",
+                 area_orientation: str = "primal_edge") -> np.ndarray:
     """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
 
     For each dual flux plane between parcels i and j, the force has two
@@ -1089,6 +1152,9 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
     viscous_flux : {'two_point', 'simplex_gradient'}
         Viscous flux formulation (see above).  ``'simplex_gradient'``
         requires ``HC._simplices``.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        Sign rule of the 2D dual face vectors the fluxes read
+        (:func:`dual_area_vector`); the method axis ``area_orientation``.
 
     Returns
     -------
@@ -1138,7 +1204,7 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
         else:
-            A_ij = dual_area_vector(v, v_j, HC, dim)
+            A_ij = dual_area_vector(v, v_j, HC, dim, area_orientation)
 
         p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
         delta_u = v_j.u[:dim] - u_i
@@ -1164,6 +1230,7 @@ def stress_acceleration(
     pressure_model=None,
     pressure_flux: str = "centred",
     viscous_flux: str = "two_point",
+    area_orientation: str = "primal_edge",
 ) -> np.ndarray:
     """Acceleration from Cauchy stress: a_i = F_stress_i / m_i.
 
@@ -1202,6 +1269,8 @@ def stress_acceleration(
         See :func:`stress_force`.
     viscous_flux : {'two_point', 'simplex_gradient'}
         See :func:`stress_force`.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        See :func:`stress_force`.
 
     Returns
     -------
@@ -1211,7 +1280,8 @@ def stress_acceleration(
     return stress_force(v, dim=dim, mu=mu, HC=HC,
                         pressure_model=pressure_model,
                         pressure_flux=pressure_flux,
-                        viscous_flux=viscous_flux) / v.m
+                        viscous_flux=viscous_flux,
+                        area_orientation=area_orientation) / v.m
 
 
 # Simplified alias for use as dudt_fn in dynamic integrators

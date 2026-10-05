@@ -87,6 +87,7 @@ class SolverMethods:
     curvature_path: str = 'integrated'
     pressure_flux: str = 'centred'
     viscous_flux: str = 'two_point'
+    area_orientation: str = 'primal_edge'
     density_diffusion: float | None = None
     displacement_eps: float | None = None
     merge_cdist: float | None = None
@@ -112,6 +113,7 @@ class SolverMethods:
         self._check_choice('curvature_path', self.curvature_path)
         self._check_choice('pressure_flux', self.pressure_flux)
         self._check_choice('viscous_flux', self.viscous_flux)
+        self._check_choice('area_orientation', self.area_orientation)
         self._check_choice('backend', self.backend)
 
         if self.density_diffusion is not None and not self.density_diffusion > 0:
@@ -496,9 +498,9 @@ class SolverMethods:
         """Acceleration function bound the canonical way.
 
         single-phase: ``partial(dudt_i, dim, mu, HC, pressure_model
-        [, pressure_flux][, viscous_flux])``
+        [, pressure_flux][, viscous_flux][, area_orientation])``
         multiphase:   ``partial(multiphase_dudt_i, dim, mps, HC,
-        pressure_model[, curvature_path])``
+        pressure_model[, curvature_path][, area_orientation])``
 
         *body_force* (per unit mass, e.g. ``[0, -9.81]``) wraps the
         result as ``a + g`` exactly like the dam-break setup does.
@@ -519,6 +521,8 @@ class SolverMethods:
                 kw_s['pressure_flux'] = self.pressure_flux
             if self.viscous_flux != AXES['viscous_flux'].default:
                 kw_s['viscous_flux'] = self.viscous_flux
+            if self.area_orientation != AXES['area_orientation'].default:
+                kw_s['area_orientation'] = self.area_orientation
             fn: Callable = partial(dudt_i, **kw_s)
         else:
             if mps is None:
@@ -528,6 +532,8 @@ class SolverMethods:
                                       pressure_model=pressure_model)
             if self.curvature_path != 'integrated':
                 kw['curvature_path'] = self.curvature_path
+            if self.area_orientation != AXES['area_orientation'].default:
+                kw['area_orientation'] = self.area_orientation
             fn = partial(multiphase_dudt_i, **kw)
         if body_force is None:
             return fn

@@ -133,6 +133,7 @@ def multiphase_stress_force(
     HC=None,
     pressure_model=None,
     curvature_path: str = 'integrated',
+    area_orientation: str = 'primal_edge',
 ) -> np.ndarray:
     """Integrated force on a dual cell with per-phase summed stress.
 
@@ -152,6 +153,11 @@ def multiphase_stress_force(
         Typically :class:`MultiphaseEOS` — updates ``v.p_phase`` in-place.
         Not called inside the per-phase loop; ``mps.refresh()`` is
         expected to have already populated ``v.p_phase``.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        Sign rule of the 2D dual face vectors
+        (:func:`ddgclib.operators.stress.dual_area_vector`); the method
+        axis ``area_orientation``.  The ``csf_dual`` curvature path reads
+        the default rule.
     """
     n_phases = mps.n_phases
     has_p_phase = hasattr(v, 'p_phase')
@@ -178,7 +184,7 @@ def multiphase_stress_force(
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
         else:
-            A_ij = dual_area_vector(v, v_j, HC, dim)
+            A_ij = dual_area_vector(v, v_j, HC, dim, area_orientation)
 
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
@@ -389,11 +395,13 @@ def multiphase_stress_acceleration(
     HC=None,
     pressure_model=None,
     curvature_path: str = 'integrated',
+    area_orientation: str = 'primal_edge',
 ) -> np.ndarray:
     """Acceleration from multiphase stress: a_i = F_i / m_i."""
     F = multiphase_stress_force(v, dim=dim, mps=mps, HC=HC,
                                 pressure_model=pressure_model,
-                                curvature_path=curvature_path)
+                                curvature_path=curvature_path,
+                                area_orientation=area_orientation)
     if v.m < 1e-30:
         return np.zeros(dim)
     return F / v.m

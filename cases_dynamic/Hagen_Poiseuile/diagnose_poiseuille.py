@@ -217,15 +217,16 @@ def arms2d(args) -> None:
     kw = dict(dim=2, L=4.0, mu=0.1, n_refine=args.refine or 2, dt=0.01)
     n = args.steps or 3000
     print(f"2D, {kw}, {n} steps")
-    rows = [
-        _run('preset', preset, n, **kw),
-        _run("viscous_flux='two_point'",
-             preset.replace(viscous_flux='two_point'), n, **kw),
-        _run("pressure_flux='simplex_gradient'",
-             preset.replace(pressure_flux='simplex_gradient'), n, **kw),
-        _run("frozen_set='hull'", preset.replace(frozen_set='hull'), n, **kw),
+    arms = [
+        ('preset', preset),
+        ("viscous_flux='two_point'", preset.replace(viscous_flux='two_point')),
+        ("pressure_flux='simplex_gradient'",
+         preset.replace(pressure_flux='simplex_gradient')),
+        ("frozen_set='hull'", preset.replace(frozen_set='hull')),
     ]
-    _save('arms2d', rows)
+    rows = [_run(label, methods, n, **kw)
+            for label, methods in arms if (args.only or '') in label]
+    _save('arms2d', rows, args.tag)
 
 
 def arms3d(args) -> None:
@@ -337,10 +338,12 @@ if __name__ == '__main__':
     ap.add_argument('--long', action='store_true',
                     help='convergence: refinement 3 to t = 60 as well')
     ap.add_argument('--only', default=None,
-                    help='arms3d: only the arms whose label contains this')
+                    help='arms2d / arms3d: only the arms whose label '
+                         'contains this')
     ap.add_argument('--tag', default='',
-                    help='arms3d: write results/laneH/arms3d_<tag>.json '
-                         '(until lane T the two centred arms differed from '
-                         'process to process: --only centred --tag p2, ...)')
+                    help='arms2d / arms3d: write results/laneH/arms<N>d_<tag>'
+                         '.json (until lane T the two centred 3D arms '
+                         'differed from process to process: --only centred '
+                         '--tag p2, ...; laneO: arms2d --only p --tag laneO)')
     a = ap.parse_args()
     globals()[a.mode](a)
