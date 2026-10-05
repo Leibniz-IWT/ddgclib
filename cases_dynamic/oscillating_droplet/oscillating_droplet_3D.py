@@ -89,7 +89,9 @@ def main(retopo_policy: str | None = None, box_shift: str = 'move_all'):
     # expecting an O(h^2) shrink: measured worse (see the lane log
     # scored table).  Also measured no-ops for this symptom: a
     # discrete-consistent scalar YL preload (see _setup.py step 4
-    # note) and stencil variants ('stokes' == 'integrated' to 1e-14).
+    # note) and stencil variants (the Stokes conormal form was the
+    # cotangent form to round-off on the moving mesh as well and was
+    # removed in laneM, 2026-10-05; csf_dual is measured worse there).
     print("\nBuilding mesh...")
     HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
@@ -101,6 +103,7 @@ def main(retopo_policy: str | None = None, box_shift: str = 'move_all'):
             split_method=methods.split_method,
             redistribute_mass=methods.redistribute_mass,
             box_shift=box_shift,
+            methods=methods,   # force axes (curvature_path, ...) bound
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

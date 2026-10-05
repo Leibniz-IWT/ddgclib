@@ -41,6 +41,7 @@ def setup_oscillating_droplet(
     split_method: str = "neighbour_count",
     redistribute_mass: bool = True,
     box_shift: str = 'move_all',
+    methods=None,
 ):
     """Set up oscillating droplet problem (2D or 3D).
 
@@ -98,6 +99,14 @@ def setup_oscillating_droplet(
         refinement 2: 3 of 189, the box corner among them).  A setup
         choice, recorded in ``params['box_shift']`` and in the ``extra``
         block of the runners' ``methods.json``, not a solver method axis.
+    methods : ddgclib.methods.SolverMethods or None
+        When given (laneM, 2026-10-05), ``split_method`` and
+        ``redistribute_mass`` are taken from the config (the explicit
+        kwargs above are ignored) and ``dudt_fn`` is built by
+        ``methods.dudt_fn``, so the force axes of the preset
+        (``curvature_path``, ``area_orientation``) reach the force.  For
+        a preset at the default force axes the partial is the one this
+        function builds by hand (same callable, same keywords).
 
     Returns
     -------
@@ -114,6 +123,12 @@ def setup_oscillating_droplet(
     params : dict
         All parameters for reference.
     """
+    if methods is not None:
+        if methods.dim != dim:
+            raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+        split_method = methods.split_method
+        redistribute_mass = methods.redistribute_mass
+
     # -- Compute bulk moduli if not given --
     if K_d is None:
         c_s = max(10.0 * epsilon * R0 * 1000.0, 1.0)
@@ -220,10 +235,13 @@ def setup_oscillating_droplet(
 
     # -- Build acceleration function --
     meos = MultiphaseEOS([eos_outer, eos_drop])
-    dudt_fn = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
+    if methods is not None:
+        dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
+    else:
+        dudt_fn = partial(
+            multiphase_dudt_i,
+            dim=dim, mps=mps, HC=HC, pressure_model=meos,
+        )
 
     # -- Retopologize function --
     # Stays on global Delaunay by default.  The two upstream

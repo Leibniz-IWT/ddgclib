@@ -201,9 +201,11 @@ def run_a5b(
         ``methods.integrate``; the returned dict carries
         ``methods.to_dict()``.  Use ``PRESETS['static_droplet_floor_2D']``
         / ``['static_droplet_floor_3D']`` (``integrator='euler'``) for the
-        pinned floors.  ``curvature_path`` still only selects the
-        MEASUREMENT stencil (``_max_interface_force``), never the force in
-        the run.
+        pinned floors.  Since laneM (2026-10-05) ``methods.curvature_path``
+        selects both the force in the run (``setup_oscillating_droplet(
+        methods=)``) and the MEASUREMENT stencil, and the explicit
+        ``curvature_path`` kwarg is ignored; without ``methods`` the kwarg
+        still only selects the measurement stencil.
     box_shift : {'move_all', 'evict'}
         Outer box shift of the droplet builders (laneB, 2026-10-05).
         ``'evict'`` is the lossy pre-laneB mesh the floors before laneB
@@ -215,6 +217,7 @@ def run_a5b(
         split_method = methods.split_method
         redistribute_mass = methods.redistribute_mass
         displacement_eps = methods.displacement_eps
+        curvature_path = methods.curvature_path
     print(f"\n{'=' * 70}")
     print(f"A.5.b ({dim}D) — retopology ON, u forced to 0 every step "
           f"({n_steps} steps), split_method={split_method!r}, "
@@ -235,6 +238,7 @@ def run_a5b(
             split_method=split_method,
             redistribute_mass=redistribute_mass,
             box_shift=box_shift,
+            methods=methods,
         )
 
     n_verts0 = sum(1 for _ in HC.V)
@@ -433,22 +437,22 @@ def main():
              'Default: False (matches production setup).',
     )
     parser.add_argument(
-        '--curvature-path', choices=['integrated', 'csf_dual', 'stokes'],
+        '--curvature-path', choices=['integrated', 'csf_dual'],
         default='integrated',
         help='Surface-tension curvature stencil for the |F| evaluation: '
              "'integrated' (default) — FTC in 2D / cotangent-Heron in "
              '3D, exact for piecewise-linear / triangulated interfaces; '
              "'csf_dual' — Continuum-Surface-Force form aligned with "
              'the dual face-area vector S_inner used by the per-phase '
-             "pressure flux; 'stokes' — Stokes-theorem boundary integral "
-             'on the barycentric dual cell of v_i restricted to interface '
-             'triangles (3D only; 2D delegates to the existing FTC form). '
+             'pressure flux (measured worse, laneM 2026-10-05). '
              'Per Tier 2B step 1 audit (2026-05-06): the '
              "static-droplet residual under 'integrated' is provably "
              'first-order discretization error of the polygon mesh '
              'and converges as O(h) (32→2.37e-3, 64→1.11e-3, 128→5.4e-4 '
-             "in 2D); 'stokes' is the Probe 2 (2026-05-27) integrated "
-             'rewrite targeting the 3D pointwise truncation residual.',
+             "in 2D).  The former 'stokes' value (Probe 2, 2026-05-27, "
+             'the conormal boundary integral on the barycentric dual) '
+             'was the cotangent form to round-off on static and moving '
+             'meshes and was removed in laneM.',
     )
     parser.add_argument(
         '--displacement-eps', type=float, default=None,

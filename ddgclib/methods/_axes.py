@@ -630,7 +630,33 @@ _AXES: list[MethodAxis] = [
     MethodAxis(
         name='curvature_path', title='Interface curvature / surface-tension stencil',
         group='forces', default='integrated', applies_to='multi',
-        control='curvature_path= on multiphase_dudt_i (dudt partial)',
+        control='curvature_path= on multiphase_dudt_i (dudt partial); bound '
+                'into the droplet setup through setup_oscillating_droplet('
+                'methods=) since laneM',
+        notes='laneM 2026-10-05 (' + _LANE + 'laneM-curvature-path.md). The '
+              "value 'stokes' (2026-05-27 Probe 2: the conormal boundary "
+              'integral of the interface over the barycentric dual cell, '
+              'integrated_hndA_i_interface, 2D aliasing integrated) was '
+              'REMOVED: on a piecewise-linear surface the integral of the '
+              'conormal along the two dual segments inside a triangle is '
+              'n_T x (x_k - x_j) / 2 whatever the interior point, i.e. the '
+              'gradient of the triangle area, which is the cotangent form; '
+              'measured equal to integrated to 6.3e-16 (static 3D), 1.0e-15 '
+              'at every force evaluation of 20 moving steps (dual_only and '
+              'delaunay) and after a jitter + Delaunay rebuild that changes '
+              'the interface triangles, exactly 0 in 2D, at 3.5x the cost in '
+              '3D (0.39 against 0.11 ms per vertex, 0.538 against 0.507 s per '
+              'step of the 2/2 run); full 2D run bit-identical to the '
+              'baseline, full 3D run l2 0.2481144314795641 / tail '
+              '0.08417379643261974 against 0.24811443136179492 / '
+              '0.0841737962816189 (4.7e-10 / 1.8e-9 relative, inside the '
+              '1.3e-9 / 3.8e-9 that a 1e-15 shift of the free vertices moves '
+              'the same run by: protocol rule 8, two seeds). The '
+              'reference integral is kept '
+              'in cases_dynamic/oscillating_droplet/diagnose_curvature_path.py'
+              ' (stokes_reference) so the equality can be re-measured; the '
+              'coordinate-keyed cache that audit T2 found (HC._interface_x_to_v) '
+              'went with the path.',
         options=(
             _opt('integrated', '2D: exact piecewise-linear FTC gamma*(t_next - t_prev) '
                  '(surface_tension_force_2d); 3D: cotangent/Heron '
@@ -642,22 +668,32 @@ _AXES: list[MethodAxis] = [
                  'test_interface_cache_invalidation.py). laneI also showed the '
                  'droplet runs never flip interface triangles, so every pinned '
                  '3D score (dual_only, delaunay, delaunay+remap) is bit-identical '
-                 'before/after the fix',
-                 dims=(2, 3), phases='multi'),
-            _opt('stokes', '3D conormal boundary integral on the barycentric dual '
-                 '(integrated_hndA_i_interface); 2D aliases "integrated"',
-                 'experimental',
-                 'ddgclib/_curvatures_heron.py:integrated_hndA_i_interface',
-                 'bit-identical to integrated on a STATIC mesh (Probe 2). The '
-                 'coordinate-keyed cache HC._interface_x_to_v that made the force '
-                 'vanish after the first vertex move (audit T2) is cleared on '
-                 'every interface refresh since laneI (tested); no dynamic A/B '
-                 'or regression pin yet',
+                 'before/after the fix. laneM 2026-10-05: moving-mesh guard per '
+                 'value and dimension (test_curvature_path.py: the force bound '
+                 'by the preset after 3 steps + jitter + Delaunay rebuild equals '
+                 'a fresh evaluation with the apex cache dropped); it is the '
+                 'gradient of the discrete interface area (equal to the Stokes '
+                 'conormal integral to 1e-15 on moving meshes, see the notes)',
                  dims=(2, 3), phases='multi'),
             _opt('csf_dual', 'Magnitude of the integrated stencil redirected along '
-                 'the dual-face normal S_inner', 'experimental',
+                 'the dual-face normal S_inner', 'measured-worse',
                  'ddgclib/operators/multiphase_stress.py:_csf_dual_surface_tension',
-                 'A/B probe only, no tests', dims=(2, 3), phases='multi'),
+                 'laneM 2026-10-05 (every arm preset.replace(curvature_path='
+                 "'csf_dual'), diagnose_curvature_path.py). Direction off the "
+                 'FTC / cotangent force by up to 2.3 deg (2D static floor), 7.5 '
+                 'deg (2D perturbed), 6.9 / 10.0 deg (3D static / perturbed), '
+                 '4.3 deg (2D) and 7.9 deg (3D) along 20 moving steps, the '
+                 'magnitude identical by construction; A.5.b floors 2D '
+                 '2.2711535e-03 against 2.2716938e-03, 3D 7.2744148e-05 against '
+                 '7.2741339e-05; full 2D droplet (oscillating_droplet_2D) l2 '
+                 '0.2041112129331814 / tail 1.0252046890273294 against '
+                 '0.17439096487276182 / 0.9998871416222597 (+17 %, KE grows '
+                 'in the second half), full 3D (oscillating_droplet_3D) l2 '
+                 '0.2784903890745515 / tail 0.08567541803104081 against '
+                 '0.24811443136179492 / 0.0841737962816189 (+12 % / +1.8 %); '
+                 '6x (2D) to 41x (3D) the cost per '
+                 'vertex. Moving-mesh guard in test_curvature_path.py',
+                 dims=(2, 3), phases='multi'),
         ),
     ),
     MethodAxis(

@@ -185,26 +185,26 @@ class TestValidation:
                       remap='conservative', redistribute_mass=True)
 
     def test_broken_status_warns(self):
-        """Constructing a config with a 'broken' option warns.  No field
-        option carries that status any more (stokes was fixed in laneI),
-        so the mechanism is exercised through a patched option."""
+        """Constructing a config with a 'broken' option warns.  The
+        mechanism is exercised through a patched option on a registered
+        value (csf_dual is measured-worse, not broken)."""
         from unittest import mock
         from ddgclib.methods._axes import MethodOption
-        broken = MethodOption('stokes', 'x', 'broken', 'ddgclib/methods/_axes.py',
+        broken = MethodOption('csf_dual', 'x', 'broken', 'ddgclib/methods/_axes.py',
                               'synthetic')
         real = SolverMethods._option
 
         def patched(axis, value):
-            if axis == 'curvature_path' and value == 'stokes':
+            if axis == 'curvature_path' and value == 'csf_dual':
                 return broken
             return real(axis, value)
 
         with mock.patch.object(SolverMethods, '_option', staticmethod(patched)):
             with pytest.warns(UserWarning, match="'broken'"):
-                SolverMethods(dim=3, phases='multi', curvature_path='stokes')
+                SolverMethods(dim=3, phases='multi', curvature_path='csf_dual')
         with warnings.catch_warnings():
             warnings.simplefilter('error')
-            SolverMethods(dim=3, phases='multi', curvature_path='stokes')  # experimental now
+            SolverMethods(dim=3, phases='multi', curvature_path='csf_dual')  # measured-worse
             SolverMethods(dim=2, workers=4)   # experimental, not broken
 
     def test_status_lookup(self):

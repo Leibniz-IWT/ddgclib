@@ -103,6 +103,7 @@ def main(box_shift: str = 'move_all'):
             split_method=methods.split_method,
             redistribute_mass=methods.redistribute_mass,
             box_shift=box_shift,
+            methods=methods,   # force axes (curvature_path, ...) bound
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

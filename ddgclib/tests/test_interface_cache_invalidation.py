@@ -1,16 +1,18 @@
 """Interface curvature caches must follow the interface sub-complex.
 
-Regression for audit 2026-09-25 F1/F2 (multiphase T1/T2):
-``HC._interface_edge_to_apex`` (3D 'integrated' surface tension) and
-``HC._interface_x_to_v`` (3D 'stokes') were built once and never cleared,
-while ``extract_interface`` rebuilds ``HC.interface_triangles`` on every
-``mps.refresh``.  After a 3D Delaunay retopology the stale apex map gave a
-surface-tension force wrong by ~100 % of its magnitude.
+Regression for audit 2026-09-25 F1 (multiphase T1):
+``HC._interface_edge_to_apex`` (3D 'integrated' surface tension) was
+built once and never cleared, while ``extract_interface`` rebuilds
+``HC.interface_triangles`` on every ``mps.refresh``.  After a 3D Delaunay
+retopology the stale apex map gave a surface-tension force wrong by
+~100 % of its magnitude.
 
 The fix lives in :func:`ddgclib.geometry._interface_subcomplex.extract_interface`:
-the coordinate map is always dropped; the apex map is dropped when the
-interface triangle set changes by vertex identity and KEPT under frozen
-connectivity (so the 3D dual_only pins stay bit-identical).
+the apex map is dropped when the interface triangle set changes by vertex
+identity and KEPT under frozen connectivity (so the 3D dual_only pins
+stay bit-identical).  The coordinate-keyed map of the former 'stokes'
+path (audit F2) went with that path in laneM (2026-10-05); the per-value
+moving-mesh guards are in ``test_curvature_path.py``.
 """
 from __future__ import annotations
 
@@ -26,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from cases_dynamic.oscillating_droplet.src._setup import (  # noqa: E402
     setup_oscillating_droplet,
 )
-from ddgclib._curvatures_heron import integrated_hndA_i_interface  # noqa: E402
 from ddgclib.operators.multiphase_stress import (  # noqa: E402
     _interface_surface_tension,
 )
@@ -107,26 +108,3 @@ def test_apex_cache_kept_under_frozen_connectivity(droplet3d):
     scale = max(np.linalg.norm(f) for f in F_fresh.values())
     for k, f in F_fresh.items():
         npt.assert_allclose(F_kept[k], f, rtol=0, atol=1e-12 * scale)
-
-
-def test_stokes_coordinate_map_dropped_on_refresh(droplet3d):
-    HC, bV, mps, _bc, _dudt, _retopo, _p = droplet3d
-    iface = {v for v in HC.V if v.is_interface}
-    for v in iface:
-        integrated_hndA_i_interface(v, iface, HC, gamma=0.05)
-    assert getattr(HC, '_interface_x_to_v', None) is not None
-
-    _jitter(HC, bV, 1e-4)
-    mps.refresh(HC, 3, reset_mass=False)
-    assert getattr(HC, '_interface_x_to_v', None) is None
-
-    iface = {v for v in HC.V if v.is_interface}
-    F_after = {id(v): integrated_hndA_i_interface(v, iface, HC, gamma=0.05)
-               for v in iface}
-    del HC._interface_x_to_v
-    F_fresh = {id(v): integrated_hndA_i_interface(v, iface, HC, gamma=0.05)
-               for v in iface}
-    scale = max(np.linalg.norm(f) for f in F_fresh.values())
-    assert scale > 0
-    for k, f in F_fresh.items():
-        npt.assert_allclose(F_after[k], f, rtol=0, atol=1e-12 * scale)

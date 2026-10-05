@@ -275,7 +275,15 @@ def _interface_surface_tension(
           quantify how much of the residual is direction-mismatch vs.
           magnitude-mismatch on irregular meshes.  Not a replacement for
           ``'integrated'`` — does not converge to ``γ κ N`` at the same
-          order on smooth interfaces.
+          order on smooth interfaces.  Measured worse on the droplet
+          (laneM, 2026-10-05; METHODS.md axis ``curvature_path``).
+
+        The former ``'stokes'`` value (3D conormal boundary integral of
+        the interface over the barycentric dual cell) is gone: on a
+        piecewise-linear surface it is the gradient of the triangle
+        areas, i.e. the cotangent form, and it reproduced
+        ``'integrated'`` to 1e-15 on static and moving meshes at 3.5x
+        the cost (laneM).
     """
     interface_nbs = {nb for nb in v.nn if getattr(nb, 'is_interface', False)}
     if len(interface_nbs) < 2:
@@ -293,25 +301,13 @@ def _interface_surface_tension(
     if curvature_path == 'csf_dual':
         return _csf_dual_surface_tension(v, dim, gamma, HC, interface_nbs)
 
-    if curvature_path == 'stokes':
-        # Stokes-theorem boundary integral on the barycentric dual cell
-        # of v_i restricted to interface triangles.  3D only; 2D delegates
-        # to the existing FTC form which is already an exact Stokes
-        # discretisation on piecewise-linear curves.
-        if dim == 3:
-            from ddgclib._curvatures_heron import integrated_hndA_i_interface
-            F3 = integrated_hndA_i_interface(
-                v, interface_nbs | {v}, HC=HC, gamma=gamma,
-            )
-            return F3[:dim]
-        F = np.zeros(dim)
-        F[:2] = surface_tension_force_2d(v, gamma, interface_nbs)
-        return F
-
     if curvature_path != 'integrated':
+        # 'stokes' (the conormal boundary integral over the barycentric
+        # dual cell, 2026-05-27 to 2026-10-05) was the cotangent form to
+        # round-off on static and moving meshes and was removed (laneM).
         raise ValueError(
             f"Unknown curvature_path={curvature_path!r}; "
-            f"expected 'integrated', 'stokes', or 'csf_dual'."
+            f"expected 'integrated' or 'csf_dual'."
         )
 
     if dim == 3:

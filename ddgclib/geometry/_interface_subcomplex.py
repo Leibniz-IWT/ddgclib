@@ -113,17 +113,16 @@ def extract_interface(
     HC.interface_edges = iface_edges
     HC.interface_triangles = iface_tris
 
-    # Invalidate the curvature caches derived from interface_triangles
-    # (audit 2026-09-25 F1/F2, _curvatures_heron.py).  The coordinate-keyed
-    # ``_interface_x_to_v`` ('stokes') is stale after any vertex move, so
-    # it is always dropped.  The id-keyed apex map ('integrated') is
-    # dropped only when the triangle set changed by vertex identity: under
-    # frozen connectivity (3D dual_only) it stays valid and is kept, which
-    # keeps its apex order (and hence the summation order) bit-identical.
+    # Invalidate the curvature cache derived from interface_triangles
+    # (audit 2026-09-25 F1, _curvatures_heron.py).  The id-keyed apex map
+    # ('integrated' and the magnitude of 'csf_dual') is dropped only when
+    # the triangle set changed by vertex identity: under frozen
+    # connectivity (3D dual_only) it stays valid and is kept, which keeps
+    # its apex order (and hence the summation order) bit-identical.
     # While the apex map exists it holds references to every vertex in the
     # signature, so the ids cannot be recycled behind a matching signature.
-    if hasattr(HC, '_interface_x_to_v'):
-        del HC._interface_x_to_v
+    # (The coordinate-keyed map of the former 'stokes' path, audit F2,
+    # went with that path in laneM, 2026-10-05.)
     tri_ids = frozenset(
         frozenset(id(v) for v in entries[0][1])
         for fkey, entries in incident_phases.items()

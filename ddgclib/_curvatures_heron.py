@@ -359,167 +359,26 @@ def hndA_i_interface(v, interface_set, n_i=None, HC=None):
             continue
         e_ij = _pad3(vj.x_a) - _pad3(vi.x_a)
         e_ij = -e_ij  # Sign convention (matches hndA_i)
+        l_ij = np.linalg.norm(e_ij)
 
-        if len(e_i_int_e_j) == 1:
-            vk = list(e_i_int_e_j)[0]
+        # One cotangent term per interface triangle at the edge, in apex
+        # order: the sum is the gradient of the triangle areas at v_i.
+        # Every triangle counts (laneM, 2026-10-05): until then only the
+        # first two apexes were summed, which dropped triangles on a
+        # non-manifold interface edge (more than two interface triangles
+        # at one edge; 22 % of the force at the two vertices of such an
+        # edge on laneI's jittered 2/2 droplet).  Manifold edges have at
+        # most two apexes and keep their arithmetic and summation order.
+        for vk in e_i_int_e_j:
             e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
             e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
-            l_ij = np.linalg.norm(e_ij)
             l_ik = np.linalg.norm(e_ik)
             l_jk = np.linalg.norm(e_jk)
             hnda_ijk, c_ijk = HNdC_ijk(e_ij, l_ij, l_jk, l_ik)
             HNdA_i += hnda_ijk
             C_i += c_ijk
-        else:
-            vk, vl = list(e_i_int_e_j)[:2]
-            e_ik = _pad3(vk.x_a) - _pad3(vi.x_a)
-            e_jk = _pad3(vk.x_a) - _pad3(vj.x_a)
-            l_ij = np.linalg.norm(e_ij)
-            l_ik = np.linalg.norm(e_ik)
-            l_jk = np.linalg.norm(e_jk)
-            hnda_ijk, c_ijk = HNdC_ijk(e_ij, l_ij, l_jk, l_ik)
-
-            e_il = _pad3(vl.x_a) - _pad3(vi.x_a)
-            e_jl = _pad3(vl.x_a) - _pad3(vj.x_a)
-            l_il = np.linalg.norm(e_il)
-            l_jl = np.linalg.norm(e_jl)
-            hnda_ijl, c_ijl = HNdC_ijk(e_ij, l_ij, l_jl, l_il)
-
-            HNdA_i += hnda_ijk
-            HNdA_i += hnda_ijl
-            C_i += c_ijk
-            C_i += c_ijl
 
     return HNdA_i, C_i
-
-
-def integrated_hndA_i_interface(v, interface_set, HC, gamma=1.0):
-    """Integrated surface-tension force on a 3D interface vertex via Stokes.
-
-    Replaces the cotangent-Heron pointwise stencil with a direct
-    boundary-integral discretisation::
-
-        F_st_i  =  gamma * integral_{Gamma_i} 2H N dA
-                =  gamma * boundary-integral_{partial Gamma_i} nu dl    (Stokes)
-
-    where ``Gamma_i`` is the portion of the interface inside the
-    *barycentric* dual cell of ``v_i`` and ``nu`` is the in-surface
-    conormal (perpendicular to the boundary, lying in the triangle's
-    tangent plane, pointing outward from the dual cell).
-
-    The boundary of the dual cell inside an interface triangle
-    ``(v_i, v_j, v_k)`` consists of the two straight segments
-    ``midpoint(v_i, v_j) -> centroid(v_i, v_j, v_k) -> midpoint(v_i, v_k)``.
-    On a closed, oriented, piecewise-linear interface mesh the conormal
-    contributions are summed across every interface triangle containing
-    ``v_i``; on a closed manifold the dual cell boundary is closed and
-    the formula is the *exact* Stokes-theorem image of the integrated
-    mean curvature normal.
-
-    Parities
-    --------
-    - Planar interface (kappa = 0 everywhere): ``F_st = 0`` by direct
-      cancellation of opposite conormal segments around v_i, *not* by
-      a kappa = 0 sample.  Holds to machine precision on any
-      triangulation, no symmetry required.
-    - Spherical interface of radius R (uniform refinement):
-      ``F_st = -(2 gamma / R) * A_i * N`` where N is the outward sphere
-      normal and ``A_i`` is the barycentric-dual interface area around
-      v_i — the analytical Young-Laplace inward pull.
-
-    Sign convention matches the existing
-    :func:`_interface_surface_tension` 3D branch: positive components
-    of ``F_st`` push the interface vertex outward; on a convex droplet
-    ``F_st`` is anti-parallel to the outward normal.
-
-    Parameters
-    ----------
-    v : vertex object
-        Must have ``v.x_a`` and be flagged ``is_interface=True``.
-    interface_set : set or iterable of vertex
-        Set of interface vertex objects.  Used as a guard so that
-        triangles touching v_i but whose other two vertices fall
-        outside the *caller-supplied* interface subset are dropped
-        (useful for local validation harnesses).  Pass
-        ``{v} | interface_neighbours`` for the standard case.
-    HC : Complex
-        Must have ``HC.interface_triangles`` populated (set by
-        :func:`ddgclib.geometry._interface_subcomplex.extract_interface`).
-        If absent, returns ``np.zeros(3)`` (caller should fall back).
-    gamma : float
-        Surface-tension coefficient [N/m].  Returns zero immediately
-        when ``gamma == 0``.
-
-    Returns
-    -------
-    F_st : ndarray, shape (3,)
-        The integrated surface-tension force on v_i.
-    """
-    if gamma == 0.0:
-        return np.zeros(3)
-
-    iface_tris = getattr(HC, 'interface_triangles', None) if HC is not None else None
-    if iface_tris is None:
-        return np.zeros(3)
-
-    # Build (and cache on HC) the coordinate-key -> vertex object lookup.
-    x_to_v = getattr(HC, '_interface_x_to_v', None)
-    if x_to_v is None:
-        x_to_v = {vv.x: vv for vv in HC.V}
-        HC._interface_x_to_v = x_to_v
-
-    interface_set = set(interface_set) if not isinstance(interface_set, set) else interface_set
-    v_key = v.x
-    x_i = _pad3(v.x_a)
-    F = np.zeros(3)
-
-    for tri_key in iface_tris:
-        if v_key not in tri_key:
-            continue
-        other_keys = [k for k in tri_key if k != v_key]
-        if len(other_keys) != 2:
-            continue  # degenerate (shouldn't happen with frozensets of size 3)
-        v_j = x_to_v.get(other_keys[0])
-        v_k = x_to_v.get(other_keys[1])
-        if v_j is None or v_k is None:
-            continue
-        # Honor caller's interface_set filter: skip triangles whose other
-        # vertices are not in the supplied interface set.
-        if v_j not in interface_set or v_k not in interface_set:
-            continue
-
-        x_j = _pad3(v_j.x_a)
-        x_k = _pad3(v_k.x_a)
-
-        # Triangle normal (unit).  ||cross|| = 2 * triangle_area.
-        normal2A = np.cross(x_j - x_i, x_k - x_i)
-        twoA = np.linalg.norm(normal2A)
-        if twoA < 1e-30:
-            continue
-        n_tri = normal2A / twoA
-
-        # Barycentric centroid and incident-edge midpoints.
-        c = (x_i + x_j + x_k) / 3.0
-        m_ij = 0.5 * (x_i + x_j)
-        m_ik = 0.5 * (x_i + x_k)
-
-        # Two dual-cell boundary segments inside this triangle, traversed
-        # as a path from m_ij to c to m_ik (orientation handled per
-        # segment via the dot-product check below).
-        for p_start, p_end in ((m_ij, c), (c, m_ik)):
-            seg = p_end - p_start
-            L = float(np.linalg.norm(seg))
-            if L < 1e-30:
-                continue
-            t = seg / L
-            nu = np.cross(n_tri, t)
-            # Orient nu OUTWARD from v_i (away from dual cell centre).
-            seg_mid = 0.5 * (p_start + p_end)
-            if np.dot(nu, seg_mid - x_i) < 0.0:
-                nu = -nu
-            F += gamma * L * nu
-
-    return F
 
 
 def int_HNdC_ijk(e_ij, l_ij, l_jk, l_ik):
