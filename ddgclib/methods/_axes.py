@@ -112,6 +112,25 @@ _AXES: list[MethodAxis] = [
         default='complex', explicit=False,
         control='how the case builds HC (domain builders always build '
                 'hyperct.Complex); reported from type(HC) and HC._SC',
+        notes='SETUP CHOICE, NOT AN AXIS (laneB 2026-10-05): the droplet-in-box '
+              'builders ddgclib.geometry.domains.droplet_in_box_2d / _3d take '
+              'box_shift="move_all" (default: the outer box is translated onto '
+              'the droplet by one HC.V.move_all, every vertex kept) or '
+              '"evict" (the loop of single moves used until 2026-10-05, which '
+              'lost one outer vertex per key collision: 2D refinement 3 6 of '
+              '145, 3D refinement 2 3 of 189, the (L, ..., L) corner always '
+              'among them, so the convex hull was cut at that corner and the '
+              'builder Delaunay papered over the holes with larger cells). The '
+              'setups of oscillating_droplet, electrolysis_bubble (its '
+              'off-centre 2D builder uses the same helper) and '
+              'shearing_plate_droplet pass it through and record it in '
+              'params["box_shift"]; every runner writes it into the extra '
+              'block of methods.json; diagnose_box_shift.py measures both '
+              'arms. Every droplet, electrolysis and shearing-plate number '
+              'pinned before laneB was produced on the "evict" mesh and is '
+              'reproduced by that value (static_droplet_2D 1.1847162859108737e-03, '
+              '3D plateau 7.274172e-05, 2D baseline l2 0.17479361640597058 and '
+              '3D 0.24811340819647862 to the bit).',
         options=(
             _opt('complex', 'hyperct.Complex vertex-vertex flag complex '
                  '(v.nn sets) + raw top-simplex list HC._simplices', 'validated',

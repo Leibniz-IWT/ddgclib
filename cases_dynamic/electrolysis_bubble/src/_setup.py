@@ -50,6 +50,7 @@ from ddgclib.geometry.domains._rectangles import rectangle
 from ddgclib.geometry.domains._multiphase_droplet import (
     _build_combined_mesh,
     _estimate_edge_length,
+    _shift_outer_box,
 )
 from ddgclib.operators.multiphase_stress import multiphase_dudt_i
 from ddgclib.operators.stress import cache_dual_volumes
@@ -129,11 +130,14 @@ def _build_offcenter_bubble_box_2d(
     refinement_outer: int,
     refinement_droplet: int,
     distr_law: str = "sinusoidal",
+    box_shift: str = 'move_all',
 ):
     """Build a 2D off-centre bubble-in-box mesh.
 
     The outer box stays at ``[-L_domain, L_domain]^2`` regardless of
     where the bubble is placed.  Returns ``(HC, bV_walls)``.
+    ``box_shift`` as in ``droplet_in_box_2d`` (``'evict'`` = the lossy
+    loop before laneB, 2026-10-05).
     """
     import math
 
@@ -147,13 +151,8 @@ def _build_offcenter_bubble_box_2d(
         refinement=refinement_outer, flow_axis=0,
     )
     HC_outer = outer_res.HC
-    # NOTE(laneL): shift by half the box width; key collisions lose outer
-    # vertices (see droplet_in_box_2d).  Old behaviour kept explicitly.
-    for v in list(HC_outer.V):
-        pos = v.x_a.copy()
-        pos[0] -= L_domain
-        pos[1] -= L_domain
-        HC_outer.V.move(v, tuple(pos), on_collision='evict')
+    # Shift by half the box width (the library builder's helper; laneB).
+    _shift_outer_box(HC_outer, (-L_domain, -L_domain), box_shift)
 
     # Bubble disk centred at the desired offset.
     drop_res = disk(
@@ -240,6 +239,7 @@ def setup_electrolysis_bubble(
     use_wall_clamp: bool = True,
     nucleation_frac: float = 0.5,
     redistribute_mass: bool = True,
+    box_shift: str = 'move_all',
 ):
     """Build a bubble-on-electrode dynamic multiphase problem.
 
@@ -278,6 +278,10 @@ def setup_electrolysis_bubble(
         Delaunay reconnection so that the pre-retopo per-phase pressure
         field is preserved while total per-phase mass is conserved.
         See ``setup_oscillating_droplet`` for the full rationale.
+    box_shift : {'move_all', 'evict'}
+        How the outer box is shifted onto its centre (laneB, 2026-10-05;
+        ``ddgclib.geometry.domains.BOX_SHIFTS``).  ``'evict'`` reproduces
+        the meshes of the runs before laneB, which lack outer vertices.
 
     Returns
     -------
@@ -336,6 +340,7 @@ def setup_electrolysis_bubble(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
 
         R2 = R0 * R0
@@ -354,6 +359,7 @@ def setup_electrolysis_bubble(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
         HC = builder_res.HC
         bV = builder_res.bV
@@ -483,6 +489,7 @@ def setup_electrolysis_bubble(
         'R0': R0,
         'L_domain': L_domain,
         'nucleation_frac': nucleation_frac,
+        'box_shift': box_shift,
         'bubble_center': tuple(bubble_center),
         'wall_bottom': wall_bottom,
         'wall_top': wall_top,

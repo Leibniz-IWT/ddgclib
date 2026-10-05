@@ -144,7 +144,8 @@ def main():
         extra={'dt': dt, 'n_steps': n_steps, 't_final': t_final,
                'domain_bounds': params['domain_bounds'],
                'refinement_outer': n_refine_outer,
-               'refinement_droplet': n_refine_droplet},
+               'refinement_droplet': n_refine_droplet,
+               'box_shift': params['box_shift']},
     )
 
     t_arr = np.array([d['t'] for d in diag_list])

@@ -98,6 +98,7 @@ def setup_shearing_plate_droplet(
     P0: float = 0.0,
     distr_law: str = "sinusoidal",
     redistribute_mass: bool = True,
+    box_shift: str = 'move_all',
 ):
     """Build the shearing-plate droplet problem.
 
@@ -109,6 +110,11 @@ def setup_shearing_plate_droplet(
         pressure field is preserved while total per-phase mass is
         conserved.  See ``setup_oscillating_droplet`` for the full
         rationale.
+    box_shift : {'move_all', 'evict'}
+        Passed to ``droplet_in_box_2d`` / ``_3d`` (laneB, 2026-10-05).
+        ``'evict'`` reproduces the pre-laneB outer mesh (2D shipped
+        setup: 22 outer vertices lost in the shift).  The anisotropic
+        rescale below is a separate step with its own collision.
 
     Returns
     -------
@@ -165,6 +171,7 @@ def setup_shearing_plate_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
         scale = np.array([L_x / L_build, L_y / L_build])
     elif dim == 3:
@@ -173,6 +180,7 @@ def setup_shearing_plate_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
         scale = np.array([L_x / L_build, L_y / L_build, L_z / L_build])
     else:
@@ -319,6 +327,7 @@ def setup_shearing_plate_droplet(
         'gamma': gamma, 'K_d': K_d, 'K_o': K_o,
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
+        'box_shift': box_shift,
         'P0': P0, 'distr_law': distr_law,
         'periodic_axes': periodic_axes,
         'domain_bounds': domain_bounds,

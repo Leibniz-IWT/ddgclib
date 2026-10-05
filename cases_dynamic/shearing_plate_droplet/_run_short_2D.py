@@ -107,7 +107,8 @@ def main():
         os.path.join(_RESULTS, 'methods_2D_short.json'), methods, HC,
         extra={'dt': dt, 'n_steps': n_steps, 't_final': t_final,
                'domain_bounds': params['domain_bounds'],
-               'refinement_outer': 3, 'refinement_droplet': 3},
+               'refinement_outer': 3, 'refinement_droplet': 3,
+               'box_shift': params['box_shift']},
     )
 
     t_arr = np.array([d['t'] for d in diag_list])

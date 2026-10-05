@@ -21,6 +21,50 @@ from ddgclib.geometry.domains._spheres import ball
 from ddgclib.geometry.domains._rectangles import rectangle
 from ddgclib.geometry.domains._boxes import box
 
+#: How the outer box is translated onto the droplet centre (``box_shift``
+#: argument of :func:`droplet_in_box_2d` / :func:`droplet_in_box_3d`).
+#: ``'move_all'`` keeps every vertex; ``'evict'`` is the loop of single
+#: moves used until 2026-10-05, which loses one outer vertex per key
+#: collision (see :func:`_shift_outer_box`).
+BOX_SHIFTS = ('move_all', 'evict')
+
+
+def _shift_outer_box(HC_outer, offset, box_shift: str = 'move_all'):
+    """Translate every vertex of the outer box mesh by ``offset``.
+
+    The box is built on ``[0, 2L]^dim`` and shifted by ``-L`` (plus the
+    droplet centre), so the target of one vertex is a key that another
+    vertex holds until its own turn.
+
+    ``'move_all'`` (default): one ``HC.V.move_all``; every key is
+    released before any is taken, so every vertex is kept.  Where no
+    key collides the result is bit-identical to the loop.
+
+    ``'evict'``: the loop of single moves with ``on_collision='evict'``
+    (the behaviour before 2026-10-05, laneB).  Each collision drops the
+    occupant from the cache with its edges in place; when the occupant
+    is moved later it takes the mover out in turn.  Measured loss of
+    outer vertices: 2D refinement 1 / 2 / 3: 1 of 13, 2 of 41, 6 of 145;
+    3D refinement 1 / 2: 2 of 35, 3 of 189; the ``(L, ..., L)`` corner
+    is always among them.  Kept so that the numbers pinned on those
+    meshes before laneB can be reproduced.
+    """
+    if box_shift not in BOX_SHIFTS:
+        raise ValueError(
+            f"box_shift must be one of {BOX_SHIFTS}, got {box_shift!r}")
+    offset = np.asarray(offset, dtype=float)
+    n = len(offset)
+    moves = []
+    for v in list(HC_outer.V):
+        pos = v.x_a.copy()
+        pos[:n] += offset
+        moves.append((v, tuple(pos)))
+    if box_shift == 'move_all':
+        HC_outer.V.move_all(moves)
+    else:
+        for v, pos in moves:
+            HC_outer.V.move(v, pos, on_collision='evict')
+
 
 def _estimate_edge_length(HC, dim, stat: str = "median"):
     """Estimate a representative edge length across a mesh.
@@ -194,6 +238,7 @@ def droplet_in_box_2d(
     refinement_droplet: int = 2,
     distr_law: str = "sinusoidal",
     center: tuple[float, float] = (0.0, 0.0),
+    box_shift: str = 'move_all',
 ) -> DomainResult:
     """Build 2D domain with a circular droplet in a rectangular box.
 
@@ -213,12 +258,20 @@ def droplet_in_box_2d(
         Distribution law for radial vertex placement in the droplet.
     center : tuple
         Center of the droplet.
+    box_shift : {'move_all', 'evict'}
+        How the outer box is moved onto ``center`` (:data:`BOX_SHIFTS`).
+        ``'move_all'`` (default) keeps every outer vertex.  ``'evict'``
+        is the lossy loop used before laneB (2026-10-05): refinement 3
+        loses 6 of 145 outer vertices, the ``(L, L)`` corner included.
+        A setup choice, not a solver method axis; runners record it in
+        the ``extra`` block of ``methods.json``.
 
     Returns
     -------
     DomainResult
         With ``boundary_groups['walls']`` (outer box walls) and
-        metadata including ``'interface_vertices'``, ``'R'``, ``'L'``.
+        metadata including ``'interface_vertices'``, ``'R'``, ``'L'``,
+        ``'box_shift'``.
     """
     cx, cy = center
     dim = 2
@@ -228,18 +281,9 @@ def droplet_in_box_2d(
                              flow_axis=0)
     HC_outer = outer_result.HC
 
-    # Shift to center at droplet
-    # NOTE(laneL): this loop shifts the box by half its width, so some
-    # targets are keys that vertices still hold until their own turn.
-    # Each such collision LOSES one outer vertex (refinement 3: 6 of them,
-    # the (L, L) corner included).  Every pinned droplet number was
-    # produced on that mesh, so the old eviction is requested explicitly;
-    # the repair is ``HC_outer.V.move_all(...)`` plus a re-pin.
-    for v in list(HC_outer.V):
-        pos = v.x_a.copy()
-        pos[0] += cx - L
-        pos[1] += cy - L
-        HC_outer.V.move(v, tuple(pos), on_collision='evict')
+    # Shift to center at droplet (laneB: one move_all by default; the
+    # lossy loop of laneL's note is the 'evict' value).
+    _shift_outer_box(HC_outer, (cx - L, cy - L), box_shift)
 
     # -- Step 2: Create droplet domain --
     drop_result = disk(R=R, center=center, refinement=refinement_droplet,
@@ -312,6 +356,7 @@ def droplet_in_box_2d(
             'simplex_phase': mps.simplex_phase,
             'interface_subcomplex': None,  # data lives on HC attributes
             'mps': mps,
+            'box_shift': box_shift,
         },
     )
 
@@ -323,6 +368,7 @@ def droplet_in_box_3d(
     refinement_droplet: int = 1,
     distr_law: str = "sinusoidal",
     center: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    box_shift: str = 'move_all',
 ) -> DomainResult:
     """Build 3D domain with a spherical droplet in a cubic box.
 
@@ -342,6 +388,9 @@ def droplet_in_box_3d(
         Distribution law for radial vertex placement in the droplet.
     center : tuple
         Center of the droplet.
+    box_shift : {'move_all', 'evict'}
+        As in :func:`droplet_in_box_2d`.  ``'evict'`` loses 3 of 189
+        outer vertices at refinement 2, the ``(L, L, L)`` corner included.
 
     Returns
     -------
@@ -356,15 +405,8 @@ def droplet_in_box_3d(
                        refinement=refinement_outer)
     HC_outer = outer_result.HC
 
-    # NOTE(laneL): as in droplet_in_box_2d, this shift loses outer
-    # vertices to key collisions (refinement 2: 3 of them, the (L, L, L)
-    # corner included) and the pinned 3D numbers depend on it.
-    for v in list(HC_outer.V):
-        pos = v.x_a.copy()
-        pos[0] += cx - L
-        pos[1] += cy - L
-        pos[2] += cz - L
-        HC_outer.V.move(v, tuple(pos), on_collision='evict')
+    # Shift to center at droplet (laneB; see droplet_in_box_2d).
+    _shift_outer_box(HC_outer, (cx - L, cy - L, cz - L), box_shift)
 
     # -- Step 2: Create droplet domain --
     drop_result = ball(R=R, center=center, refinement=refinement_droplet,
@@ -429,5 +471,6 @@ def droplet_in_box_3d(
             'simplex_phase': mps.simplex_phase,
             'interface_subcomplex': None,  # data lives on HC attributes
             'mps': mps,
+            'box_shift': box_shift,
         },
     )

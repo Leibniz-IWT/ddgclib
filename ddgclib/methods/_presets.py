@@ -35,16 +35,22 @@ PRESETS: dict[str, SolverMethods] = {
         redistribute_mass=True, split_method='neighbour_count',
         label=_OD + "oscillating_droplet_2D.py (retopo_policy_2d='delaunay_remap')",
         notes='Default since laneE (2026-07-29). Full run refine 3/3: l2 '
-              '0.17479361640597058 / tail 0.9998967874595965 '
-              '(baselines/baseline_oscillation.json; reproduced through the '
-              'wrapper 2026-09-25). Fast mirror refine 2/2: l2 0.054514 < '
-              '0.0600 (TestOscillationEnvelopeRegression2D).',
+              '0.17439096487276182 / tail 0.9998871416222597 / mass drift '
+              '1.48e-14 (baselines/baseline_oscillation.json, laneB '
+              '2026-10-05 on the full outer mesh, 317 vertices; the setup '
+              'choice box_shift="evict" reproduces the pre-laneB baseline l2 '
+              '0.17479361640597058 / tail 0.9998967874595965 on the lossy '
+              '311-vertex mesh to the bit). Fast mirror refine 2/2: l2 '
+              '0.054618 < 0.0600 (TestOscillationEnvelopeRegression2D; '
+              '0.054514 before laneB).',
     ),
     'oscillating_droplet_2D_dual_only': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
         label=_OD + "oscillating_droplet_2D.py (retopo_policy_2d='dual_only')",
-        notes='lane5 default before laneE: l2 0.17857 / tail 0.99925. '
+        notes='lane5 default before laneE: l2 0.17857 / tail 0.99925 (lossy '
+              'pre-laneB mesh); laneB 2026-10-05, full outer mesh: l2 '
+              '0.17946703687459944 / tail 0.9998387858074947. '
               'Guard: TestDualOnlyRetopoPolicy2D.',
     ),
     'oscillating_droplet_2D_bare_delaunay': SolverMethods(
@@ -67,14 +73,21 @@ PRESETS: dict[str, SolverMethods] = {
         redistribute_mass=True,
         label=_OD + "oscillating_droplet_2D.py (retopo_policy_2d='delaunay_remap_p2')",
         notes='laneH opt-in: l2 0.03795682994323827 (-78%), l2_two_fluid '
-              '0.02193, tail 1.3973 (tail gate uncalibrated). NOT the default.',
+              '0.02193, tail 1.3973 (tail gate uncalibrated). NOT the default. '
+              'laneB 2026-10-05, full outer mesh: l2 0.038841363169171125 '
+              '(-78 % against the default 0.17439), l2_two_fluid 0.02306, '
+              'tail 1.3936743069461104: the missing box corner was not the '
+              'over-decay.',
     ),
     'static_droplet_floor_2D': SolverMethods(
         dim=2, phases='multi', integrator='euler',
         connectivity='delaunay', remap=None, redistribute_mass=True,
         label='ddgclib/tests/test_case_oscillating_droplet.py::'
               'TestStaticDroplet2DRetopologyFloor (u=0 every step)',
-        notes='Pinned floors 2.3748568e-03 (step 0) / 2.2716938e-03 (post-retopo).',
+        notes='Pinned floors 2.3748568e-03 (step 0) / 2.2716938e-03 (post-retopo). '
+              'laneB 2026-10-05 (full outer mesh): step 0 bit-identical, '
+              'post-retopo 2.2716937806e-03 against 2.2716937802e-03 before '
+              '(1.8e-10 relative), pinned digits unchanged.',
     ),
     'static_droplet_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
@@ -84,7 +97,11 @@ PRESETS: dict[str, SolverMethods] = {
               'formerly the case-local _dual_only_retopo closure): no '
               'mps.refresh, no redistribution, no EOS update, so the pressure '
               'field is frozen at its setup value (audit F11). Pinned summary '
-              '1.1847162859108737e-03, mass 0.0.',
+              '1.1672989414885857e-03 (interface radius drift over 100 '
+              'steps), max KE normalised 8.79e-09, mass 0.0 (laneB '
+              '2026-10-05, full outer mesh; the pre-laneB value '
+              '1.1847162859108737e-03 is reproduced by the setup choice '
+              'box_shift="evict").',
     ),
     # ------------------------------------------------------------------
     # oscillating droplet 3D
@@ -93,26 +110,39 @@ PRESETS: dict[str, SolverMethods] = {
         dim=3, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
         label=_OD + "oscillating_droplet_3D.py (retopo_policy_3d='dual_only')",
-        notes='laneB default: l2 0.24811340819647862 / tail 0.08410 '
-              '(baselines/baseline_oscillation_3d.json). laneG: the score '
-              'is a bump/over-decay cancellation; do not read as inflation.',
+        notes='laneB (July) default: l2 0.24811340819647862 / tail 0.08410 '
+              'on the lossy pre-2026-10-05 mesh (472 vertices, 96 walls, the '
+              'box corner missing). laneB (2026-10-05, full outer mesh, 475 '
+              'vertices, 98 walls): l2 0.24811443136179492 / tail '
+              '0.0841737962816189 / R_max_peak 0.010790237633926668 / mass '
+              'drift 4.8e-14 (baselines/baseline_oscillation_3d.json); the '
+              'setup choice box_shift="evict" reproduces the old baseline in '
+              'every key. laneG: the score is a bump/over-decay '
+              'cancellation; do not read as inflation (unchanged by the '
+              'corner: 4e-6 relative).',
     ),
     'oscillating_droplet_3D_delaunay': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
         connectivity='delaunay', remap=None, redistribute_mass=True,
         label=_OD + "oscillating_droplet_3D.py --retopo delaunay",
-        notes='MEASURED WORSE: l2 1.5244561707801316 / tail 0.47067 (laneB). '
-              'laneI (2026-09-25) fixed the never-invalidated 3D interface apex '
+        notes='MEASURED WORSE: l2 1.5244561707801316 / tail 0.47067 (laneB, '
+              'July). laneI (2026-09-25) fixed the never-invalidated 3D interface apex '
               'cache and re-ran this config: bit-identical (the run never flips '
               'interface triangles), so the rejection is confirmed free of the '
-              'stale-cache effect. delaunay+remap likewise stays 1.8734809234034775.',
+              'stale-cache effect. delaunay+remap likewise stays 1.8734809234034775. '
+              'laneB 2026-10-05 (full outer mesh): l2 1.5291100090540053 / '
+              'tail 0.4594532578392181 / R_max_peak 0.011400164376344007, '
+              'still measured worse.',
     ),
     'static_droplet_floor_3D': SolverMethods(
         dim=3, phases='multi', integrator='euler',
         connectivity='delaunay', remap=None, redistribute_mass=True,
         label='ddgclib/tests/test_case_oscillating_droplet.py::'
               'TestStaticDroplet3DRetopologyFloor (u=0 every step)',
-        notes='Pinned floors 6.0153e-05 (step 0) / 7.274172e-05 (plateau, laneA).',
+        notes='Pinned floors 6.0153e-05 (step 0) / 7.274134e-05 (plateau; '
+              'laneB 2026-10-05 on the full outer mesh, 475 vertices; laneA '
+              'pinned 7.274172e-05 on the lossy 472-vertex mesh, reproduced by '
+              'box_shift="evict"). Step 0 is bit-identical between the meshes.',
     ),
     # ------------------------------------------------------------------
     # dam break
@@ -157,7 +187,16 @@ PRESETS: dict[str, SolverMethods] = {
         notes='Per-step Delaunay without remap (the configuration measured '
               'worse on the droplet). Gravity + NaN guard in the setup dudt '
               'wrapper, WallClampBC, gas mass injection in the callback. '
-              'Unvalidated; only pin is 5-step per-phase mass drift <= 1.94e-15.',
+              'Unvalidated; only pin is 5-step per-phase mass drift <= 1.94e-15. '
+              'laneB 2026-10-05: the setup mesh lacked 8 of 41 outer vertices '
+              '(L 0.004, refinement 2) until the builder fix (setup choice '
+              'box_shift, recorded in methods.json); shipped horizon (6330 '
+              'steps) A/B digest hull = membership a8301121c7bf44ab on the full '
+              'mesh (214 vertices, 16 walls, KE at the end 4.2625e-02 J, '
+              '|u|max 3.32 m/s) against 38530636a343cf7a (206, 15, 6.212278e-03 '
+              'J, 1.74 m/s) on the pre-laneB mesh with the current library '
+              '(lane L recorded 9ed4c69378ac129a on the library of '
+              '2026-10-01); unvalidated case, no reference ranks the two.',
     ),
     'electrolysis_bubble_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
@@ -165,7 +204,12 @@ PRESETS: dict[str, SolverMethods] = {
         label=_EB + 'electrolysis_bubble_3D.py',
         notes='UNSTABLE: gas phase lost entirely by t~1.1e-4 s (audit). Same '
               'wiring as 2D. (The stale 3D interface apex cache, audit T1, is '
-              'fixed since laneI; this case has not been re-run.)',
+              'fixed since laneI; this case has not been re-run.) laneB '
+              '2026-10-05: the setup mesh lacked 2 of 35 outer vertices '
+              '(refinement 1, the box corner among them); 300-step A/B digest '
+              'hull = membership 6bdbc9c542ffd6fc (KE_max 1.945652e-12, 95 '
+              'vertices, 26 walls) on the full mesh, d4e464d4974dbf5d (lane '
+              'L\'s record, reproduced to the bit by box_shift="evict").',
     ),
     'electrolysis_bubble_fritz_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
@@ -186,7 +230,18 @@ PRESETS: dict[str, SolverMethods] = {
               '_make_periodic_multiphase_retopo closure): ghost Delaunay + '
               'refresh + redistribution, no remap/cadence. domain_bounds from '
               'the setup params. UNSTABLE: interface lost by t~0.044 s, '
-              '|u|max 65x U_wall (audit).',
+              '|u|max 65x U_wall (audit). laneB 2026-10-05: the setup mesh '
+              'lacked 22 of 145 outer vertices (4 of the 9 top-plate vertices '
+              'among them) until the builder fix (box_shift, setup choice); '
+              'on the full mesh the short window (refinement 3/3, t = 0.05 s) '
+              'holds max u / U_wall at 8 to 11 until t = 0.038 s and blows up '
+              'by t = 0.05 (295; the pre-laneB mesh: 348 at t = 0.013). Not '
+              'the cure: the anisotropic rescale of the setup maps the two '
+              'outer vertices at (0, +-0.0075) onto the droplet poles and its '
+              'on_collision="evict" loop deletes those interface vertices '
+              '(one pole before laneB, both now); first interface loss at '
+              'step 78 (evict) / 183 (move_all). Geometric fix in the case is '
+              'open.',
     ),
     'shearing_plate_droplet_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',

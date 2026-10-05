@@ -179,7 +179,8 @@ def main():
         os.path.join(_RESULTS, 'methods_2D.json'), methods, HC,
         extra={'dt': dt, 'n_steps': n_steps, 't_final': t_final,
                'refinement_outer': n_refine_outer_2d,
-               'refinement_droplet': n_refine_drop_2d},
+               'refinement_droplet': n_refine_drop_2d,
+               'box_shift': params['box_shift']},
     )
     print(f"\nSimulation finished at t = {t_final:.4f} s "
           f"(n_snapshots = {history.n_snapshots})")

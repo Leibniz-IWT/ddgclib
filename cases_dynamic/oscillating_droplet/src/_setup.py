@@ -40,6 +40,7 @@ def setup_oscillating_droplet(
     distr_law: str = "sinusoidal",
     split_method: str = "neighbour_count",
     redistribute_mass: bool = True,
+    box_shift: str = 'move_all',
 ):
     """Set up oscillating droplet problem (2D or 3D).
 
@@ -88,6 +89,15 @@ def setup_oscillating_droplet(
         Lagrangian per-vertex ``v.m_phase`` is held against a shifting
         ``v.dual_vol_phase``, driving spurious ``rho`` and ``p_phase``
         swings (3D static-droplet A.5.b: 1.44e-3 → 7.4e-5 with this on).
+    box_shift : {'move_all', 'evict'}
+        How ``droplet_in_box_2d`` / ``_3d`` shift the outer box onto the
+        droplet (laneB, 2026-10-05; ``ddgclib.geometry.domains.BOX_SHIFTS``).
+        ``'move_all'`` (default) keeps every outer vertex; ``'evict'``
+        is the lossy loop every number pinned before laneB was produced
+        on (2D refinement 3: 6 of 145 outer vertices missing, 3D
+        refinement 2: 3 of 189, the box corner among them).  A setup
+        choice, recorded in ``params['box_shift']`` and in the ``extra``
+        block of the runners' ``methods.json``, not a solver method axis.
 
     Returns
     -------
@@ -133,6 +143,7 @@ def setup_oscillating_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
     elif dim == 3:
         result = droplet_in_box_3d(
@@ -140,6 +151,7 @@ def setup_oscillating_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
     else:
         raise ValueError(f"dim must be 2 or 3, got {dim}")
@@ -239,6 +251,7 @@ def setup_oscillating_droplet(
         'L_domain': L_domain, 'P0': P0,
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
+        'box_shift': box_shift,
         'remesh_mode': 'delaunay',
         'remesh_kwargs': adaptive_kwargs,
     }

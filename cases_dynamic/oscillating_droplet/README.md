@@ -15,6 +15,17 @@ python cases_dynamic/oscillating_droplet/oscillating_droplet_3D.py
 
 # 2D mesh convergence study
 python cases_dynamic/oscillating_droplet/mesh_convergence_2D.py
+
+# A/B against the pre-2026-10-05 outer mesh (lane B): the builders used to
+# lose outer vertices in their box shift (6 of 145 in 2D, 3 of 189 in 3D,
+# the box corner included).  --box-shift evict rebuilds that mesh and
+# writes suffixed artifacts (score_evict.json, snapshots_evict/, ...);
+# the choice is recorded in methods.json (extra.box_shift).  Both arms of
+# every pinned number: diagnose_box_shift.py (census, mesh, floors,
+# envelope, shearrun, fullrun).
+python cases_dynamic/oscillating_droplet/oscillating_droplet_2D.py --box-shift evict
+python cases_dynamic/oscillating_droplet/oscillating_droplet_3D.py --box-shift evict
+python cases_dynamic/oscillating_droplet/static_droplet_2D.py --box-shift evict
 ```
 
 ## Outputs

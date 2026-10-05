@@ -180,6 +180,7 @@ def run_a5b(
     curvature_path: str = 'integrated',
     displacement_eps: float | None = None,
     methods=None,
+    box_shift: str = 'move_all',
 ) -> dict:
     """A.5.b — retopology ON, velocity forced to zero every step.
 
@@ -203,6 +204,10 @@ def run_a5b(
         pinned floors.  ``curvature_path`` still only selects the
         MEASUREMENT stencil (``_max_interface_force``), never the force in
         the run.
+    box_shift : {'move_all', 'evict'}
+        Outer box shift of the droplet builders (laneB, 2026-10-05).
+        ``'evict'`` is the lossy pre-laneB mesh the floors before laneB
+        were pinned on.  Recorded in the returned dict.
     """
     if methods is not None:
         if methods.dim != dim:
@@ -229,11 +234,13 @@ def run_a5b(
             refinement_droplet=refinement_droplet,
             split_method=split_method,
             redistribute_mass=redistribute_mass,
+            box_shift=box_shift,
         )
 
     n_verts0 = sum(1 for _ in HC.V)
     n_iface0 = len(_interface_vertices(HC))
-    print(f"  Initial mesh: {n_verts0} vertices, {n_iface0} interface")
+    print(f"  Initial mesh: {n_verts0} vertices, {n_iface0} interface "
+          f"(box_shift={box_shift})")
 
     c_s = float(np.sqrt(K_d / rho_d))
     dt, dx_min = _compute_dt(HC, dim, c_s)
@@ -347,6 +354,7 @@ def run_a5b(
         'redistribute_mass': redistribute_mass,
         'displacement_eps': displacement_eps,
         'methods': methods.to_dict() if methods is not None else None,
+        'box_shift': box_shift,
         'max_abs_F_peak': maxF_overall,
         'max_abs_F_end': maxF_end,
         'mean_abs_F_end': meanF_end,

@@ -58,7 +58,7 @@ _POLICY_PRESETS = {
 }
 
 
-def main(retopo_policy: str | None = None):
+def main(retopo_policy: str | None = None, box_shift: str = 'move_all'):
     dim = 3
     if retopo_policy is None:
         retopo_policy = retopo_policy_3d
@@ -100,10 +100,12 @@ def main(retopo_policy: str | None = None):
             refinement_droplet=2,
             split_method=methods.split_method,
             redistribute_mass=methods.redistribute_mass,
+            box_shift=box_shift,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
-    print(f"Mesh: {n_verts} vertices, {n_iface} interface")
+    print(f"Mesh: {n_verts} vertices, {n_iface} interface "
+          f"(box_shift={box_shift})")
 
     # -- Retopology policy (A/B via --retopo; default from _params) --
     # 'dual_only' freezes the builder connectivity (skip_triangulation)
@@ -118,7 +120,10 @@ def main(retopo_policy: str | None = None):
 
     # Non-default policies write suffixed artifacts (snapshots, figures,
     # score) so an A/B run never clobbers the default baseline outputs.
+    # laneB: the same for the lossy pre-laneB outer mesh (--box-shift evict).
     suffix = '' if retopo_policy == retopo_policy_3d else f'_{retopo_policy}'
+    if box_shift != 'move_all':
+        suffix += f'_{box_shift}'
     snapshots_dir = _SNAPSHOTS + suffix
 
     # -- CFL timestep --
@@ -202,6 +207,7 @@ def main(retopo_policy: str | None = None):
     score['refinement_outer'] = 2
     score['refinement_droplet'] = 2
     score['retopo_policy'] = retopo_policy
+    score['box_shift'] = box_shift
     score_path = os.path.join(_RESULTS, f'score{suffix}.json')
     save_score(score_path, score, methods=methods)   # self-describing score
     record_methods(
@@ -209,6 +215,7 @@ def main(retopo_policy: str | None = None):
         extra={'retopo_policy': retopo_policy, 'dt': dt,
                'n_steps': n_steps, 't_end': t_end,
                'refinement_outer': 2, 'refinement_droplet': 2,
+               'box_shift': params['box_shift'],
                'K_d': K_d, 'K_o': K_o},
     )
     print(f"\n3D oscillation score saved to {score_path}")
@@ -280,5 +287,13 @@ if __name__ == '__main__':
              "src/_params.py). 'dual_only' skips per-step Delaunay "
              "retriangulation (frozen connectivity, duals refreshed).",
     )
+    parser.add_argument(
+        '--box-shift', choices=('move_all', 'evict'), default='move_all',
+        dest='box_shift',
+        help="Outer box shift of droplet_in_box_3d (laneB): 'move_all' "
+             "keeps every outer vertex (default); 'evict' is the lossy "
+             "pre-laneB mesh (3 of 189 outer vertices missing), written "
+             "to suffixed artifacts",
+    )
     args = parser.parse_args()
-    main(retopo_policy=args.retopo)
+    main(retopo_policy=args.retopo, box_shift=args.box_shift)

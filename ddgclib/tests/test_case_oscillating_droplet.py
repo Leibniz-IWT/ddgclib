@@ -162,6 +162,14 @@ class TestStaticDroplet2DRetopologyFloor(unittest.TestCase):
     caught at the regression layer.  See
     ``.claude/plans/please-do-some-deep-vectorized-tarjan.md`` (status
     log 2026-05-28).
+
+    laneB (2026-10-05): the builder keeps every outer vertex now
+    (``box_shift='move_all'``; the mesh has 317 vertices instead of
+    311, the box corner included).  Measured on it: step 0
+    2.3748568012e-03 (bit-identical, the interface stencil does not
+    reach the box), step 1 2.2716937806e-03 (was 2.2716937802e-03,
+    1.8e-10 relative), plateau spread 1.44e-13.  The pinned digits are
+    unchanged; ``box_shift='evict'`` reproduces the old values.
     """
 
     EXPECTED_STEP0_MAXF = 2.3748568e-03
@@ -332,6 +340,14 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
     the old fan plateau was exactly bit-stable), volume rel spread
     0.0 from step 1.  The 2D floors are bit-identical (both changes
     are 3D-only).
+
+    RE-PIN 2026-10-05 (laneB, ``box_shift='move_all'``): the builder
+    keeps every outer vertex (475 vertices instead of 472, 98 walls
+    instead of 96, all 8 corners).  ``EXPECTED_PLATEAU_MAXF``
+    7.274172e-05 -> 7.274134e-05 (-5.3e-6 relative; measured
+    7.2741338970e-05 at step 1, 7.2741338968e-05 at step 20, plateau
+    spread 2.72e-11), step 0 bit-identical.  ``box_shift='evict'``
+    reproduces 7.2741721787e-05 (``diagnose_box_shift.py floors``).
     """
 
     EXPECTED_STEP0_MAXF = 6.0153e-05
@@ -339,8 +355,9 @@ class TestStaticDroplet3DRetopologyFloor(unittest.TestCase):
     # 2026-07-29) -> 7.274172e-05 (exact simplex-container volumes +
     # canonical 3D qhull input order, lane A re-pin — see class
     # docstring; the switch WITHOUT canonical order measures
-    # 7.616854e-05).
-    EXPECTED_PLATEAU_MAXF = 7.274172e-05
+    # 7.616854e-05) -> 7.274134e-05 (laneB 2026-10-05, full outer mesh;
+    # the lossy pre-laneB mesh gives 7.274172e-05 again).
+    EXPECTED_PLATEAU_MAXF = 7.274134e-05
     REL_TOL = 0.01
     REFINE_OUTER = 2
     REFINE_DROPLET = 2
@@ -571,6 +588,14 @@ class TestOscillationEnvelopeRegression2D(unittest.TestCase):
     the same code state: l2 0.17479361640597058, tail
     0.9998967874595965 (dual_only: 0.1785660454150319 /
     0.9992507831101141).
+
+    laneB (2026-10-05, ``box_shift='move_all'``): the fixture has 97
+    vertices (the lossy pre-laneB shift dropped 2 outer vertices, the
+    (L, L) corner included; total dual volume was 9.6875e-3 instead of
+    1e-2).  Measured on the full mesh: l2 0.054618059950224354, tail
+    0.93731955721225069, linf 0.083920319769496821, mass drift 1.3e-14,
+    KE_max 1.4248519830969824e-06; the pins below hold unchanged.
+    ``box_shift='evict'`` reproduces the numbers above to the bit.
 
     A/B sensitivity: reverting the retopo policy to BARE per-step
     Delaunay (no remap, pre-lane-5) scores l2 1.384569 / tail 2.110904

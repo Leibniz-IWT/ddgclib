@@ -70,8 +70,14 @@ from cases_dynamic.oscillating_droplet.diagnose_a5_bisection import (  # noqa: E
 # --redistribute-mass --n-steps 100; the exact switch WITHOUT
 # canonical order measures 7.616854e-05).  Peak == end because the
 # step-1 transient IS the plateau now.  2D pins below are bit-unchanged.
-A5B_3D_PEAK = 7.274172e-05
-A5B_3D_END = 7.274172e-05
+# RE-PIN 2026-10-05 (lane B): the droplet builders keep every outer
+# vertex (box_shift='move_all'; 475 vertices / 98 walls instead of 472 /
+# 96, the box corner included): 7.274172e-05 -> 7.274134e-05 (measured
+# peak 7.2741338970e-05, end 7.2741338968e-05 over 20 steps; -5.3e-6
+# relative).  box_shift='evict' reproduces 7.2741721787e-05.  The 2D
+# floors move by 1.8e-10 relative (step 1) and keep their digits.
+A5B_3D_PEAK = 7.274134e-05
+A5B_3D_END = 7.274134e-05
 
 # 2D: post-Phase-2c, curvature-stencil bound on the polygon-vs-circle
 # truncation.  Refinement 3/3, 311 vertices / 32 interface.  Peak is

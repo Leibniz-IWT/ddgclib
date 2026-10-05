@@ -1,4 +1,5 @@
 {
+  "box_shift": "move_all",
   "inputs": {
     "R0": 0.01,
     "beta": 25.0,
@@ -6,32 +7,47 @@
     "l": 2,
     "omega": 12.909944487358056
   },
+  "inputs_two_fluid": {
+    "beta": 6.832550976708139,
+    "beta_energy": 17.777777777777775,
+    "omega": 8.752846836064656
+  },
   "kind": "oscillation",
-  "l2_error_normalized": 0.17479361640597058,
-  "linf_error_normalized": 0.32364245955409165,
-  "mass_drift": 2.4056717879332966e-14,
+  "l2_error_normalized": 0.17439096487276182,
+  "l2_error_normalized_two_fluid": 0.18420032366674188,
+  "linf_error_normalized": 0.323163334437819,
+  "linf_error_normalized_two_fluid": 0.31069551831830466,
+  "mass_drift": 1.4835808907017442e-14,
   "methods": {
+    "area_orientation": "primal_edge",
     "backend": null,
     "connectivity": "delaunay",
     "curvature_path": "integrated",
+    "density_diffusion": null,
     "dim": 2,
     "displacement_eps": null,
+    "frozen_set": "hull",
     "integrator": "symplectic_euler",
     "label": "cases_dynamic/oscillating_droplet/oscillating_droplet_2D.py (retopo_policy_2d='delaunay_remap')",
     "merge_cdist": null,
-    "notes": "Default since laneE (2026-07-29). Full run refine 3/3: l2 0.17479361640597058 / tail 0.9998967874595965 (baselines/baseline_oscillation.json; reproduced through the wrapper 2026-09-25). Fast mirror refine 2/2: l2 0.054514 < 0.0600 (TestOscillationEnvelopeRegression2D).",
+    "notes": "Default since laneE (2026-07-29). Full run refine 3/3: l2 0.17439096487276182 / tail 0.9998871416222597 / mass drift 1.48e-14 (baselines/baseline_oscillation.json, laneB 2026-10-05 on the full outer mesh, 317 vertices; the setup choice box_shift=\"evict\" reproduces the pre-laneB baseline l2 0.17479361640597058 / tail 0.9998967874595965 on the lossy 311-vertex mesh to the bit). Fast mirror refine 2/2: l2 0.054618 < 0.0600 (TestOscillationEnvelopeRegression2D; 0.054514 before laneB).",
     "periodic_axes": null,
     "phases": "multi",
+    "pressure_flux": "centred",
     "projection_every": 1,
     "redistribute_mass": true,
     "remap": "conservative",
     "remesh_kwargs": null,
     "split_method": "neighbour_count",
+    "viscous_flux": "two_point",
     "workers": null
   },
   "n_frames": 207,
-  "summary": 0.17479361640597058,
+  "refinement_droplet": 3,
+  "refinement_outer": 3,
+  "retopo_policy": "delaunay_remap",
+  "summary": 0.17439096487276182,
   "t_end": 0.11432433142499636,
   "t_start": 0.0,
-  "tail_growth": 0.9998967874595965
+  "tail_growth": 0.9998871416222597
 }

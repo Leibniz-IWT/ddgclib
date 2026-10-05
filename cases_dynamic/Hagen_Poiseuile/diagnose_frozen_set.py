@@ -110,7 +110,8 @@ def _build_electrolysis(args, dim):
         rho_gas=p.rho_gas, mu_liq=p.mu_liq, mu_gas=p.mu_gas, gamma=p.gamma,
         K_liq=p.K_liq, K_gas=p.K_gas, g=p.g, P0=p.P0,
         refinement_outer=ro, refinement_droplet=rd,
-        redistribute_mass=methods.redistribute_mass)
+        redistribute_mass=methods.redistribute_mass,
+        box_shift=args.box_shift)
     c_s = max(np.sqrt(p.K_liq / p.rho_liq), np.sqrt(p.K_gas / p.rho_gas))
     dx_min = min(d for d in (np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim])
                              for v in HC.V for nb in v.nn) if d > 1e-15)
@@ -124,7 +125,15 @@ def _build_electrolysis(args, dim):
     kw = dict(dt=dt, n_steps=n_steps, bc_set=bc_set, mps=mps)
     box = [(-p.L_domain, p.L_domain)] * dim
     return (preset, HC, bV, kw, box, lambda v: v.phase == 0,
-            dict(dudt_fn=dudt_fn, extra_callback=inject), f"_n{n_steps}")
+            dict(dudt_fn=dudt_fn, extra_callback=inject),
+            f"_n{n_steps}{_bs_label(args)}")
+
+
+def _bs_label(args) -> str:
+    """laneB: the outer box shift of the droplet builders is a setup
+    choice; the lossy pre-laneB mesh (``--box-shift evict``) gets its own
+    record so it never overwrites the default one."""
+    return '' if args.box_shift == 'move_all' else f"_bs-{args.box_shift}"
 
 
 def build_electrolysis_2d(args):
@@ -144,12 +153,14 @@ def build_droplet_2d(args):
     HC, bV, mps, bc_set, dudt_fn, _r, params = setup_oscillating_droplet(
         dim=2, R0=R0, epsilon=0.05, l=2, L_domain=L, refinement_outer=2,
         refinement_droplet=2, split_method=methods.split_method,
-        redistribute_mass=methods.redistribute_mass)
+        redistribute_mass=methods.redistribute_mass,
+        box_shift=args.box_shift)
     n_steps = args.steps if args.steps is not None else 200
     kw = dict(dt=args.dt if args.dt is not None else 2e-5, n_steps=n_steps,
               bc_set=bc_set, mps=mps)
     return ('oscillating_droplet_2D', HC, bV, kw, [(-L, L), (-L, L)],
-            lambda v: v.phase == 1, dict(dudt_fn=dudt_fn), f"_n{n_steps}")
+            lambda v: v.phase == 1, dict(dudt_fn=dudt_fn),
+            f"_n{n_steps}{_bs_label(args)}")
 
 
 BUILDERS = {
@@ -251,13 +262,15 @@ def run_arm(case: str, arm: str, args) -> dict:
         'state_sha256': hashlib.sha256(repr(state).encode()).hexdigest(),
         'series': series,
     }
-    os.makedirs(_OUT, exist_ok=True)
-    stem = os.path.join(_OUT, f"{case}{label}_{arm}")
+    out_dir = args.out or _OUT
+    os.makedirs(out_dir, exist_ok=True)
+    stem = os.path.join(out_dir, f"{case}{label}_{arm}")
     with open(stem + '.json', 'w') as f:
         json.dump(out, f, indent=1)
     record_methods(stem + '_methods.json', methods, HC,
                    extra={'dt': kw['dt'], 'n_steps': kw['n_steps'],
-                          'case': case, 'label': label})
+                          'case': case, 'label': label,
+                          'box_shift': args.box_shift})
     return out
 
 
@@ -273,6 +286,12 @@ def main() -> None:
                     help='dam break alpha_art')
     ap.add_argument('--t-end', type=float, default=None, dest='t_end')
     ap.add_argument('--refine', type=int, default=None)
+    ap.add_argument('--box-shift', default='move_all', dest='box_shift',
+                    choices=['move_all', 'evict'],
+                    help='droplet / electrolysis builders (laneB): evict = '
+                         'the lossy pre-laneB outer mesh')
+    ap.add_argument('--out', default=None,
+                    help=f'output directory (default {_OUT})')
     args = ap.parse_args()
 
     arms = ['hull', 'membership'] if args.arm == 'both' else [args.arm]
