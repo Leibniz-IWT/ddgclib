@@ -42,12 +42,13 @@ Usage (repo root)::
     integrated (the integrators are wrapped, nothing else changes).
     ``--orientation`` replaces ``area_orientation`` on every 2D preset and
     on the arms built here, i.e. the run is ``preset.replace(...)``, and
-    the scan reads the vectors with that rule.  It reaches the runs whose
-    force is built by ``methods.dudt_fn`` (the laneL / R / P arms, hp2d*,
-    hydro2d*); the multiphase setups (droplet, dam break, electrolysis,
-    shearing plate) build their own ``partial(multiphase_dudt_i, ...)``
-    and run the library default whatever the preset says (laneO known
-    limit).
+    the scan reads the vectors with that rule.  It reaches every run whose
+    force is built by ``methods.dudt_fn``: the laneL / R / P arms, hp2d*,
+    hydro2d*, and since laneW (2026-10-05) the multiphase cases as well
+    (the droplet, dam-break, electrolysis and shearing-plate setups take
+    ``methods=`` and build their force from it; until laneW they built
+    their own ``partial(multiphase_dudt_i, ...)`` and ran the library
+    default whatever the preset said, laneO known limit 1).
 
 As a pytest plugin it counts per test (no behaviour change)::
 

@@ -19,14 +19,16 @@ physics objects (``HC``, ``mps``, ``domain_bounds``, ``mu``, the EOS, a
 custom retopology callable, a ``boundary_filter``) are passed to the
 builders at build time.
 
-Typical use in a case runner::
+Typical use in a case runner (the setup takes the config and builds the
+force with :meth:`SolverMethods.dudt_fn` and its retopology function with
+:meth:`SolverMethods.retopologize_fn`, so every axis of the preset is
+applied, not only recorded)::
 
     from ddgclib.methods import PRESETS, record_methods
 
     methods = PRESETS['oscillating_droplet_2D']
     HC, bV, mps, bc_set, dudt_fn, _, params = setup_oscillating_droplet(
-        dim=2, ..., split_method=methods.split_method,
-        redistribute_mass=methods.redistribute_mass)
+        dim=2, ..., methods=methods)
     t_final = methods.integrate(HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
                                 bc_set=bc_set, callback=callback, mps=mps)
     record_methods('results/methods.json', methods, HC,

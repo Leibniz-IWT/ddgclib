@@ -194,6 +194,29 @@ PRESETS: dict[str, SolverMethods] = {
         notes='Frozen connectivity (was skip_triangulation=True at integrator '
               'level). Not re-run since laneF; April outputs only.',
     ),
+    'dam_break_2D_no_air': SolverMethods(
+        dim=2, phases='single', integrator='symplectic_euler',
+        connectivity='delaunay',
+        label=_DB + 'dam_break_2D_no_air.py',
+        notes='Single-phase liquid column with a free surface (no air '
+              'phase), setup_dam_break_single_phase: EOS pressure, gravity '
+              'as body_force, boundary_filter = the tank walls (v.is_wall; '
+              'the free-surface vertices are topological boundary vertices '
+              'that advect), hull-frozen per-step Delaunay without a remap, '
+              'i.e. the configuration laneK measured unstable with an EOS '
+              '(the force builder warns). laneW 2026-10-05: wired to the '
+              'preset (the runner built its partial and integrator kwargs by '
+              'hand before); unvalidated, no pin, never scored.',
+    ),
+    'dam_break_3D_no_air': SolverMethods(
+        dim=3, phases='single', integrator='symplectic_euler',
+        connectivity='delaunay',
+        label=_DB + 'dam_break_3D_no_air.py',
+        notes='3D version of dam_break_2D_no_air (same wiring). The runner '
+              'catches the integrator abort (3D free-surface corners produce '
+              'large spurious forces) to keep the snapshots. Unvalidated, no '
+              'pin.',
+    ),
     # ------------------------------------------------------------------
     # electrolysis bubble
     # ------------------------------------------------------------------

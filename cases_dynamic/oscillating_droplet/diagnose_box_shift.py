@@ -210,8 +210,7 @@ def _run_mesh_arm(dim, ro, rd, arm, preset_name, L) -> dict:
             dim=dim, R0=R0, epsilon=0.0, l=l, rho_d=rho_d, rho_o=rho_o,
             mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
             L_domain=L, refinement_outer=ro, refinement_droplet=rd,
-            split_method=methods.split_method,
-            redistribute_mass=methods.redistribute_mass, box_shift=arm)
+            methods=methods, box_shift=arm)
     lost = _shift_census(dim, ro, L)['arms']['evict']['lost_positions']
     setup_state = _mesh_state(HC, bV, mps, dim, L, lost)
     retopo = methods.retopologize_fn(mps=mps)
@@ -405,8 +404,7 @@ def cmd_envelope(args) -> None:
                 dim=dim, R0=R0, epsilon=epsilon, l=l, rho_d=rho_d, rho_o=rho_o,
                 mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
                 L_domain=L_domain, refinement_outer=2, refinement_droplet=2,
-                split_method=methods.split_method,
-                redistribute_mass=methods.redistribute_mass, box_shift=arm)
+                methods=methods, box_shift=arm)
         dt = _cfl_dt(HC, dim, K_d, rho_d, gamma)
         t_end = min(t_end_2d, 5.0 / beta)
         n_steps = int(t_end / dt) + 1
@@ -448,8 +446,7 @@ def cmd_envelope(args) -> None:
                     dim=2, R0=0.01, epsilon=eps, l=2, rho_d=800.0, rho_o=1000.0,
                     mu_d=0.5, mu_o=0.1, gamma=0.05, L_domain=0.05,
                     refinement_outer=1, refinement_droplet=2,
-                    split_method=m.split_method,
-                    redistribute_mass=m.redistribute_mass, box_shift=arm)
+                    methods=m, box_shift=arm)
 
         for preset, n, label, extra in (
                 ('oscillating_droplet_2D', 200, 'endurance_200', {}),
@@ -513,7 +510,7 @@ def cmd_shearrun(args) -> None:
                     rho_d=sp.rho_d, rho_o=sp.rho_o, mu_d=sp.mu_d, mu_o=sp.mu_o,
                     gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o,
                     refinement_outer=3, refinement_droplet=3,
-                    redistribute_mass=m.redistribute_mass, box_shift=arm)
+                    methods=m, box_shift=arm)
         n0 = sum(1 for _ in HC.V)
         iface0 = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
         rec = {'box_shift': arm, 'setup_digest': _digest(HC), 'n_verts': n0,
@@ -535,7 +532,7 @@ def cmd_shearrun(args) -> None:
                     rho_d=sp.rho_d, rho_o=sp.rho_o, mu_d=sp.mu_d, mu_o=sp.mu_o,
                     gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o,
                     refinement_outer=3, refinement_droplet=3,
-                    redistribute_mass=m.redistribute_mass, box_shift=arm)
+                    methods=m, box_shift=arm)
         c_s = float(np.sqrt(sp.K_o / sp.rho_o))
         dx_min = min(float(np.linalg.norm(v.x_a[:2] - nb.x_a[:2]))
                      for v in HC.V for nb in v.nn

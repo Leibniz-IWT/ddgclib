@@ -33,13 +33,20 @@ from cases_dynamic.oscillating_droplet.src._setup import (
 from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.methods import PRESETS
+
+# Per-step Delaunay without a remap, redistribution on: the setup's
+# historic default retopology (measured worse than the shipped
+# 'oscillating_droplet_2D' preset for dynamics; kept so the study runs
+# the configuration it was written for).
+METHODS = PRESETS['oscillating_droplet_2D_bare_delaunay']
 
 
-def run_single(refinement_outer, refinement_droplet, n_steps_max=500):
+def run_single(refinement_outer, refinement_droplet, n_steps_max=500,
+               methods=METHODS):
     """Run one simulation at a given refinement level."""
     dim = 2
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
@@ -47,6 +54,7 @@ def run_single(refinement_outer, refinement_droplet, n_steps_max=500):
             L_domain=L_domain,
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
+            methods=methods,
         )
 
     n_verts = sum(1 for _ in HC.V)
@@ -66,10 +74,9 @@ def run_single(refinement_outer, refinement_droplet, n_steps_max=500):
         t_arr.append(t)
         R_max_arr.append(diag['R_max'])
 
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback,
-        retopologize_fn=retopo_fn,
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
 
     # Final

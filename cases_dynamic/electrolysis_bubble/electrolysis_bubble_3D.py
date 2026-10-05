@@ -88,7 +88,7 @@ def main():
             g=g, P0=P0,
             refinement_outer=n_refine_outer_3d,
             refinement_droplet=n_refine_drop_3d,
-            redistribute_mass=methods.redistribute_mass,
+            methods=methods,   # force + retopology built from the preset
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

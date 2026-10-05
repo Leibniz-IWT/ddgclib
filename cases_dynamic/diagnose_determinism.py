@@ -257,8 +257,7 @@ def _droplet(dim: int, preset: str, refine: tuple, steps: int, hook, callback,
         dim=dim, R0=P.R0, epsilon=P.epsilon, l=P.l, rho_d=P.rho_d,
         rho_o=P.rho_o, mu_d=P.mu_d, mu_o=P.mu_o, gamma=P.gamma, K_d=P.K_d,
         K_o=P.K_o, L_domain=P.L_domain, refinement_outer=refine[0],
-        refinement_droplet=refine[1], split_method=methods.split_method,
-        redistribute_mass=methods.redistribute_mass)
+        refinement_droplet=refine[1], methods=methods)
     hook(HC, bV)
     c_s = np.sqrt(P.K_d / P.rho_d)
     dx_min = min(d for d in (np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim])
@@ -286,7 +285,7 @@ def _dam_break(dim: int, steps, hook, callback):
         gamma=P.gamma, K_l=P.K_l, K_g=P.K_g, g=P.g,
         gravity_axis=P.gravity_axis, P_atm=P.P_atm,
         n_refine=3 if dim == 2 else P.n_refine_3d,
-        alpha_art=P.alpha_art, redistribute_mass=methods.redistribute_mass)
+        alpha_art=P.alpha_art, methods=methods)
     hook(HC, bV)
     dt = cfl_timestep(HC, dim, float(np.sqrt(P.K_l / P.rho_l)), cfl=P.cfl)
     methods.integrate(HC, bV, dudt_fn, dt=dt, n_steps=steps, bc_set=bc_set,
@@ -304,8 +303,7 @@ def _electrolysis(dim: int, steps, hook, callback):
     )
     methods = PRESETS[f'electrolysis_bubble_{dim}D']
     HC, bV, mps, bc_set, dudt_fn, _fn, params = setup_electrolysis_bubble(
-        dim=dim, refinement_outer=1, refinement_droplet=2,
-        redistribute_mass=methods.redistribute_mass)
+        dim=dim, refinement_outer=1, refinement_droplet=2, methods=methods)
     hook(HC, bV)
     methods.integrate(HC, bV, dudt_fn, dt=1e-7, n_steps=steps, bc_set=bc_set,
                       callback=callback, mps=mps)
@@ -330,8 +328,7 @@ def _shearing(dim: int, steps, hook, callback):
      params) = setup_shearing_plate_droplet(
         dim=dim, R0=sp.R0, L_x=sp.L_x, L_y=sp.L_y, U_wall=sp.U_wall,
         rho_d=sp.rho_d, rho_o=sp.rho_o, mu_d=sp.mu_d, mu_o=sp.mu_o,
-        gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o,
-        redistribute_mass=m.redistribute_mass, **kw)
+        gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o, methods=m, **kw)
     hook(HC, bV)
     m.integrate(HC, bV, dudt_fn, dt=1e-5 if dim == 2 else 1e-6,
                 n_steps=steps, bc_set=bc_set, mps=mps, callback=callback,

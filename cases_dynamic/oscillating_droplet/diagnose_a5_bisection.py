@@ -34,7 +34,6 @@ import json
 import os
 import sys
 import time
-from functools import partial
 
 import numpy as np
 
@@ -48,7 +47,6 @@ from cases_dynamic.oscillating_droplet.src._setup import (
     setup_oscillating_droplet,
 )
 from ddgclib.operators.multiphase_stress import multiphase_stress_force
-from ddgclib.dynamic_integrators import euler
 from ddgclib.data import compute_conservation
 
 
@@ -103,7 +101,17 @@ def run_a5a(
     split_method: str = 'neighbour_count',
     curvature_path: str = 'integrated',
 ) -> dict:
-    """A.5.a — frozen mesh, no retopology, evaluate F once."""
+    """A.5.a: frozen mesh, no retopology, evaluate F once.
+
+    The setup is built from ``SolverMethods(dim, phases='multi',
+    split_method=..., curvature_path=...)`` (connectivity='frozen':
+    nothing retopologizes here) and the stencil of the measurement is
+    the config's ``curvature_path``.
+    """
+    from ddgclib.methods import SolverMethods
+    methods = SolverMethods(dim=dim, phases='multi', connectivity='frozen',
+                            split_method=split_method,
+                            curvature_path=curvature_path)
     print(f"\n{'=' * 70}")
     print(f"A.5.a ({dim}D) — frozen mesh, retopology DISABLED, "
           f"split_method={split_method!r}, "
@@ -117,7 +125,7 @@ def run_a5a(
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
-            split_method=split_method,
+            methods=methods,
         )
 
     n_verts = sum(1 for _ in HC.V)
@@ -204,28 +212,39 @@ def run_a5b(
         pinned floors.  Since laneM (2026-10-05) ``methods.curvature_path``
         selects both the force in the run (``setup_oscillating_droplet(
         methods=)``) and the MEASUREMENT stencil, and the explicit
-        ``curvature_path`` kwarg is ignored; without ``methods`` the kwarg
-        still only selects the measurement stencil.
+        ``curvature_path`` kwarg is ignored.  ``None`` (laneW, 2026-10-05)
+        builds the config from the explicit kwargs: ``SolverMethods(dim,
+        phases='multi', integrator='euler', connectivity='delaunay',
+        split_method=..., redistribute_mass=..., curvature_path=...,
+        displacement_eps=...)``, i.e. what the hand-written ``euler(...)``
+        call of this function ran before, with the stencil now applied to
+        the force as well as to the measurement.
     box_shift : {'move_all', 'evict'}
         Outer box shift of the droplet builders (laneB, 2026-10-05).
         ``'evict'`` is the lossy pre-laneB mesh the floors before laneB
         were pinned on.  Recorded in the returned dict.
     """
-    if methods is not None:
-        if methods.dim != dim:
-            raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
-        split_method = methods.split_method
-        redistribute_mass = methods.redistribute_mass
-        displacement_eps = methods.displacement_eps
-        curvature_path = methods.curvature_path
+    if methods is None:
+        from ddgclib.methods import SolverMethods
+        methods = SolverMethods(
+            dim=dim, phases='multi', integrator='euler',
+            connectivity='delaunay', split_method=split_method,
+            redistribute_mass=redistribute_mass,
+            curvature_path=curvature_path,
+            displacement_eps=displacement_eps)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
+    redistribute_mass = methods.redistribute_mass
+    displacement_eps = methods.displacement_eps
+    curvature_path = methods.curvature_path
     print(f"\n{'=' * 70}")
     print(f"A.5.b ({dim}D) — retopology ON, u forced to 0 every step "
           f"({n_steps} steps), split_method={split_method!r}, "
           f"redistribute_mass={redistribute_mass}, "
           f"curvature_path={curvature_path!r}, "
           f"displacement_eps={displacement_eps!r}"
-          + (f", methods={methods.label or methods.connectivity!r}"
-             if methods is not None else ''))
+          f", methods={methods.label or methods.connectivity!r}")
     print('=' * 70)
 
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
@@ -235,8 +254,6 @@ def run_a5b(
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
-            split_method=split_method,
-            redistribute_mass=redistribute_mass,
             box_shift=box_shift,
             methods=methods,
         )
@@ -307,20 +324,10 @@ def run_a5b(
                   f"nV={step_n_verts[-1]}  nI={step_n_iface[-1]}")
 
     t0 = time.perf_counter()
-    if methods is not None:
-        methods.integrate(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
-            bc_set=bc_set, callback=zero_u_callback, mps=mps,
-        )
-    else:
-        euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-            bc_set=bc_set, callback=zero_u_callback,
-            retopologize_fn=retopo_fn,
-            remesh_mode=params['remesh_mode'],
-            remesh_kwargs=params['remesh_kwargs'],
-            displacement_eps=displacement_eps,
-        )
+    methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=zero_u_callback, mps=mps,
+    )
     wall = time.perf_counter() - t0
 
     max_F_arr = np.array(step_max_F)

@@ -37,8 +37,8 @@ from cases_dynamic.dam_break.src._params import (
 from cases_dynamic.dam_break.src._setup import (
     setup_dam_break_single_phase, cfl_timestep,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 from ddgclib.visualization.unified import plot_fluid
 
@@ -54,6 +54,12 @@ def main():
     print("2D Dam Break — Single phase (liquid only, free surface)")
     print("=" * 60)
 
+    # Solver methods (METHODS.md): single phase, symplectic Euler, per-step
+    # Delaunay, walls frozen through boundary_filter; the EOS + bare
+    # Delaunay combination is laneK's measured-unstable one (warns).
+    methods = PRESETS['dam_break_2D_no_air']
+    print(methods.describe())
+
     print("\nBuilding mesh...")
     HC, bV, bc_set, dudt_fn, params = setup_dam_break_single_phase(
         dim=dim, a=a,
@@ -61,6 +67,7 @@ def main():
         rho_l=rho_l, mu_l=mu_l, K_l=K_l,
         g=g, gravity_axis=gravity_axis, P_atm=P_atm,
         n_refine=n_refine_2d, alpha_art=alpha_art,
+        methods=methods,
     )
     n_verts = sum(1 for _ in HC.V)
     n_free = len(params['free_face'])
@@ -116,8 +123,8 @@ def main():
         return bool(getattr(v, 'is_wall', False))
 
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
             bc_set=bc_set, callback=callback,
             boundary_filter=_wall_filter,
         )
@@ -127,6 +134,15 @@ def main():
         print(f"  recorded {history.n_snapshots} snapshots before abort")
     print(f"Simulation finished at t={t_final:.4f} s, "
           f"snapshots recorded: {history.n_snapshots}")
+    record_methods(
+        os.path.join(_RESULTS, 'methods_2D_no_air.json'), methods, HC,
+        extra={'dt': dt, 'n_steps': n_steps, 't_end': t_end,
+               't_final': t_final, 'n_refine': n_refine_2d,
+               'alpha_art': alpha_art, 'cfl': cfl,
+               'body_force': dudt_fn.body_force.tolist(),
+               'boundary_filter': 'v.is_wall (tank walls frozen, free '
+                                  'surface advects)'},
+    )
 
     # -- Static plot --
     try:

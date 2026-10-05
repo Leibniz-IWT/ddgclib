@@ -641,15 +641,26 @@ m = PRESETS['shearing_plate_droplet_2D']
 HC, bV, mps, bc_set, dudt_fn, retopo_fn, groups, params = setup_shearing_plate_droplet(
     dim=2, R0=sp.R0, L_x=sp.L_x, L_y=sp.L_y, U_wall=sp.U_wall, rho_d=sp.rho_d,
     rho_o=sp.rho_o, mu_d=sp.mu_d, mu_o=sp.mu_o, gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o,
-    refinement_outer=3, refinement_droplet=3, redistribute_mass=m.redistribute_mass)
+    refinement_outer=3, refinement_droplet=3, methods=m)
 if {use_wrapper}:
     fn = m.retopologize_fn(mps=mps, domain_bounds=params['domain_bounds'])
     assert fn.keywords['periodic_axes'] == list(params['periodic_axes'])
     m.integrate(HC, bV, dudt_fn, dt=1e-5, n_steps=3, bc_set=bc_set, mps=mps,
                 domain_bounds=params['domain_bounds'])
 else:
+    # the closure the setup carried before laneW (_make_periodic_multiphase_retopo)
+    from ddgclib.geometry.periodic import retopologize_periodic
+    from ddgclib.operators.mass_redistribution import (
+        redistribute_mass_multiphase, snapshot_geometry_multiphase)
+    def closure(HC, bV, dim, remesh_mode='delaunay', remesh_kwargs=None):
+        snap = snapshot_geometry_multiphase(HC, mps.n_phases)
+        retopologize_periodic(HC, bV, dim, periodic_axes=list(params['periodic_axes']),
+                              domain_bounds=params['domain_bounds'])
+        mps.refresh(HC, dim, reset_mass=False, split_method='neighbour_count')
+        redistribute_mass_multiphase(HC, dim, mps, bV=bV, pressure_snapshot=snap)
+        mps.compute_phase_pressures(HC)
     symplectic_euler(HC, bV, dudt_fn, dt=1e-5, n_steps=3, dim=2, bc_set=bc_set,
-                     retopologize_fn=retopo_fn, remesh_mode=params['remesh_mode'],
+                     retopologize_fn=closure, remesh_mode=params['remesh_mode'],
                      remesh_kwargs=params['remesh_kwargs'])
 state = sorted((tuple(v.x_a[:2]), tuple(v.u[:2]), float(v.m),
                 tuple(float(p) for p in v.p_phase)) for v in HC.V)
@@ -658,11 +669,11 @@ print('STATE', hashlib.sha256(repr(state).encode()).hexdigest(), len(state))
 
     def test_periodic_multiphase_is_bit_identical_to_shearing_wrapper(self):
         """shearing_plate_droplet/src/_setup.py built a periodic multiphase
-        closure; connectivity='periodic' + phases='multi' selects the
-        library copy.  Three steps of the shipped 2D configuration must
-        agree to the bit.  Each variant runs in its own interpreter: the
-        case setup is not re-entrant (a second call in one process crashes
-        on the outer-vertex rescale key collision, audit 2026-09-25)."""
+        closure until laneW (kept verbatim in the probe above);
+        connectivity='periodic' + phases='multi' selects the library copy.
+        Three steps of the shipped 2D configuration must agree to the bit.
+        Each variant runs in its own interpreter (the probe was written
+        when the case setup was not re-entrant, audit 2026-09-25)."""
         from pathlib import Path
         root = str(Path(__file__).resolve().parents[2])
         digests = []
@@ -677,8 +688,14 @@ print('STATE', hashlib.sha256(repr(state).encode()).hexdigest(), len(state))
         assert digests[0] == digests[1]
 
     def test_electrolysis_presets_match_setup_partials(self):
+        """The partial the electrolysis setup bound by hand until laneW:
+        partial(_retopologize_multiphase, mps, split_method=
+        'neighbour_count', redistribute_mass=...)."""
         from cases_dynamic.electrolysis_bubble.src._setup import (
             setup_electrolysis_bubble,
+        )
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
         )
         m = PRESETS['electrolysis_bubble_2D']
         with warnings.catch_warnings():
@@ -687,12 +704,219 @@ print('STATE', hashlib.sha256(repr(state).encode()).hexdigest(), len(state))
                 setup_electrolysis_bubble(
                     dim=2, refinement_outer=1, refinement_droplet=2,
                     redistribute_mass=m.redistribute_mass)
-        wrap_fn = m.retopologize_fn(mps=mps)
-        assert wrap_fn.func is retopo_fn.func
-        assert wrap_fn.keywords == retopo_fn.keywords
+        case_fn = partial(_retopologize_multiphase, mps=mps,
+                          split_method='neighbour_count',
+                          redistribute_mass=True)
+        for fn in (retopo_fn, m.retopologize_fn(mps=mps)):
+            assert fn.func is case_fn.func
+            assert fn.keywords == case_fn.keywords
         # fritz: redistribute_mass unbound in the case -> integrator default
         # False, which the preset states explicitly
         assert PRESETS['electrolysis_bubble_fritz_2D'].redistribute_mass is False
+
+
+# ---------------------------------------------------------------------------
+# laneW (2026-10-05): every setup builds its force and its retopology
+# function from SolverMethods, so a recorded force axis is an applied one
+# ---------------------------------------------------------------------------
+
+def _multiphase_keywords(fn):
+    """(func, keyword names) of a multiphase stress partial, through the
+    body-force / guard wrappers."""
+    inner = getattr(fn, 'stress_fn', fn)
+    return inner.func, set(inner.keywords)
+
+
+_HISTORIC_MULTI = {'dim', 'mps', 'HC', 'pressure_model'}
+
+
+class TestSetupsBuildFromMethods:
+    def test_droplet(self, droplet_2d):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
+        )
+        from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+        # no config: the partials the setup used to build by hand
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = droplet_2d()
+        assert _multiphase_keywords(dudt_fn) == (multiphase_dudt_i,
+                                                 _HISTORIC_MULTI)
+        assert dudt_fn.keywords['mps'] is mps and dudt_fn.keywords['HC'] is HC
+        assert retopo_fn.func is _retopologize_multiphase
+        assert retopo_fn.keywords == dict(mps=mps, split_method='neighbour_count',
+                                          redistribute_mass=True)
+        # a preset with non-default force axes: applied, not only recorded
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')      # dual_midpoint is 'broken'
+            m = PRESETS['oscillating_droplet_2D'].replace(
+                curvature_path='csf_dual', area_orientation='dual_midpoint')
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = droplet_2d(methods=m)
+        assert dudt_fn.keywords['curvature_path'] == 'csf_dual'
+        assert dudt_fn.keywords['area_orientation'] == 'dual_midpoint'
+        assert retopo_fn.keywords['retopo_remap'] == 'conservative'
+        with pytest.raises(ValueError, match='dim'):
+            droplet_2d(methods=PRESETS['oscillating_droplet_3D'])
+
+    @staticmethod
+    def _dam_break(**kw):
+        from cases_dynamic.dam_break.src import _params as p
+        from cases_dynamic.dam_break.src._setup import (
+            setup_dam_break_multiphase,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            return setup_dam_break_multiphase(
+                dim=2, a=p.a, L=p.L, H=p.H, W=p.W, col_w=p.col_w,
+                col_h=p.col_h, col_d=p.col_d, rho_l=p.rho_l, rho_g=p.rho_g,
+                mu_l=p.mu_l, mu_g=p.mu_g, gamma=p.gamma, K_l=p.K_l,
+                K_g=p.K_g, g=p.g, gravity_axis=p.gravity_axis, P_atm=p.P_atm,
+                n_refine=2, alpha_art=p.alpha_art, **kw), p.g
+
+    def test_dam_break_multiphase(self):
+        from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+        m = PRESETS['dam_break_2D']
+        (HC, bV, mps, bc_set, dudt_fn, retopo_fn, params), g = \
+            self._dam_break(methods=m)
+        # the historic partial + the historic gravity closure
+        assert _multiphase_keywords(dudt_fn) == (multiphase_dudt_i,
+                                                 _HISTORIC_MULTI)
+        g_vec = np.array([0.0, -g])
+        np.testing.assert_array_equal(dudt_fn.body_force, g_vec)
+        v = next(v for v in HC.V if not v.boundary)
+        np.testing.assert_array_equal(dudt_fn(v), dudt_fn.stress_fn(v) + g_vec)
+        assert retopo_fn.keywords == dict(
+            mps=mps, split_method='neighbour_count', redistribute_mass=True,
+            retopo_remap='conservative', frozen_set='membership')
+        # no config: the setup's own partial (redistribute_mass kwarg)
+        (HC2, bV2, mps2, _, dudt2, retopo2, _), _ = \
+            self._dam_break(redistribute_mass=True)
+        assert _multiphase_keywords(dudt2) == _multiphase_keywords(dudt_fn)
+        assert retopo2.keywords == dict(mps=mps2, split_method='neighbour_count',
+                                        redistribute_mass=True)
+        # a force axis of the config is applied
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')      # dual_midpoint is 'broken'
+            m_legacy = m.replace(area_orientation='dual_midpoint')
+        (_, _, _, _, dudt3, _, _), _ = self._dam_break(methods=m_legacy)
+        assert dudt3.stress_fn.keywords['area_orientation'] == 'dual_midpoint'
+
+    def test_dam_break_single_phase(self):
+        from cases_dynamic.dam_break.src import _params as p
+        from cases_dynamic.dam_break.src._setup import (
+            setup_dam_break_single_phase,
+        )
+        from ddgclib.operators.stress import stress_acceleration
+
+        def build(**kw):
+            return setup_dam_break_single_phase(
+                dim=2, a=p.a, col_w=p.col_w, col_h=p.col_h, col_d=p.col_d,
+                rho_l=p.rho_l, mu_l=p.mu_l, K_l=p.K_l, g=p.g,
+                gravity_axis=p.gravity_axis, P_atm=p.P_atm, n_refine=2,
+                alpha_art=p.alpha_art, **kw)
+
+        # the configuration is laneK's measured-unstable one: it warns
+        with pytest.warns(UserWarning, match='UNSTABLE'):
+            HC, bV, bc_set, dudt_fn, params = build(
+                methods=PRESETS['dam_break_2D_no_air'])
+        stress = dudt_fn.stress_fn
+        assert stress.func is stress_acceleration
+        assert set(stress.keywords) == {'dim', 'mu', 'HC', 'pressure_model'}
+        assert stress.keywords['HC'] is HC
+        assert hasattr(stress.keywords['pressure_model'], 'density')
+        np.testing.assert_array_equal(dudt_fn.body_force, [0.0, -p.g])
+        v = next(v for v in HC.V if not v.boundary)
+        np.testing.assert_array_equal(dudt_fn(v),
+                                      stress(v) + np.array([0.0, -p.g]))
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            _, _, _, dudt2, _ = build()      # no config: the same partial
+        assert set(dudt2.stress_fn.keywords) == set(stress.keywords)
+
+    def test_electrolysis(self):
+        from cases_dynamic.electrolysis_bubble.src._setup import (
+            electrolysis_dudt, setup_electrolysis_bubble,
+        )
+        from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+        m = PRESETS['electrolysis_bubble_2D']
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+                setup_electrolysis_bubble(
+                    dim=2, refinement_outer=1, refinement_droplet=2,
+                    methods=m)
+        stress = dudt_fn.stress_fn
+        assert _multiphase_keywords(dudt_fn) == (multiphase_dudt_i,
+                                                 _HISTORIC_MULTI)
+        g_vec = params['gravity_vec']
+        np.testing.assert_array_equal(dudt_fn.body_force, g_vec)
+        v = next(v for v in HC.V if not v.boundary)
+        assert np.isfinite(v.m) and v.m > 1e-30
+        np.testing.assert_array_equal(dudt_fn(v), stress(v) + g_vec)
+        # the guard of the historic closure: degenerate mass -> zero
+        m_v = v.m
+        v.m = 0.0
+        np.testing.assert_array_equal(dudt_fn(v), np.zeros(2))
+        v.m = m_v
+        assert retopo_fn.keywords == dict(mps=mps, split_method='neighbour_count',
+                                          redistribute_mass=True)
+        # a force axis of the config is applied
+        fn = electrolysis_dudt(m.replace(curvature_path='csf_dual'), HC, mps,
+                               params['meos'], g_vec)
+        assert fn.stress_fn.keywords['curvature_path'] == 'csf_dual'
+        # the Fritz runner's wiring: the same guard and the fritz preset's
+        # retopology (no redistribution)
+        from cases_dynamic.electrolysis_bubble.electrolysis_bubble_fritz_2D import (
+            setup_fritz_dynamics,
+        )
+        meta = {'L_domain': params['L_domain'],
+                'electrode_z': params['wall_bottom'], 'R_top': params['R0']}
+        mf = PRESETS['electrolysis_bubble_fritz_2D']
+        bc_f, dudt_f, retopo_f = setup_fritz_dynamics(HC, bV, mps, meta,
+                                                      methods=mf)
+        assert _multiphase_keywords(dudt_f) == (multiphase_dudt_i,
+                                                _HISTORIC_MULTI)
+        np.testing.assert_array_equal(dudt_f.body_force, g_vec)
+        assert retopo_f.keywords == dict(mps=mps, split_method='neighbour_count',
+                                         redistribute_mass=False)
+        _, _, retopo_f0 = setup_fritz_dynamics(HC, bV, mps, meta)
+        assert retopo_f0.keywords == retopo_f.keywords
+
+    def test_shearing_plate(self):
+        from cases_dynamic.shearing_plate_droplet.src import _params as sp
+        from cases_dynamic.shearing_plate_droplet.src._setup import (
+            setup_shearing_plate_droplet,
+        )
+        from ddgclib.methods._retopo import retopologize_multiphase_periodic
+        from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+
+        def build(**kw):
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                return setup_shearing_plate_droplet(
+                    dim=2, R0=sp.R0, L_x=sp.L_x, L_y=sp.L_y, U_wall=sp.U_wall,
+                    rho_d=sp.rho_d, rho_o=sp.rho_o, mu_d=sp.mu_d, mu_o=sp.mu_o,
+                    gamma=sp.gamma, K_d=sp.K_d, K_o=sp.K_o,
+                    refinement_outer=2, refinement_droplet=2, **kw)
+
+        m = PRESETS['shearing_plate_droplet_2D']
+        HC, bV, mps, bc_set, dudt_fn, retopo_fn, groups, params = build(methods=m)
+        assert _multiphase_keywords(dudt_fn) == (multiphase_dudt_i,
+                                                 _HISTORIC_MULTI)
+        assert retopo_fn.func is retopologize_multiphase_periodic
+        assert retopo_fn.keywords == dict(
+            mps=mps, periodic_axes=[0],
+            domain_bounds=[(-sp.L_x, sp.L_x), (-sp.L_y, sp.L_y)],
+            split_method='neighbour_count', redistribute_mass=True)
+        assert params['periodic_axes'] == [0]
+        # the setup runs on the periodic connectivity only
+        with pytest.raises(ValueError, match='periodic'):
+            build(methods=PRESETS['oscillating_droplet_2D'])
+        # a force axis of the config is applied
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')      # dual_midpoint is 'broken'
+            m_legacy = m.replace(area_orientation='dual_midpoint')
+        *_, dudt2, retopo2, _, _ = build(methods=m_legacy)
+        assert dudt2.keywords['area_orientation'] == 'dual_midpoint'
+        assert retopo2.keywords['redistribute_mass'] is True
 
 
 # ---------------------------------------------------------------------------

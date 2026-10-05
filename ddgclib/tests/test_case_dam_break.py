@@ -50,7 +50,7 @@ def _build_2d(alpha=alpha_art):
         gamma=gamma, K_l=K_l, K_g=K_g,
         g=g, gravity_axis=gravity_axis, P_atm=P_atm,
         n_refine=3, alpha_art=alpha,
-        redistribute_mass=METHODS.redistribute_mass,
+        methods=METHODS,
     )
 
 

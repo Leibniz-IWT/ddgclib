@@ -91,8 +91,9 @@ def main(box_shift: str = 'move_all'):
 
     # -- Setup --
     print("\nBuilding mesh...")
-    # split_method / redistribute_mass MUST match between setup and the
-    # runtime retopology (see setup docstring); the preset owns both.
+    # The preset owns every method choice of the setup (split_method,
+    # redistribute_mass at mps.refresh; the force axes in dudt_fn) and of
+    # the run (methods.integrate below): setup and runtime cannot drift.
     HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
@@ -100,10 +101,8 @@ def main(box_shift: str = 'move_all'):
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
-            split_method=methods.split_method,
-            redistribute_mass=methods.redistribute_mass,
             box_shift=box_shift,
-            methods=methods,   # force axes (curvature_path, ...) bound
+            methods=methods,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

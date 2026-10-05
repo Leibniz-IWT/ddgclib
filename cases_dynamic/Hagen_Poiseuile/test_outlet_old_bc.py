@@ -9,7 +9,6 @@ Usage:
 """
 
 import numpy as np
-from functools import partial
 
 from hyperct import Complex
 from hyperct.ddg import compute_vd
@@ -25,8 +24,7 @@ from ddgclib.initial_conditions import (
     LinearPressureGradient,
     UniformMass,
 )
-from ddgclib.operators.stress import dudt_i
-from ddgclib.dynamic_integrators import symplectic_euler
+from ddgclib.methods import SolverMethods
 from ddgclib.geometry._complex_operations import extrude
 
 # --- Parameters (match HP2D case) ---
@@ -82,7 +80,11 @@ ic = CompositeIC(
 ic.apply(HC, bV)
 bc_set.apply_all(HC, bV, dt=0.0)
 
-dudt_fn = partial(dudt_i, dim=d, mu=mu, HC=HC)
+# Solver configuration (METHODS.md): symplectic Euler, per-step Delaunay,
+# walls frozen through boundary_filter, serial force evaluation.
+methods = SolverMethods(dim=d, workers=1,
+                        label='Hagen_Poiseuile/test_outlet_old_bc.py')
+dudt_fn = methods.dudt_fn(HC, mu=mu)
 
 # --- Callback ---
 print(f"{'Step':>6}  {'t':>7}  {'Verts':>5}  {'bV':>3}  "
@@ -119,10 +121,10 @@ def callback(step, t, HC, bV, diag):
 print(f"\nOLD BC: OutletDeleteBC(outlet_pos={L + outlet_buffer}, backflow_clamp=2.0)")
 print(f"Running {n_steps} steps, dt={dt}\n")
 
-t_final = symplectic_euler(
-    HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=d,
+t_final = methods.integrate(
+    HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
     bc_set=bc_set, boundary_filter=wall_criterion,
-    callback=callback, workers=1,
+    callback=callback,
 )
 
 n_final = sum(1 for _ in HC.V)

@@ -64,7 +64,7 @@ def main():
             gamma=gamma, K_l=K_l, K_g=K_g,
             g=g, gravity_axis=gravity_axis, P_atm=P_atm,
             n_refine=n_refine_2d, alpha_art=alpha_art,
-            redistribute_mass=methods.redistribute_mass,
+            methods=methods,   # force + retopology built from the preset
         )
     n_verts = sum(1 for _ in HC.V)
     n_liq = sum(1 for v in HC.V if v.phase == 1)
@@ -140,7 +140,7 @@ def main():
         extra={'dt': dt, 'n_steps': n_steps, 't_end': t_end,
                't_final': t_final, 'n_refine': n_refine_2d,
                'alpha_art': alpha_art, 'cfl': cfl,
-               'body_force': f'g={g} on axis {gravity_axis} (setup closure)'},
+               'body_force': dudt_fn.body_force.tolist()},
     )
 
     # -- Static plots --

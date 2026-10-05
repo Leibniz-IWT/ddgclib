@@ -100,10 +100,8 @@ def main(retopo_policy: str | None = None, box_shift: str = 'move_all'):
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=2,
             refinement_droplet=2,
-            split_method=methods.split_method,
-            redistribute_mass=methods.redistribute_mass,
             box_shift=box_shift,
-            methods=methods,   # force axes (curvature_path, ...) bound
+            methods=methods,   # every method choice of the setup and run
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

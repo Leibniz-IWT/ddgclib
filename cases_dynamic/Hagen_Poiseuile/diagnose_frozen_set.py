@@ -78,7 +78,7 @@ def build_dam_break_2d(args):
         col_d=p.col_d, rho_l=p.rho_l, rho_g=p.rho_g, mu_l=p.mu_l,
         mu_g=p.mu_g, gamma=p.gamma, K_l=p.K_l, K_g=p.K_g, g=p.g,
         gravity_axis=p.gravity_axis, P_atm=p.P_atm, n_refine=refine,
-        alpha_art=alpha, redistribute_mass=methods.redistribute_mass)
+        alpha_art=alpha, methods=methods)
     dt = cfl_timestep(HC, 2, float(np.sqrt(p.K_l / p.rho_l)), cfl=p.cfl)
     n_steps = args.steps if args.steps is not None else int(t_end / dt) + 1
     kw = dict(dt=dt, n_steps=n_steps, bc_set=bc_set, mps=mps)
@@ -110,8 +110,7 @@ def _build_electrolysis(args, dim):
         rho_gas=p.rho_gas, mu_liq=p.mu_liq, mu_gas=p.mu_gas, gamma=p.gamma,
         K_liq=p.K_liq, K_gas=p.K_gas, g=p.g, P0=p.P0,
         refinement_outer=ro, refinement_droplet=rd,
-        redistribute_mass=methods.redistribute_mass,
-        box_shift=args.box_shift)
+        methods=methods, box_shift=args.box_shift)
     c_s = max(np.sqrt(p.K_liq / p.rho_liq), np.sqrt(p.K_gas / p.rho_gas))
     dx_min = min(d for d in (np.linalg.norm(v.x_a[:dim] - nb.x_a[:dim])
                              for v in HC.V for nb in v.nn) if d > 1e-15)
@@ -152,9 +151,7 @@ def build_droplet_2d(args):
     R0, L = 0.01, 0.05
     HC, bV, mps, bc_set, dudt_fn, _r, params = setup_oscillating_droplet(
         dim=2, R0=R0, epsilon=0.05, l=2, L_domain=L, refinement_outer=2,
-        refinement_droplet=2, split_method=methods.split_method,
-        redistribute_mass=methods.redistribute_mass,
-        box_shift=args.box_shift)
+        refinement_droplet=2, methods=methods, box_shift=args.box_shift)
     n_steps = args.steps if args.steps is not None else 200
     kw = dict(dt=args.dt if args.dt is not None else 2e-5, n_steps=n_steps,
               bc_set=bc_set, mps=mps)

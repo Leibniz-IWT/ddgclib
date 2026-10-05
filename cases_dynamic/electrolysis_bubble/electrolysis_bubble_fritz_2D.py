@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import os
 import sys
-from functools import partial
 
 import numpy as np
 
@@ -59,16 +58,14 @@ from ddgclib.multiphase import (
 from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
 from ddgclib.multiphase import mass_conserving_merge
 from ddgclib.operators.stress import cache_dual_volumes
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet, NoSlipWallBC,
 )
 from ddgclib.visualization import plot_fluid
 
-from cases_dynamic.electrolysis_bubble.src._setup import WallClampBC
+from cases_dynamic.electrolysis_bubble.src._setup import (
+    WallClampBC, electrolysis_dudt,
+)
 
 from cases_dynamic.electrolysis_bubble.src._params import (
     R0, L_domain, rho_liq, rho_gas, mu_liq, mu_gas,
@@ -717,17 +714,24 @@ def _apply_fritz_ic(HC, mps, meta, *,
 # Dynamic-run wiring (BCs, dudt, retopology)
 # =====================================================================
 
-def setup_fritz_dynamics(HC, bV, mps, meta):
+def setup_fritz_dynamics(HC, bV, mps, meta, methods=None):
     """Build ``bc_set, dudt_fn, retopo_fn`` for the Fritz mesh.
 
-    Mirrors the wall-clamp + multiphase-stress + gravity recipe from
-    ``setup_electrolysis_bubble``, parameterised by the Fritz mesh
-    metadata.  The returned callables plug straight into
-    ``symplectic_euler(HC, bV, dudt_fn, ..., bc_set=bc_set,
-    retopologize_fn=retopo_fn)``.
+    The wall-clamp BCs of ``setup_electrolysis_bubble`` parameterised by
+    the Fritz mesh metadata; the force is the same guarded
+    ``electrolysis_dudt`` (``methods.dudt_fn(..., body_force=g)``) and
+    the retopology ``methods.retopologize_fn(mps=mps)``.  *methods* is
+    ``PRESETS['electrolysis_bubble_fritz_2D']`` normally; ``None`` =
+    ``SolverMethods(dim=2, phases='multi')`` (per-step Delaunay, no
+    redistribution: the partials this function used to build by hand).
     """
+    from ddgclib.methods import SolverMethods
     dim = 2
     axis = dim - 1
+    if methods is None:
+        methods = SolverMethods(dim=dim, phases='multi')
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
     L_dom = meta['L_domain']
     wall_bottom = meta['electrode_z']
     wall_top = wall_bottom + 2.0 * L_dom
@@ -749,26 +753,10 @@ def setup_fritz_dynamics(HC, bV, mps, meta):
     eos_liq = mps.phases[0].eos
     eos_gas = mps.phases[1].eos
     meos = MultiphaseEOS([eos_liq, eos_gas])
-
-    _base_dudt = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
     gravity_vec = np.zeros(dim)
     gravity_vec[axis] = -g
-
-    def dudt_fn(v, **_kw):
-        if not np.isfinite(v.m) or v.m < 1e-30:
-            return np.zeros(dim)
-        a = _base_dudt(v)
-        if not np.all(np.isfinite(a)):
-            return np.zeros(dim)
-        return a + gravity_vec
-
-    retopo_fn = partial(
-        _retopologize_multiphase, mps=mps,
-        split_method='neighbour_count',
-    )
+    dudt_fn = electrolysis_dudt(methods, HC, mps, meos, gravity_vec)
+    retopo_fn = methods.retopologize_fn(mps=mps)
     return bc_set, dudt_fn, retopo_fn
 
 
@@ -781,11 +769,12 @@ def run_short_dynamics(HC, bV, mps, meta, *,
     in place (positions, velocities, pressures, dual volumes).
     """
     dim = 2
-    bc_set, dudt_fn, _setup_retopo_fn = setup_fritz_dynamics(HC, bV, mps, meta)
     # Solver methods (METHODS.md): per-step Delaunay, NO redistribution
     # (the historic partial left it unbound -> integrator default False).
     from ddgclib.methods import PRESETS, record_methods
     methods = PRESETS['electrolysis_bubble_fritz_2D']
+    bc_set, dudt_fn, _setup_retopo_fn = setup_fritz_dynamics(
+        HC, bV, mps, meta, methods=methods)
 
     c_s_liq = float(np.sqrt(K_liq / rho_liq))
     c_s_gas = float(np.sqrt(K_gas / rho_gas))

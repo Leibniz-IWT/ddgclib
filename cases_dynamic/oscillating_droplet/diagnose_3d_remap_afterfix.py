@@ -72,8 +72,7 @@ def main():
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=2,
             refinement_droplet=2,
-            split_method=methods.split_method,
-            redistribute_mass=methods.redistribute_mass,
+            methods=methods,
         )
     print(f"Mesh: {sum(1 for _ in HC.V)} vertices, "
           f"{sum(1 for v in HC.V if getattr(v, 'is_interface', False))} "

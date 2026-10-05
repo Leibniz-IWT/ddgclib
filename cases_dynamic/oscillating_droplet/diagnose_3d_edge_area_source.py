@@ -89,8 +89,7 @@ def _setup(methods, eps, refine=2):
         dim=3, R0=R0, epsilon=eps, l=l, rho_d=rho_d, rho_o=rho_o,
         mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
         L_domain=L_domain, refinement_outer=refine, refinement_droplet=refine,
-        split_method=methods.split_method,
-        redistribute_mass=methods.redistribute_mass,
+        methods=methods,
     )
 
 
@@ -550,8 +549,7 @@ def run_dambreak(n_steps: int, arms=('cache', 'pij_simplex', 'pij')) -> dict:
             dim=3, a=a, L=L, H=H, W=W, col_w=col_w, col_h=col_h, col_d=col_d,
             rho_l=rho_l, rho_g=rho_g, mu_l=mu_l, mu_g=mu_g, gamma=gam,
             K_l=K_l, K_g=K_g, g=g, gravity_axis=gravity_axis, P_atm=P_atm,
-            n_refine=n_refine_3d, alpha_art=alpha_art,
-            redistribute_mass=m.redistribute_mass)
+            n_refine=n_refine_3d, alpha_art=alpha_art, methods=m)
         c_s = np.sqrt(K_l / rho_l)
         dt = cfl_timestep(HC, 3, c_s, cfl=cfl)
         m0 = compute_conservation(HC, dim=3)['mass_total']

@@ -177,7 +177,18 @@ _AXES: list[MethodAxis] = [
             _opt('multi', 'Sharp-interface n-phase model on MultiphaseSystem; '
                  'per-phase summed stress + surface tension', 'validated',
                  'ddgclib/operators/multiphase_stress.py:multiphase_stress_force',
-                 'oscillating droplet 2D/3D pins (test_case_oscillating_droplet.py)'),
+                 'oscillating droplet 2D/3D pins (test_case_oscillating_droplet.py). '
+                 'laneW 2026-10-05: every multiphase setup (droplet, dam break, '
+                 'electrolysis + Fritz, shearing plate) builds its force and '
+                 'retopology function from SolverMethods (dudt_fn with '
+                 'body_force= for gravity, retopologize_fn); no setup, shipped '
+                 'runner or maintained driver binds multiphase_dudt_i or '
+                 '_retopologize_multiphase by hand (the unconverted stale '
+                 'driver diagnose_split_methods.py and the other exceptions '
+                 'are listed in the laneW log, section 9) '
+                 '(test_methods.py::TestSetupsBuildFromMethods; every pin, both '
+                 'droplet baselines and the lane L / B smoke digests '
+                 'bit-identical)'),
         ),
     ),
     # ------------------------------------------------------------------
@@ -631,8 +642,12 @@ _AXES: list[MethodAxis] = [
         name='curvature_path', title='Interface curvature / surface-tension stencil',
         group='forces', default='integrated', applies_to='multi',
         control='curvature_path= on multiphase_dudt_i (dudt partial); bound '
-                'into the droplet setup through setup_oscillating_droplet('
-                'methods=) since laneM',
+                'by SolverMethods.dudt_fn, which every multiphase setup '
+                'calls (setup_oscillating_droplet(methods=) since laneM; '
+                'setup_dam_break_multiphase, setup_electrolysis_bubble, '
+                'setup_fritz_dynamics and setup_shearing_plate_droplet since '
+                'laneW, 2026-10-05): the value on a preset is applied, not '
+                'only recorded (test_methods.py::TestSetupsBuildFromMethods)',
         notes='laneM 2026-10-05 (' + _LANE + 'laneM-curvature-path.md). The '
               "value 'stokes' (2026-05-27 Probe 2: the conormal boundary "
               'integral of the interface over the barycentric dual cell, '
@@ -845,7 +860,10 @@ _AXES: list[MethodAxis] = [
                 'sources and the 1D sign ignore it; operators that read '
                 'dual_area_vector outside the force (density_diffusion_step, '
                 'scalar_gradient_integrated, the csf_dual curvature path) '
-                'always use the default',
+                'always use the default. Reaches every case force since '
+                'laneW (2026-10-05): the droplet, dam-break (both phases), '
+                'electrolysis (+ Fritz) and shearing-plate setups build their '
+                'force with SolverMethods.dudt_fn (recorded = applied)',
         notes='Added 2026-10-05 (laneO). The 2D dual face of an edge is the '
               'segment between the two dual vertices (barycentres, or '
               'barycentre and edge midpoint on the hull) the endpoints share; '

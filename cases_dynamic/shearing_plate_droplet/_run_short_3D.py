@@ -47,7 +47,7 @@ def main():
             K_d=K_d, K_o=K_o,
             refinement_outer=1,
             refinement_droplet=2,
-            redistribute_mass=methods.redistribute_mass,
+            methods=methods,   # force + periodic retopology from the preset
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

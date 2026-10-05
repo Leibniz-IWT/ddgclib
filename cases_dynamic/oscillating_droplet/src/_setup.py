@@ -2,11 +2,11 @@
 
 Constructs the multiphase mesh, applies initial conditions with
 an ellipsoidal perturbation, and returns all objects needed to
-run the simulation.
+run the simulation.  The force and the retopology function are built
+by :class:`ddgclib.methods.SolverMethods` (``methods.dudt_fn`` /
+``methods.retopologize_fn``), never by hand (laneW, 2026-10-05).
 """
 from __future__ import annotations
-
-from functools import partial
 
 import numpy as np
 
@@ -15,10 +15,7 @@ from ddgclib.multiphase import MultiphaseSystem, PhaseProperties, mass_conservin
 from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
 from ddgclib.geometry.domains import droplet_in_box_2d, droplet_in_box_3d
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
+from ddgclib.methods import SolverMethods
 
 
 def setup_oscillating_droplet(
@@ -100,13 +97,18 @@ def setup_oscillating_droplet(
         choice, recorded in ``params['box_shift']`` and in the ``extra``
         block of the runners' ``methods.json``, not a solver method axis.
     methods : ddgclib.methods.SolverMethods or None
-        When given (laneM, 2026-10-05), ``split_method`` and
-        ``redistribute_mass`` are taken from the config (the explicit
-        kwargs above are ignored) and ``dudt_fn`` is built by
-        ``methods.dudt_fn``, so the force axes of the preset
-        (``curvature_path``, ``area_orientation``) reach the force.  For
-        a preset at the default force axes the partial is the one this
-        function builds by hand (same callable, same keywords).
+        The solver configuration (a preset, normally).  ``split_method``
+        and ``redistribute_mass`` are taken from it (the explicit kwargs
+        above are ignored), ``dudt_fn`` is ``methods.dudt_fn(HC, mps=mps,
+        pressure_model=meos)`` so the force axes of the preset
+        (``curvature_path``, ``area_orientation``) are applied, and
+        ``retopo_fn`` is ``methods.retopologize_fn(mps=mps)`` (laneM /
+        laneW, 2026-10-05).  ``None`` builds the configuration from the
+        explicit kwargs: ``SolverMethods(dim, phases='multi',
+        split_method=..., redistribute_mass=...)`` (per-step Delaunay,
+        no remap, the default force axes), whose partials are the ones
+        this function used to build by hand (same callables, same
+        keywords; ``ddgclib/tests/test_methods.py``).
 
     Returns
     -------
@@ -120,14 +122,20 @@ def setup_oscillating_droplet(
         Boundary condition container.
     dudt_fn : callable
         Acceleration function for integrators.
+    retopo_fn : callable
+        ``methods.retopologize_fn(mps=mps)``; the runners let
+        ``methods.integrate`` build it again.
     params : dict
         All parameters for reference.
     """
-    if methods is not None:
-        if methods.dim != dim:
-            raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
-        split_method = methods.split_method
-        redistribute_mass = methods.redistribute_mass
+    if methods is None:
+        methods = SolverMethods(dim=dim, phases='multi',
+                                split_method=split_method,
+                                redistribute_mass=redistribute_mass)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
+    redistribute_mass = methods.redistribute_mass
 
     # -- Compute bulk moduli if not given --
     if K_d is None:
@@ -233,33 +241,14 @@ def setup_oscillating_droplet(
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), result.boundary_groups['walls'])
 
-    # -- Build acceleration function --
+    # -- Acceleration and retopology functions: from the configuration --
+    # (connectivity='adaptive' is exercised by
+    # oscillating_droplet_2D_adaptive.py; the two upstream hyperct.remesh
+    # issues that used to blow up this case were fixed 2026-07-02,
+    # lane4-remesh-upstream; the pinned floor tests keep 'delaunay').
     meos = MultiphaseEOS([eos_outer, eos_drop])
-    if methods is not None:
-        dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
-    else:
-        dudt_fn = partial(
-            multiphase_dudt_i,
-            dim=dim, mps=mps, HC=HC, pressure_model=meos,
-        )
-
-    # -- Retopologize function --
-    # Stays on global Delaunay by default.  The two upstream
-    # hyperct.remesh issues that used to blow up this case were fixed
-    # 2026-07-02 (lane4-remesh-upstream):
-    #   1. edge_split_2d now transfers a conservative mass share FROM
-    #      the endpoints (sum(m) and sum(m_phase) invariant) instead of
-    #      assigning the midpoint the arithmetic mean of its endpoints.
-    #   2. adaptive_remesh defaults to a per-edge local length scale
-    #      (length_scale='local'), so a mixed fine-droplet /
-    #      coarse-outer mesh no longer triggers unbounded splits.
-    # remesh_mode='adaptive' is exercised by
-    # oscillating_droplet_2D_adaptive.py; the pinned floor tests keep
-    # using 'delaunay'.
-    adaptive_kwargs = None
-    retopo_fn = partial(_retopologize_multiphase, mps=mps,
-                        split_method=split_method,
-                        redistribute_mass=redistribute_mass)
+    dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
+    retopo_fn = methods.retopologize_fn(mps=mps)
 
     # -- Collect params --
     params = {
@@ -271,7 +260,7 @@ def setup_oscillating_droplet(
         'refinement_droplet': refinement_droplet,
         'box_shift': box_shift,
         'remesh_mode': 'delaunay',
-        'remesh_kwargs': adaptive_kwargs,
+        'remesh_kwargs': None,
     }
 
     return HC, bV, mps, bc_set, dudt_fn, retopo_fn, params

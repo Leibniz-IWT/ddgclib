@@ -25,14 +25,15 @@ initialiser).
 Hydrostatic pressure is pre-imposed in the liquid (avoiding the
 startup pressure wave), gas pressure is stratified to roughly match
 (so no fast-scale mismatch at the interface), and the retopology is
-the standard ``_retopologize_multiphase`` (Delaunay + multiphase
-re-labeling), because dual-only retopology on this problem is
-markedly less stable than the full Delaunay pass (contrary to the
-static_droplet_2D case, which has no gravity).
+the preset's (``PRESETS['electrolysis_bubble_2D']`` / ``_3D``: per-step
+Delaunay + multiphase re-labeling, built by
+``methods.retopologize_fn``), because dual-only retopology on this
+problem is markedly less stable than the full Delaunay pass (contrary
+to the static_droplet_2D case, which has no gravity).  The force is
+``methods.dudt_fn(..., body_force=g)`` inside the case-physics guard
+:func:`electrolysis_dudt` (laneW, 2026-10-05).
 """
 from __future__ import annotations
-
-from functools import partial
 
 import numpy as np
 
@@ -52,12 +53,41 @@ from ddgclib.geometry.domains._multiphase_droplet import (
     _estimate_edge_length,
     _shift_outer_box,
 )
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+from ddgclib.methods import SolverMethods
 from ddgclib.operators.stress import cache_dual_volumes
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
 from hyperct.ddg import compute_vd
+
+
+# =====================================================================
+# Force: the preset-bound multiphase stress + gravity, guarded
+# =====================================================================
+
+def electrolysis_dudt(methods, HC, mps, meos, gravity_vec):
+    """The acceleration of this case: ``methods.dudt_fn(HC, mps=mps,
+    pressure_model=meos, body_force=gravity_vec)`` (the library's
+    multiphase stress partial plus gravity, so every force axis of the
+    preset is applied) inside the thinnest case-physics guard: a vertex
+    with degenerate mass, or whose stress is not finite, gets zero
+    acceleration (3D domain corners can have NaN dual volume in the
+    barycentric construction; the guard is this case's workaround, not a
+    method axis).  ``dudt_fn.stress_fn`` / ``dudt_fn.body_force`` expose
+    the parts (``ddgclib/tests/test_methods.py``).
+    """
+    base = methods.dudt_fn(HC, mps=mps, pressure_model=meos,
+                           body_force=gravity_vec)
+    dim = methods.dim
+
+    def dudt_fn(v, **_kw):
+        if not np.isfinite(v.m) or v.m < 1e-30:
+            return np.zeros(dim)
+        a = base(v)
+        if not np.all(np.isfinite(a)):
+            return np.zeros(dim)
+        return a
+
+    dudt_fn.stress_fn = base.stress_fn  # type: ignore[attr-defined]
+    dudt_fn.body_force = base.body_force  # type: ignore[attr-defined]
+    return dudt_fn
 
 
 # =====================================================================
@@ -240,6 +270,7 @@ def setup_electrolysis_bubble(
     nucleation_frac: float = 0.5,
     redistribute_mass: bool = True,
     box_shift: str = 'move_all',
+    methods=None,
 ):
     """Build a bubble-on-electrode dynamic multiphase problem.
 
@@ -278,15 +309,32 @@ def setup_electrolysis_bubble(
         Delaunay reconnection so that the pre-retopo per-phase pressure
         field is preserved while total per-phase mass is conserved.
         See ``setup_oscillating_droplet`` for the full rationale.
+        Ignored when *methods* is given.
     box_shift : {'move_all', 'evict'}
         How the outer box is shifted onto its centre (laneB, 2026-10-05;
         ``ddgclib.geometry.domains.BOX_SHIFTS``).  ``'evict'`` reproduces
         the meshes of the runs before laneB, which lack outer vertices.
+    methods : ddgclib.methods.SolverMethods or None
+        The solver configuration (``PRESETS['electrolysis_bubble_2D']``
+        / ``['electrolysis_bubble_3D']``, normally).  ``split_method``
+        and ``redistribute_mass`` are taken from it, ``dudt_fn`` is
+        :func:`electrolysis_dudt` (``methods.dudt_fn(..., body_force=
+        g)`` guarded) and ``retopo_fn`` is ``methods.retopologize_fn(
+        mps=mps)`` (laneW, 2026-10-05).  ``None`` builds
+        ``SolverMethods(dim, phases='multi', redistribute_mass=...)``
+        from the explicit kwarg (per-step Delaunay, no remap, the
+        partials the setup used to build by hand).
 
     Returns
     -------
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params
     """
+    if methods is None:
+        methods = SolverMethods(dim=dim, phases='multi',
+                                redistribute_mass=redistribute_mass)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
     axis = dim - 1
     floor = -L_domain
     ceiling = +L_domain
@@ -376,7 +424,7 @@ def setup_electrolysis_bubble(
 
     # -- Initial conditions --
     ZeroVelocity(dim=dim).apply(HC, bV)
-    mps.refresh(HC, dim, reset_mass=True, split_method='neighbour_count')
+    mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
 
     # Some 3D wall-corner vertices can end up with NaN dual volumes
     # (the barycentric-dual construction is degenerate on domain
@@ -442,7 +490,7 @@ def setup_electrolysis_bubble(
     )
 
     mass_conserving_merge(HC, cdist=1e-12)
-    mps.refresh(HC, dim, reset_mass=False, split_method='neighbour_count')
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
 
     # -- Boundary conditions --
     bc_set = BoundaryConditionSet()
@@ -460,29 +508,12 @@ def setup_electrolysis_bubble(
             None,
         )
 
-    # -- Acceleration: stress + gravity --
+    # -- Acceleration: stress + gravity (guarded) --
     meos = MultiphaseEOS([eos_liq, eos_gas])
-    _base_dudt = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
     gravity_vec = np.zeros(dim)
     gravity_vec[axis] = -g
-
-    def dudt_fn(v, **_kw):
-        # Skip vertices with degenerate mass (3D domain corners can
-        # have NaN dual volume in the barycentric construction).
-        if not np.isfinite(v.m) or v.m < 1e-30:
-            return np.zeros(dim)
-        a = _base_dudt(v)
-        if not np.all(np.isfinite(a)):
-            return np.zeros(dim)
-        return a + gravity_vec
-
-    retopo_fn = partial(
-        _retopologize_multiphase, mps=mps, split_method='neighbour_count',
-        redistribute_mass=redistribute_mass,
-    )
+    dudt_fn = electrolysis_dudt(methods, HC, mps, meos, gravity_vec)
+    retopo_fn = methods.retopologize_fn(mps=mps)
 
     params = {
         'dim': dim,

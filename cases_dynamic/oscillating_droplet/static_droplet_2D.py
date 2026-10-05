@@ -71,8 +71,8 @@ def main(box_shift: str = 'move_all'):
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
-            split_method=methods.split_method,
             box_shift=box_shift,
+            methods=methods,   # every method choice of the setup and run
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
