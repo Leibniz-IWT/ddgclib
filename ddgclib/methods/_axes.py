@@ -98,7 +98,7 @@ def _opt(key, summary, status, where, evidence='', dims=(1, 2, 3), phases='both'
 
 AXIS_GROUPS = (
     'problem', 'time', 'connectivity', 'thermodynamics', 'forces',
-    'dual geometry (reported)', 'execution',
+    'dual geometry', 'execution',
 )
 
 _LANE = 'docs_temp/debug_session/'
@@ -345,7 +345,10 @@ _AXES: list[MethodAxis] = [
                  'live, so this is the fixed-connectivity path with wall half '
                  'cells and p_ij faces in 3D: hydrostatic_3D preset, 100 t_ac '
                  'max|u| envelope 2.4e-4 m/s (uniform density start) / 5.4e-7 '
-                 '(equilibrium masses), integrated L2 0.99 Pa = 1.0e-4 rho g H',
+                 '(equilibrium masses), integrated L2 0.99 Pa = 1.0e-4 rho g H. '
+                 'laneQ 2026-10-05: the 3D dual faces follow the axis '
+                 'edge_area_source (None = the legacy ring walk; hydrostatic_3D '
+                 'reads the exact p_ij_simplex cache since laneQ)',
                  dims=(2, 3)),
             _opt('frozen', 'retopologize_fn=False: NO topology or dual refresh at '
                  'all. Surface meshes / A.5.a static probes only', 'opt-in',
@@ -685,7 +688,10 @@ _AXES: list[MethodAxis] = [
                  '0.08211494566330206 in every interpreter since, and a 1e-15 '
                  'shift of the interior vertices moves it between 0.079 and '
                  '0.169 (8 seeds): the arm is chaotic, quote it with that '
-                 'spread',
+                 'spread. laneQ 2026-10-05: on the exact faces '
+                 '(edge_area_source=p_ij_simplex) the same arm gives l2 '
+                 '0.056658 and radial velocity 2.5e-17, i.e. the result of the '
+                 'simplex_gradient volume form, at 44 s against 58 s',
                  phases='single'),
             _opt('acoustic-riemann', 'Lagrangian Godunov contact pressure '
                  'p* = 1/2 (p_i + p_j) - 1/2 rho_f c_f (u_j - u_i).n: momentum '
@@ -897,7 +903,7 @@ _AXES: list[MethodAxis] = [
     # dual geometry: resolved from the mesh, reported only
     # ------------------------------------------------------------------
     MethodAxis(
-        name='dual_method', title='Dual vertex construction', group='dual geometry (reported)',
+        name='dual_method', title='Dual vertex construction', group='dual geometry',
         default='barycentric', explicit=False,
         control='hard-coded compute_vd(HC, method="barycentric") in _retopologize',
         options=(
@@ -910,7 +916,7 @@ _AXES: list[MethodAxis] = [
         ),
     ),
     MethodAxis(
-        name='dual_path', title='Dual construction path', group='dual geometry (reported)',
+        name='dual_path', title='Dual construction path', group='dual geometry',
         default='simplex_aware', explicit=False,
         control='presence of HC._simplices (connect_and_cache_simplices at every '
                 'Delaunay retopology; rebuild_simplex_cache_2d / _3d of the built '
@@ -927,7 +933,7 @@ _AXES: list[MethodAxis] = [
         ),
     ),
     MethodAxis(
-        name='dual_volume', title='Dual cell volume source', group='dual geometry (reported)',
+        name='dual_volume', title='Dual cell volume source', group='dual geometry',
         default='simplex_exact', explicit=False,
         control='dim + HC._simplices + HC._vd_method + whether batch_e_star runs '
                 '(stress.py:_use_exact_barycentric_volume, _retopologize step 5b)',
@@ -974,7 +980,7 @@ _AXES: list[MethodAxis] = [
     ),
     MethodAxis(
         name='boundary_dual_vol', title='Boundary-vertex dual volume convention',
-        group='dual geometry (reported)', default='half_cell', explicit=False,
+        group='dual geometry', default='half_cell', explicit=False,
         control='dim: 3D retopology zeroes boundary dual_vol (batch_e_star path); '
                 '1D/2D/periodic/setup keep the truncated half cell, and so do '
                 'connectivity=dual_only_bare and delaunay_material in 3D',
@@ -996,18 +1002,45 @@ _AXES: list[MethodAxis] = [
     ),
     MethodAxis(
         name='edge_area_source', title='Oriented dual face area A_ij source',
-        group='dual geometry (reported)', default='shared_vd_2d', explicit=False,
-        control='dim + HC._edge_area_cache + HC._periodic_axes '
-                '(stress.py:stress_force, dual_area_vector)',
-        notes='laneJ (2026-09-25) recommends making this an EXPLICIT 3D axis '
-              '(keys e_star_cache | p_ij | p_ij_simplex) once p_ij_simplex has '
-              'a vectorised hyperct kernel; until then it stays reported. '
-              'Forcing p_ij today = connectivity="custom" wrapper that clears '
-              'HC._edge_area_cache after each retopology '
-              '(cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py).',
+        group='dual geometry', default=None,
+        control='edge_area_source= integrator kwarg, forwarded by name to '
+                '_retopologize / _retopologize_multiphase / bare_dual_refresh / '
+                'retopologize_material_delaunay, which fill HC._edge_area_cache '
+                'from the chosen source and record the value on '
+                'HC._edge_area_source; every reader of a dual face (stress_force, '
+                'multiphase_stress_force, velocity_difference_tensor, '
+                'scalar_gradient_integrated, velocity_laplacian, '
+                'density_diffusion_step, the csf_dual stencil) takes the cache '
+                'entry of the edge, else dual_area_vector(source=HC._edge_area_source). '
+                '3D only; 1D and 2D keep their reported sources',
+        notes='EXPLICIT since laneQ (2026-10-05); the 2D values stay reported. '
+              'A flat tetrahedron (qhull\'s triangulated output puts 44 of them '
+              'into the 2540 of the droplet mesh and 13 into a Delaunay rebuild '
+              'of the refinement 2 box) has a dual face piece in its own plane, '
+              'so no geometric rule can orient it: the exact sources orient it '
+              'by its neighbours (combinatorial orientation of the complex), '
+              'which is what closes the cells there. DEFAULT DECISION (laneQ, '
+              'protocol rule 5): the exact faces are the default of '
+              'hydrostatic_3D (re-pinned) and NOT of the 3D droplet presets: on '
+              'the main benchmark every exact-area arm fails the better-l2-AND-'
+              'tail rule because the pinned score is laneG\'s bump / over-decay '
+              'cancellation (full table in the laneQ log, section 4). '
+              'cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py '
+              'runs every arm through the axis.',
         options=(
-            _opt('batch_e_star_cache', '3D: cached e_star fan areas from '
-                 'batch_e_star(orient=True) at the last retopology', 'validated',
+            _opt(None, 'The legacy source of the path: e_star_cache where the '
+                 'retopology builds the fan cache (connectivity delaunay, '
+                 'dual_only), p_ij_ring on the cache-less 3D paths '
+                 '(dual_only_bare, delaunay_material, periodic, frozen, a '
+                 'setup mesh); 2D shared_vd_2d / min_image_2d, 1D the interval',
+                 'validated',
+                 'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize step 5b',
+                 'every pin before laneQ; bit-identical to the explicit value '
+                 'it resolves to'),
+            _opt('e_star_cache', '3D: cached e_star fan areas of every edge at '
+                 'an interior vertex from batch_e_star(orient=True) at the last '
+                 'retopology (hull vertices read the ring walk); built by '
+                 'connectivity delaunay / dual_only only', 'validated',
                  'hyperct/ddg/_operators.py:batch_e_star',
                  'all 3D pins. NOT linearly precise: laneJ measured per-edge '
                  'difference to p_ij median 0.125 / max 0.625 (box), closure '
@@ -1017,18 +1050,92 @@ _AXES: list[MethodAxis] = [
                  'floor 6.0153e-05) and part of the dynamic outward bump '
                  '(final inflation 1.87 % -> 0.82 % R0 on p_ij) - but p_ij alone '
                  'scores l2 0.28713 vs 0.24811 (laneG cancellation exposed), so '
-                 'no flip', dims=(3,)),
-            _opt('p_ij_ring_3d', '3D DEC p_ij dual polygon ring walk (linearly '
-                 'precise on box/ball, 1e-18); used only when no cache exists',
+                 'no flip. laneQ 2026-10-05 (full outer mesh, every arm a '
+                 'preset.replace through this axis): the droplet keeps this '
+                 'value; the A.5.b floor 7.2741338970e-05 and the full run (l2 '
+                 '0.24811443136179492 / tail 0.0841737962816189) reproduce the '
+                 'pins to the bit; the arms p_ij_simplex / p_ij_simplex + '
+                 'redistribute_mass=False / + projection_every=2 score l2 '
+                 '0.28653 / 0.32625 / 0.34581 against the cache arms 0.24811 / '
+                 '0.26658 / 0.28898 (sign decomposition in the log): the exact '
+                 'faces cut the early bump (q2 +0.245 -> +0.093) and halve the '
+                 'final inflation (1.87 % -> 0.83 % R0), which exposes the '
+                 'genuine over-decay, so no arm passes the flip rule. Retopology '
+                 '407 ms against 231 ms with the exact cache on the 2/2 droplet '
+                 '(batch_e_star 187 ms, the kernel 11 ms)', dims=(3,)),
+            _opt('p_ij_simplex', '3D: the exact barycentric dual face of EVERY '
+                 'directed edge of every vertex (hull included), cached at the '
+                 'retopology by hyperct.ddg.simplex_dual_face_areas in one '
+                 'vectorised pass over HC._simplices: per simplex '
+                 '|T| (grad phi_j - grad phi_i) / 4 = the two '
+                 'barycentric-subdivision triangles at the edge, flat '
+                 'tetrahedra oriented by their neighbours; no fan walk, so no '
+                 'fan-failure promotion', 'validated',
+                 'hyperct/ddg/_dual_volume.py:simplex_dual_face_areas',
+                 'laneQ 2026-10-05: antisymmetric to the bit, closure of every '
+                 'interior cell 1.6e-16 and linear precision 2e-15 on the '
+                 'droplet mesh with its 44 flat tetrahedra, hull half cells '
+                 'closed against the box-face normals to 1.7e-16 (82 of the 98 '
+                 'hull vertices touch a flat tetrahedron), equal to laneJ\'s '
+                 'per-edge polygon to 2.1e-15 on every link and to laneT\'s '
+                 'per-tetrahedron quads to 1.3e-15 on every link without a flat '
+                 'tetrahedron (on the 179 of 6220 directed hull-hull links with '
+                 '1 or 2 flat tetrahedra the quads\' per-piece sign rule '
+                 'quad . d_ij > 0 is undefined and differs by up to 163 %); '
+                 '11 ms per call on 2540 tetrahedra against 187 ms for '
+                 'batch_e_star (hyperct test_dual_face_areas.py, 14 tests incl. '
+                 'the lattice hull beside flat tetrahedra; '
+                 'test_edge_area_source.py). Linear-pressure force on the '
+                 'droplet interface cells 1e-13 V|g| (cache: up to 62, ring '
+                 'walk: up to 47). DEFAULT of hydrostatic_3D (pins re-measured '
+                 'and re-pinned: refinement 1 peak / KE at 40 t_ac move in '
+                 'round-off only, the refinement 2 remap arm by -2.2 % / -2.6 % '
+                 '= the removed hull-edge tie of laneT; 22 against 55 ms per '
+                 'step). Hagen-Poiseuille 3D with pressure_flux=centred '
+                 '(refinement 1, 600 steps): l2 0.056658 and radial velocity '
+                 '2.5e-17 against 0.082115 / 6.3e-3 on the fan cache and '
+                 '0.056561 / 1.3e-5 on the ring walk, 44 s against 58 / 152 s. '
+                 'Droplet: A.5.b floor 6.2838104071e-05 (-13.6 % against the '
+                 'cache, 0.36 against 0.56 s/step); full run l2 0.28653 / tail '
+                 '0.08825 / R_max_end 0.010083 / mass 8.6e-14 at 0.34 s/step '
+                 '(cache 0.554), NOT adopted there (flip rule, see the axis '
+                 'notes). dam_break_3D smoke: the shipped preset aborts with '
+                 'NaN after 17 steps on the fan cache (HEAD library too), '
+                 'after 156 with the exact cache, after 91 per edge: the case '
+                 'blows up on every source', dims=(3,)),
+            _opt('p_ij', '3D: no cache; every edge built on demand from the '
+                 'tetrahedra around it (stress._dual_area_vector_3d_simplex: '
+                 'the DEC p_ij polygon with ring order and face vertices read '
+                 'from HC._simplices, open chain through the edge midpoint on '
+                 'a hull edge). The same face as p_ij_simplex, uncached',
                  'opt-in',
+                 'ddgclib/operators/stress.py:_dual_area_vector_3d_simplex',
+                 'laneQ 2026-10-05: equal to the p_ij_simplex cache to '
+                 'round-off on every mesh tried (test_edge_area_source.py); '
+                 'replaces the heuristic face selection of p_ij_ring (laneJ '
+                 'F4b) and the hull-edge tie (laneT). Same numbers as '
+                 'p_ij_simplex up to the run\'s amplification of round-off '
+                 '(A.5.b floor 6.2838104071e-05 in both; hydrostatic 3D '
+                 'refinement 1 KE at 40 t_ac 6.2063651563e-06 in both; '
+                 'Poiseuille centred arm l2 0.056612 against 0.056658; full 3D '
+                 'droplet l2 0.28653087622018630 / tail 0.08825446501866843 '
+                 'against 0.28653087631979274 / 0.08825446509925354), at the '
+                 'cost of a per-edge Python construction: force evaluation of '
+                 'the 2/2 droplet 603 ms against 70 ms (1.07 against 0.36 '
+                 's/step on the A.5.b floor, 1.07 against 0.34 on the full '
+                 'droplet)', dims=(3,)),
+            _opt('p_ij_ring', '3D: no cache; the legacy ring walk over the '
+                 'shared dual vertices with the nearest-barycentre face '
+                 'heuristic (dual_area_vector before laneQ; what every '
+                 'cache-less 3D path read)', 'broken',
                  'ddgclib/operators/stress.py:_dual_area_vector_3d_p_ij',
-                 'test_stress.py p_ij linear-precision tests. laneJ: the face '
-                 'vertex is chosen as the common neighbour nearest the midpoint '
-                 'of two tet barycentres; on 743 of 5193 directed droplet edges '
-                 'that picks a non-face vertex, giving the 2.6 % closure '
-                 'residuals laneG attributed to the pressure side. 4.1x wall '
-                 'cost (2.05 vs 0.50 s/step). laneT 2026-10-02, BOUNDARY '
-                 'edges, NOT fixed: there the ring also holds the edge midpoint '
+                 'test_stress.py p_ij linear-precision tests (box/ball: 1e-18). '
+                 'laneJ: the face vertex is chosen as the common neighbour '
+                 'nearest the midpoint of two tet barycentres; on 743 of 5193 '
+                 'directed droplet edges that picks a non-face vertex, giving '
+                 'the 2.6 % closure residuals laneG attributed to the pressure '
+                 'side. 4.1x wall cost (2.05 vs 0.50 s/step). laneT 2026-10-02, '
+                 'BOUNDARY edges: there the ring also holds the edge midpoint '
                  'and the two boundary-face barycentres, and the nearest-'
                  'barycentre rule puts an interior face barycentre next to the '
                  'midpoint whenever it is not farther than the boundary one; '
@@ -1039,20 +1146,18 @@ _AXES: list[MethodAxis] = [
                  'interior endpoint: 1127, exact to 8e-16). A 1e-15 shift of '
                  'the interior vertices moves the KE of that column by 2e-6 '
                  'after 150 steps on FIXED connectivity (6e-12 at refinement '
-                 '1, which has no such edge). Strict xfail in '
-                 'test_determinism.py; p_ij_simplex is the fix', dims=(3,)),
-            _opt('p_ij_simplex', 'p_ij polygon with ring order and face vertices '
-                 'read from HC._simplices (exact faces): closure 2.3e-16, linear '
-                 'precision 1.9e-15 at every interior vertex', 'experimental',
-                 'cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py '
-                 '(driver only, not in the library yet)',
-                 'laneJ: static floor 6.28386e-05, dynamic l2 0.28653 / tail '
-                 '0.08818, 1.89 s/step. Target default after a vectorised '
-                 'hyperct kernel, 3D re-pin and co-evaluation with the '
-                 'redistribution-pump rework (laneG lever b)', dims=(3,)),
-            _opt('shared_vd_2d', '2D: segment between the two dual vertices shared '
-                 'by v_i and v_j, oriented outward by the axis area_orientation '
-                 '(A_ij . d_ij > 0 since laneO)', 'validated',
+                 '1, which has no such edge). Kept selectable so that laneJ\'s '
+                 'p_ij arm and the pre-laneQ numbers of the cache-less paths '
+                 'reproduce: laneQ measured the Poiseuille centred arm '
+                 '0.05656136676066496 / radial 1.258e-05 (= laneH / laneT), '
+                 'the hydrostatic_3D pins before laneQ to the bit, the A.5.b '
+                 'floor 6.2838085762e-05 (laneJ 6.283858835e-05 on the lossy '
+                 'mesh); 2.2 s/step on the A.5.b floor (force evaluation 1.8 s '
+                 'against 0.07 s with a cache)', dims=(3,)),
+            _opt('shared_vd_2d', '2D (reported, not selectable): segment between '
+                 'the two dual vertices shared by v_i and v_j, oriented outward '
+                 'by the axis area_orientation (A_ij . d_ij > 0 since laneO)',
+                 'validated',
                  'ddgclib/operators/stress.py:dual_area_vector (2D branch)',
                  'all 2D pins (batch_e_star raises for dim != 3). DEFECT found '
                  'by laneH 2026-10-01, FIXED by laneO 2026-10-05 (axis '
@@ -1073,8 +1178,9 @@ _AXES: list[MethodAxis] = [
                  '(laneO log, section 3), every other 2D pin and the full 2D '
                  'droplet baseline are bit-identical',
                  dims=(2,)),
-            _opt('min_image_2d', '2D periodic: minimum-image rebuild of the dual '
-                 'segment, sign by the axis area_orientation', 'experimental',
+            _opt('min_image_2d', '2D periodic (reported, not selectable): '
+                 'minimum-image rebuild of the dual segment, sign by the axis '
+                 'area_orientation', 'experimental',
                  'ddgclib/operators/stress.py:dual_area_vector (periodic branch)',
                  'd_ij is NOT min-imaged (06_known_issues). laneO 2026-10-05: '
                  'the sign defect of shared_vd_2d was here too (64 vectors '
@@ -1091,7 +1197,7 @@ _AXES: list[MethodAxis] = [
     ),
     MethodAxis(
         name='boundary_rule', title='Topological boundary detection',
-        group='dual geometry (reported)', default='boundary_from_simplices',
+        group='dual geometry', default='boundary_from_simplices',
         explicit=False,
         control='HC._simplices present -> boundary_from_simplices, else HC.boundary(); '
                 'dual_only carries the previous bV',

@@ -735,7 +735,7 @@ class TestEffectiveMethods:
         batch_e_star cache and boundary dual volumes are zeroed."""
         HC, bV = self._run_one_retopo(3)
         eff = effective_methods(HC, 3)
-        assert eff['edge_area_source'] == 'batch_e_star_cache'
+        assert eff['edge_area_source'] == 'e_star_cache'
         assert eff['edge_area_cache_present'] is True
         assert eff['boundary_dual_vol'] == 'zeroed'
         assert eff['dual_volume'] == 'simplex_exact'
@@ -775,7 +775,7 @@ class TestEffectiveMethods:
             if pool is not None:
                 pool.terminate()
         cache = HC._edge_area_cache
-        assert effective_methods(HC, 3)['edge_area_source'] == 'batch_e_star_cache'
+        assert effective_methods(HC, 3)['edge_area_source'] == 'e_star_cache'
         assert {i: set(row) for i, row in cache.items()} == {
             i: set(row) for i, row in ref.items()}
         for i, row in ref.items():

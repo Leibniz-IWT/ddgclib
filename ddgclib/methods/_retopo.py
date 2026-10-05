@@ -52,12 +52,43 @@ __all__ = ['bare_dual_refresh', 'retopologize_multiphase_periodic',
            'retopologize_material_delaunay']
 
 
-def bare_dual_refresh(HC, bV, dim, mps=None, boundary_filter=None, **_kw):
+def _set_edge_area_source(HC, dim, edge_area_source, where):
+    """The 3D dual face source of a retopology that builds no fan cache
+    (method axis ``edge_area_source``, laneQ): ``'p_ij_simplex'`` fills
+    ``HC._edge_area_cache`` from ``hyperct.ddg.simplex_dual_face_areas``,
+    ``'p_ij'`` and ``'p_ij_ring'`` (the legacy ring walk, = ``None``)
+    leave it empty and tag the per-edge construction on
+    ``HC._edge_area_source``.  ``'e_star_cache'`` is not built here."""
+    if edge_area_source is None:
+        edge_area_source = 'p_ij_ring'
+    if edge_area_source not in ('p_ij', 'p_ij_simplex', 'p_ij_ring'):
+        raise ValueError(
+            f"{where} builds no batch_e_star cache: edge_area_source="
+            f"{edge_area_source!r} is not applied (use 'p_ij', "
+            "'p_ij_simplex' or 'p_ij_ring')")
+    if dim != 3:
+        if edge_area_source != 'p_ij_ring':
+            raise ValueError("edge_area_source is a 3D axis")
+        return
+    if edge_area_source == 'p_ij_simplex':
+        from hyperct.ddg import simplex_dual_face_areas
+        HC._edge_area_cache = simplex_dual_face_areas(HC, dim)
+    else:
+        HC._edge_area_cache = None
+    HC._edge_area_source = edge_area_source
+
+
+def bare_dual_refresh(HC, bV, dim, mps=None, boundary_filter=None,
+                      edge_area_source=None, **_kw):
     """Boundary retag + dual rebuild on frozen connectivity; nothing else.
 
     *boundary_filter* (``fn(v) -> bool``, forwarded by the integrator)
     selects which hull vertices are frozen, as in ``_retopologize``; the
-    default ``None`` freezes the whole hull.  ``_kw`` swallows the
+    default ``None`` freezes the whole hull.  *edge_area_source* (3D,
+    forwarded by the integrator): ``'p_ij_simplex'`` caches the exact
+    dual faces of every edge, ``'p_ij'`` builds them per edge, ``None`` /
+    ``'p_ij_ring'`` is the legacy ring walk (see
+    :func:`_set_edge_area_source`).  ``_kw`` swallows the
     ``remesh_mode``/``remesh_kwargs`` the integrator forwards to every
     callable retopology function.
     """
@@ -69,6 +100,7 @@ def bare_dual_refresh(HC, bV, dim, mps=None, boundary_filter=None, **_kw):
         v.boundary = v in dV
     compute_vd(HC, method="barycentric")
     cache_dual_volumes(HC, dim)
+    _set_edge_area_source(HC, dim, edge_area_source, 'bare_dual_refresh')
     if mps is not None:
         mps.split_dual_volumes(HC, dim)
     if boundary_filter is not None:
@@ -279,6 +311,7 @@ def retopologize_material_delaunay(HC, bV, dim, boundary_filter=None,
                                    pressure_model=None,
                                    redistribute_mass=False,
                                    retopo_remap=None, domain_tol=1e-3,
+                                   edge_area_source=None,
                                    **_kw) -> float:
     """Delaunay rebuild that keeps the fluid domain (single phase).
 
@@ -329,6 +362,11 @@ def retopologize_material_delaunay(HC, bV, dim, boundary_filter=None,
     rescale); it needs ``redistribute_mass=True`` and an EOS
     *pressure_model*.  Without it the masses are held, which is the
     measured-unstable combination of laneK when an EOS is in the loop.
+
+    *edge_area_source* (3D, forwarded by the integrator): the dual face
+    source of the rebuilt connectivity, see :func:`_set_edge_area_source`
+    (``None`` = the legacy ring walk, ``'p_ij_simplex'`` = exact cached
+    faces, ``'p_ij'`` = exact per edge).
 
     Needs the simplex cache of the current connectivity
     (``HC._simplices``; every domain builder provides it).  ``_kw``
@@ -398,6 +436,8 @@ def retopologize_material_delaunay(HC, bV, dim, boundary_filter=None,
     compute_vd(HC, method="barycentric")
     cache_dual_volumes(HC, dim)
     HC._edge_area_cache = None
+    _set_edge_area_source(HC, dim, edge_area_source,
+                          'retopologize_material_delaunay')
 
     if boundary_filter is not None:
         dV = {v for v in dV if boundary_filter(v)}

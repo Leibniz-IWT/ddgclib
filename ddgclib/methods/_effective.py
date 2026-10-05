@@ -43,7 +43,12 @@ def effective_methods(HC, dim: int, methods=None) -> dict[str, Any]:
         dual_volume = 'fan_walk_3d'
 
     if dim == 3:
-        edge_area = 'batch_e_star_cache' if cache is not None else 'p_ij_ring_3d'
+        # The retopology records the axis value that ran (laneQ); a mesh
+        # no retopology has tagged reads the cache if one exists, else the
+        # legacy ring walk.
+        edge_area = getattr(HC, '_edge_area_source', None)
+        if edge_area is None:
+            edge_area = 'e_star_cache' if cache is not None else 'p_ij_ring'
     elif dim == 2:
         edge_area = 'min_image_2d' if periodic else 'shared_vd_2d'
     else:

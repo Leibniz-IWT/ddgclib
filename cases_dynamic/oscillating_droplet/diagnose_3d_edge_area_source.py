@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
-"""laneJ: 3D edge-area source A/B (e_star cache vs DEC p_ij), audit F4.
+"""3D edge-area source A/B: the method axis ``edge_area_source`` (laneJ
+measured it with case-side wrappers, laneQ made it a library axis).
 
-MEASUREMENT ONLY.  No library code is changed: the p_ij path is forced
-by wrapping a preset's retopology function so that it clears
-``HC._edge_area_cache`` after every call (``stress_force`` /
-``multiphase_stress_force`` then fall back to ``dual_area_vector`` ->
-``_dual_area_vector_3d_p_ij``).  Every configuration is built from
-``ddgclib.methods.PRESETS``; the p_ij arm is the same preset with
-``connectivity='custom'`` and ``custom=no_cache(base)``.
+MEASUREMENT ONLY.  Every arm is ``PRESETS[...]`` or
+``preset.replace(...)``; the arm names map to ``replace`` keywords in
+:data:`ARMS`.  ``cache`` is the preset itself without ``replace``: on the
+droplet and dam-break presets ``edge_area_source=None`` = the legacy
+``batch_e_star`` fan cache (the ``hydrostatic`` sub-command runs the
+explicit sources instead, because ``hydrostatic_3D`` reads
+``p_ij_simplex`` since laneQ); ``pij_simplex`` the exact cached faces of
+``hyperct.ddg.simplex_dual_face_areas``, ``pij`` the same face built per
+edge, ``pij_ring`` the legacy ring walk (laneJ's ``pij`` arm, the
+pre-laneQ ``hydrostatic_3D``).  The ``*_noredis`` and ``*_p2`` arms are
+laneG's lever (b): ``redistribute_mass=False`` and ``projection_every=2``.
 
 Sub-commands (run from the repo root with the ddg env python)::
 
     python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py static
-    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py a5b
-    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py dynamic --arm pij
-    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py dynamic --arm cache
+    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py a5b [--arm NAME]
+    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py dynamic --arm NAME [--snapshots]
+    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py hydrostatic [--refine N] [--n-tac T]
+    python cases_dynamic/oscillating_droplet/diagnose_3d_edge_area_source.py dambreak [--n-steps N]
 
-Outputs (``results_3d/``): ``laneJ_static.json``, ``laneJ_a5b.json``,
-``score_pij.json`` / ``methods_pij.json`` / ``diags_pij.json`` /
-``snapshots_pij/`` (and ``*_cache_laneJ`` for the reference arm).
+``--out DIR`` redirects every output (default ``results_3d/``, where the
+kept arms of laneJ and laneQ live: ``laneQ_static.json``,
+``laneQ_a5b.json``, ``score_laneQ_<arm>.json`` / ``methods_laneQ_<arm>.json``
+/ ``diags_laneQ_<arm>.json``, ``laneQ_hydrostatic*.json``,
+``laneQ_dambreak.json``).  The laneJ files (``laneJ_*.json``,
+``score_pij*.json``, ...) were produced by the previous version of this
+driver with ``connectivity='custom'`` wrappers; ``pij_ring`` reproduces
+its ``pij`` arm through the axis.
 """
 from __future__ import annotations
 
@@ -45,142 +56,42 @@ from ddgclib.operators.stress import dual_area_vector, stress_force  # noqa: E40
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _RESULTS = os.path.join(_CASE_DIR, 'results_3d')
 
-
-# ---------------------------------------------------------------------------
-# p_ij forcing wrapper
-# ---------------------------------------------------------------------------
-def no_cache(base):
-    """Wrap a preset retopology callable; clear the e_star cache after it.
-
-    Declares by name exactly the kwargs ``_do_retopologize`` forwards to
-    the base partial (``skip_triangulation`` is deliberately NOT declared:
-    the dual_only partial binds it and a call-time value would override
-    the binding).
-    """
-    def _no_cache(HC, bV, dim, boundary_filter=None, merge_cdist=None,
-                  backend=None, remesh_mode='delaunay', remesh_kwargs=None):
-        base(HC, bV, dim, boundary_filter=boundary_filter,
-             merge_cdist=merge_cdist, backend=backend,
-             remesh_mode=remesh_mode, remesh_kwargs=remesh_kwargs)
-        HC._edge_area_cache = None
-    _no_cache.__name__ = 'no_cache'
-    return _no_cache
+# arm name -> SolverMethods.replace(...) keywords
+ARMS: dict[str, dict] = {
+    'cache': {},
+    'pij_simplex': dict(edge_area_source='p_ij_simplex'),
+    'pij': dict(edge_area_source='p_ij'),
+    'pij_ring': dict(edge_area_source='p_ij_ring'),
+    'cache_noredis': dict(redistribute_mass=False),
+    'pij_simplex_noredis': dict(edge_area_source='p_ij_simplex',
+                                redistribute_mass=False),
+    'cache_p2': dict(projection_every=2),
+    'pij_simplex_p2': dict(edge_area_source='p_ij_simplex',
+                           projection_every=2),
+}
+SOURCE_ARMS = ('cache', 'pij_simplex', 'pij', 'pij_ring')
+# hydrostatic_3D builds no fan cache: its sources are the explicit three
+HYDRO_ARMS = ('pij_ring', 'pij_simplex', 'pij')
 
 
-def _simplex_pij_A(v_i, v_j, tets):
-    """DEC p_ij area vector built from the explicit tets around edge ij.
-
-    Same polygon as ``stress._dual_area_vector_3d_p_ij`` (tet barycentres
-    interleaved with face barycentres (x_i + x_j + x_k)/3), but the ring
-    order and the face vertex k are read from ``HC._simplices`` (the link
-    cycle of the edge) instead of the dual-vertex ring walk + the
-    nearest-midpoint face-barycentre heuristic.  Returns None for an
-    open link (boundary edge) -> caller falls back to the library path.
-    """
-    if not tets:
-        return None
-    others = [tuple(w for w in T if w is not v_i and w is not v_j)
-              for T in tets]
-    if any(len(o) != 2 for o in others):
-        return None
-    cnt: dict[int, int] = {}
-    for o in others:
-        for w in o:
-            cnt[id(w)] = cnt.get(id(w), 0) + 1
-    if any(c != 2 for c in cnt.values()):
-        return None  # open or non-manifold link
-    n = len(tets)
-    used = [False] * n
-    order, ks = [0], [others[0][1]]
-    used[0] = True
-    cur = others[0][1]
-    while len(order) < n:
-        nxt = next((t for t in range(n)
-                    if not used[t] and any(w is cur for w in others[t])), None)
-        if nxt is None:
-            return None
-        used[nxt] = True
-        order.append(nxt)
-        cur = [w for w in others[nxt] if w is not cur][0]
-        ks.append(cur)
-    x_i, x_j = v_i.x_a[:3], v_j.x_a[:3]
-    pts = []
-    for a in range(n):
-        pts.append(np.mean([w.x_a[:3] for w in tets[order[a]]], axis=0))
-        pts.append((x_i + x_j + ks[a].x_a[:3]) / 3.0)
-    P = np.array(pts)
-    c = P.mean(axis=0)
-    A = np.zeros(3)
-    for k in range(len(P)):
-        A += 0.5 * np.cross(P[k] - c, P[(k + 1) % len(P)] - c)
-    if np.dot(A, x_j - x_i) < 0:
-        A = -A
-    return A
-
-
-def simplex_pij_cache(HC) -> dict:
-    """{id(v): {id(nb): A_ij}} for every edge with a closed tet link."""
-    et: dict[frozenset, list] = {}
-    for T in HC._simplices:
-        T = tuple(T)
-        for a in range(4):
-            for b in range(a + 1, 4):
-                et.setdefault(frozenset((id(T[a]), id(T[b]))), []).append(T)
-    cache: dict = {}
-    for v in HC.V:
-        row = {}
-        for nb in v.nn:
-            A = _simplex_pij_A(v, nb, et.get(frozenset((id(v), id(nb))), []))
-            if A is not None:
-                row[id(nb)] = A
-        if row:
-            cache[id(v)] = row
-    return cache
-
-
-def simplex_cache(base):
-    """Like :func:`no_cache` but fills the cache with simplex-driven p_ij."""
-    def _simplex_cache(HC, bV, dim, boundary_filter=None, merge_cdist=None,
-                       backend=None, remesh_mode='delaunay',
-                       remesh_kwargs=None):
-        base(HC, bV, dim, boundary_filter=boundary_filter,
-             merge_cdist=merge_cdist, backend=backend,
-             remesh_mode=remesh_mode, remesh_kwargs=remesh_kwargs)
-        HC._edge_area_cache = simplex_pij_cache(HC)
-        HC._laneJ_edge_area_source = 'p_ij_simplex'
-    _simplex_cache.__name__ = 'simplex_cache'
-    return _simplex_cache
-
-
-def arm_methods(preset: str, arm: str, mps):
-    """(methods, custom) for an arm in {'cache', 'pij', 'pij_simplex'}."""
+def arm_methods(preset: str, arm: str):
     methods = PRESETS[preset]
-    if arm == 'cache':
-        return methods, None
-    base = methods.retopologize_fn(mps=mps)
-    if arm == 'pij':
-        m = methods.replace(
-            connectivity='custom',
-            label=methods.label + ' + laneJ no_cache wrapper (p_ij forced)',
-            notes=f'laneJ: preset {preset!r} retopology, then '
-                  'HC._edge_area_cache = None',
-        )
-        return m, no_cache(base)
-    m = methods.replace(
-        connectivity='custom',
-        label=methods.label + ' + laneJ simplex_cache wrapper',
-        notes=f'laneJ: preset {preset!r} retopology, then '
-              'HC._edge_area_cache = simplex-driven p_ij (scratch construction; '
-              'effective_methods will misreport batch_e_star_cache)',
+    kw = ARMS[arm]
+    if not kw:
+        return methods
+    return methods.replace(label=f"{methods.label} [laneQ arm {arm}]",
+                           notes=f"laneQ arm {arm!r} of preset {preset!r}: "
+                                 f"{kw}", **kw)
+
+
+def _setup(methods, eps, refine=2):
+    return setup_oscillating_droplet(
+        dim=3, R0=R0, epsilon=eps, l=l, rho_d=rho_d, rho_o=rho_o,
+        mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
+        L_domain=L_domain, refinement_outer=refine, refinement_droplet=refine,
+        split_method=methods.split_method,
+        redistribute_mass=methods.redistribute_mass,
     )
-    return m, simplex_cache(base)
-
-
-def _eff(HC, dim, methods):
-    e = effective_methods(HC, dim, methods)
-    if getattr(HC, '_laneJ_edge_area_source', None):
-        e['edge_area_source_laneJ'] = HC._laneJ_edge_area_source
-    return e
 
 
 # ---------------------------------------------------------------------------
@@ -201,15 +112,20 @@ def _A_cache(HC, v, nb):
     return dual_area_vector(v, nb, HC, 3), False  # stress.py fallback
 
 
-def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
-    """Per-edge A_ij diff, linear precision and closure on both paths.
+PATHS = ('cache', 'p_ij', 'p_ij_ring')
 
-    *groups*: optional {name: predicate(v)} for extra vertex classes
-    (interface, bulk droplet, ...).  Standard classes: 'interior'
-    (not in bV, no bV neighbour), 'boundary_adjacent' (not in bV, >= 1
-    bV neighbour), 'boundary' (in bV: open truncated cell, closure not
-    expected; both paths use p_ij there because batch_e_star only
-    caches interior vertices).
+
+def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
+    """Per-edge A_ij diff, linear precision and closure on three paths:
+    the e_star cache as the force reads it (``cache``), the exact per-edge
+    construction (``p_ij``) and the legacy ring walk (``p_ij_ring``).
+
+    *groups*: optional {name: predicate(v)} for extra vertex classes.
+    Standard classes: 'interior' (not in bV, no bV neighbour),
+    'boundary_adjacent' (not in bV, >= 1 bV neighbour), 'boundary' (in
+    bV: open truncated cell, closure not expected; the cache path reads
+    the ring walk there because batch_e_star only caches interior
+    vertices).
     """
     assert HC._edge_area_cache is not None, 'probe needs the cache path'
     g = np.array([1.0, 2.0, 3.0])
@@ -221,30 +137,33 @@ def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
         v.u = np.zeros(3)
         v.p = p0 + float(g @ v.x_a[:3])
 
-    rel_diff, abs_diff = [], []
+    rel_diff = {'cache_vs_p_ij': [], 'p_ij_ring_vs_p_ij': []}
     n_cache_hit = n_cache_miss = 0
-    per_v: dict[str, dict] = {'cache': {}, 'pij': {}}
+    per_v: dict[str, dict] = {p: {} for p in PATHS}
     for v in HC.V:
         nbs = list(v.nn)
-        Ac, Ap = [], []
+        As = {p: [] for p in PATHS}
         for nb in nbs:
             a_c, hit = _A_cache(HC, v, nb)
-            a_p = dual_area_vector(v, nb, HC, 3)
-            Ac.append(a_c)
-            Ap.append(a_p)
+            a_p = dual_area_vector(v, nb, HC, 3, source='p_ij')
+            a_r = dual_area_vector(v, nb, HC, 3, source='p_ij_ring')
+            As['cache'].append(a_c)
+            As['p_ij'].append(a_p)
+            As['p_ij_ring'].append(a_r)
             if v not in bV:
                 n_cache_hit += hit
                 n_cache_miss += (not hit)
                 if np.linalg.norm(a_p) > 0:
-                    rel_diff.append(np.linalg.norm(a_c - a_p)
-                                    / np.linalg.norm(a_p))
-                abs_diff.append(np.linalg.norm(a_c - a_p))
-        for path, As in (('cache', Ac), ('pij', Ap)):
-            As = np.array(As) if As else np.zeros((0, 3))
-            s = As.sum(axis=0) if len(As) else np.zeros(3)
-            ssum = float(np.sum(np.linalg.norm(As, axis=1))) if len(As) else 0.0
+                    rel_diff['cache_vs_p_ij'].append(
+                        np.linalg.norm(a_c - a_p) / np.linalg.norm(a_p))
+                    rel_diff['p_ij_ring_vs_p_ij'].append(
+                        np.linalg.norm(a_r - a_p) / np.linalg.norm(a_p))
+        for path in PATHS:
+            A = np.array(As[path]) if As[path] else np.zeros((0, 3))
+            s = A.sum(axis=0) if len(A) else np.zeros(3)
+            ssum = float(np.sum(np.linalg.norm(A, axis=1))) if len(A) else 0.0
             M = np.zeros((3, 3))
-            for nb, a in zip(nbs, As):
+            for nb, a in zip(nbs, A):
                 M += 0.5 * np.outer(nb.x_a[:3] - v.x_a[:3], a)
             vol = float(getattr(v, 'dual_vol', 0.0) or 0.0)
             per_v[path][id(v)] = {
@@ -256,10 +175,17 @@ def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
             }
 
     # Force residual with a linear point-valued pressure (mu=0, u=0):
-    # exact integrated force is -g * Vol_i.
+    # exact integrated force is -g * Vol_i.  The force reads the cache
+    # when present, else dual_area_vector(source=HC._edge_area_source).
     cache_saved = HC._edge_area_cache
-    for path in ('cache', 'pij'):
-        HC._edge_area_cache = cache_saved if path == 'cache' else None
+    source_saved = getattr(HC, '_edge_area_source', None)
+    for path in PATHS:
+        if path == 'cache':
+            HC._edge_area_cache = cache_saved
+            HC._edge_area_source = source_saved
+        else:
+            HC._edge_area_cache = None
+            HC._edge_area_source = path
         for v in HC.V:
             rec = per_v[path][id(v)]
             if v in bV or rec['vol'] <= 0:
@@ -269,6 +195,7 @@ def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
             rec['force_rel'] = float(np.linalg.norm(F + g * rec['vol'])
                                      / (np.linalg.norm(g) * rec['vol']))
     HC._edge_area_cache = cache_saved
+    HC._edge_area_source = source_saved
 
     for v in HC.V:
         v.u, v.p = saved[id(v)]
@@ -282,15 +209,14 @@ def probe_mesh(HC, bV, label: str, groups: dict | None = None) -> dict:
         classes.update(groups)
     out = {'label': label,
            'n_vertices': sum(1 for _ in HC.V), 'n_bV': len(bV),
-           'edge_rel_diff': _stats(rel_diff),
-           'edge_abs_diff': _stats(abs_diff),
+           'edge_rel_diff': {k: _stats(d) for k, d in rel_diff.items()},
            'n_directed_interior_edges_cache_hit': int(n_cache_hit),
            'n_directed_interior_edges_cache_miss': int(n_cache_miss),
            'classes': {}}
     for cname, pred in classes.items():
         vs = [v for v in HC.V if pred(v)]
         entry = {'n': len(vs)}
-        for path in ('cache', 'pij'):
+        for path in PATHS:
             recs = [per_v[path][id(v)] for v in vs]
             entry[path] = {
                 'closure_rel': _stats([r['closure_rel'] for r in recs]),
@@ -323,13 +249,7 @@ def run_static() -> dict:
         ('droplet_eps0.05_dual_only_preset', EPS_CASE, 'oscillating_droplet_3D'),
     ):
         methods = PRESETS[preset]
-        HC, bV, mps, *_ = setup_oscillating_droplet(
-            dim=3, R0=R0, epsilon=eps, l=l, rho_d=rho_d, rho_o=rho_o,
-            mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
-            L_domain=L_domain, refinement_outer=2, refinement_droplet=2,
-            split_method=methods.split_method,
-            redistribute_mass=methods.redistribute_mass,
-        )
+        HC, bV, mps, *_ = _setup(methods, eps)
         cache_at_setup = getattr(HC, '_edge_area_cache', None) is not None
         retopo = methods.retopologize_fn(mps=mps)
         retopo(HC, bV, 3)
@@ -361,16 +281,8 @@ def run_a5b_arm(arm: str, n_steps: int = 20) -> dict:
 
     dim = 3
     preset = 'static_droplet_floor_3D'
-    methods0 = PRESETS[preset]
-    HC, bV, mps, bc_set, dudt_fn, _setup_retopo, params = \
-        setup_oscillating_droplet(
-            dim=dim, R0=R0, epsilon=0.0, l=l, rho_d=rho_d, rho_o=rho_o,
-            mu_d=mu_d, mu_o=mu_o, gamma=gamma, K_d=K_d, K_o=K_o,
-            L_domain=L_domain, refinement_outer=2, refinement_droplet=2,
-            split_method=methods0.split_method,
-            redistribute_mass=methods0.redistribute_mass,
-        )
-    methods, custom = arm_methods(preset, arm, mps)
+    methods = arm_methods(preset, arm)
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo, params = _setup(methods, 0.0)
     c_s = float(np.sqrt(K_d / rho_d))
     dt, dx_min = _compute_dt(HC, dim, c_s)
 
@@ -383,7 +295,7 @@ def run_a5b_arm(arm: str, n_steps: int = 20) -> dict:
     def cb(step, t, HC_cb, bV_cb=None, diagnostics=None):
         t0 = time.perf_counter()
         if step == 0:
-            eff['after_step1'] = _eff(HC_cb, dim, methods)
+            eff['after_step1'] = effective_methods(HC_cb, dim, methods)
         cache_frames.append(getattr(HC_cb, '_edge_area_cache', None) is not None)
         maxF.append(_max_interface_force(HC_cb, dim, mps)[0])
         mass.append(compute_conservation(HC_cb, dim=dim)['mass_total'])
@@ -395,9 +307,9 @@ def run_a5b_arm(arm: str, n_steps: int = 20) -> dict:
 
     t0 = time.perf_counter()
     methods.integrate(HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
-                      bc_set=bc_set, callback=cb, mps=mps, custom=custom)
+                      bc_set=bc_set, callback=cb, mps=mps)
     wall = time.perf_counter() - t0
-    eff['end'] = _eff(HC, dim, methods)
+    eff['end'] = effective_methods(HC, dim, methods)
     return {
         'arm': arm, 'preset': preset, 'config': methods.to_dict(),
         'n_steps': n_steps, 'dt': dt,
@@ -421,14 +333,14 @@ def run_a5b(n_steps: int = 20) -> dict:
     out = {}
     t0 = time.perf_counter()
     h = harness(dim=3, refinement_outer=2, refinement_droplet=2,
-                n_steps=n_steps, split_method='neighbour_count',
-                redistribute_mass=True, curvature_path='integrated')
+                n_steps=n_steps, curvature_path='integrated',
+                methods=PRESETS['static_droplet_floor_3D'])
     out['harness_cache'] = {k: h[k] for k in (
         'max_abs_F_peak', 'max_abs_F_end', 'max_abs_F_history',
         'mass_rel_drift', 'dt')}
     out['harness_cache']['wall_s'] = time.perf_counter() - t0
-    out['pin'] = 7.274172e-05
-    for arm in ('cache', 'pij'):
+    out['pin'] = 7.274134e-05
+    for arm in SOURCE_ARMS:
         out[arm] = run_a5b_arm(arm, n_steps)
     return out
 
@@ -436,7 +348,7 @@ def run_a5b(n_steps: int = 20) -> dict:
 # ---------------------------------------------------------------------------
 # Full 3D dynamic droplet (mirror of oscillating_droplet_3D.py main)
 # ---------------------------------------------------------------------------
-def run_dynamic(arm: str) -> dict:
+def run_dynamic(arm: str, out_dir: str, snapshots: bool = False) -> dict:
     from cases_dynamic.oscillating_droplet.src._analytical import (
         damped_frequency, lamb_damping_rate, max_radius_envelope,
         rayleigh_frequency,
@@ -451,23 +363,13 @@ def run_dynamic(arm: str) -> dict:
 
     dim = 3
     preset = 'oscillating_droplet_3D'
-    suffix = {'pij': '_pij', 'cache': '_cache_laneJ',
-              'pij_simplex': '_pij_simplex'}[arm]
-    methods0 = PRESETS[preset]
+    suffix = f'_laneQ_{arm}'
+    methods = arm_methods(preset, arm)
     omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim, rho_outer=rho_o)
     beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
     _ = damped_frequency(omega, beta)
 
-    HC, bV, mps, bc_set, dudt_fn, _setup_retopo, params = \
-        setup_oscillating_droplet(
-            dim=dim, R0=R0, epsilon=EPS_CASE, l=l,
-            rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
-            gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
-            refinement_outer=2, refinement_droplet=2,
-            split_method=methods0.split_method,
-            redistribute_mass=methods0.redistribute_mass,
-        )
-    methods, custom = arm_methods(preset, arm, mps)
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo, params = _setup(methods, EPS_CASE)
     print(methods.describe(), flush=True)
 
     c_s = np.sqrt(K_d / rho_d)
@@ -484,8 +386,10 @@ def run_dynamic(arm: str) -> dict:
     print(f"[{arm}] dt={dt:.2e}, n_steps={n_steps}, t_end={t_end:.4f}",
           flush=True)
 
-    snapshots_dir = os.path.join(_RESULTS, 'snapshots' + suffix)
-    os.makedirs(snapshots_dir, exist_ok=True)
+    snapshots_dir = None
+    if snapshots:
+        snapshots_dir = os.path.join(out_dir, 'snapshots' + suffix)
+        os.makedirs(snapshots_dir, exist_ok=True)
     history = StateHistory(fields=['u', 'p', 'phase', 'is_interface'],
                            record_every=record_every, save_dir=snapshots_dir)
     diag_list: list[dict] = []
@@ -508,7 +412,7 @@ def run_dynamic(arm: str) -> dict:
         now = time.perf_counter()
         step_times.append(now - t_last[0])
         if step == 0:
-            eff['after_step1'] = _eff(HC_cb, dim, methods)
+            eff['after_step1'] = effective_methods(HC_cb, dim, methods)
         cache_frames[0] += getattr(HC_cb, '_edge_area_cache', None) is not None
         cache_frames[1] += 1
         history.callback(step, t, HC_cb, bV_cb, diagnostics)
@@ -523,8 +427,7 @@ def run_dynamic(arm: str) -> dict:
         t_last[0] = time.perf_counter()
 
     t_final = methods.integrate(HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
-                                bc_set=bc_set, callback=callback, mps=mps,
-                                custom=custom)
+                                bc_set=bc_set, callback=callback, mps=mps)
     wall = time.perf_counter() - t_wall0
     record(t_final)
 
@@ -542,13 +445,13 @@ def run_dynamic(arm: str) -> dict:
     score['refinement_outer'] = 2
     score['refinement_droplet'] = 2
     score['retopo_policy'] = 'dual_only'
-    score['laneJ'] = {
-        'arm': arm, 'edge_area_source_after_step1':
-            eff['after_step1'].get('edge_area_source_laneJ',
-                                   eff['after_step1']['edge_area_source']),
+    score['laneQ'] = {
+        'arm': arm, 'replace': ARMS[arm],
+        'edge_area_source_after_step1': eff['after_step1']['edge_area_source'],
         'cache_present_frames': cache_frames[0],
         'n_callback_frames': cache_frames[1],
         'quarter_mean_err': [float(np.mean(x)) for x in q],
+        'R_max_end': float(R_arr[-1]),
         'KE_max': float(max(d['KE'] for d in diag_list)),
         'wall_s': wall,
         'wall_per_step_s': wall / n_steps,
@@ -556,46 +459,173 @@ def run_dynamic(arm: str) -> dict:
         'two_fluid_reference': 'not applicable: add_two_fluid_reference '
                                'uses the 2D dispersion only',
     }
-    save_score(os.path.join(_RESULTS, f'score{suffix}.json'), score)
+    save_score(os.path.join(out_dir, f'score{suffix}.json'), score,
+               methods=methods)
     record_methods(
-        os.path.join(_RESULTS, f'methods{suffix}.json'), methods, HC,
+        os.path.join(out_dir, f'methods{suffix}.json'), methods, HC,
         extra={'arm': arm, 'base_preset': preset,
                'effective_after_step1': eff['after_step1'],
                'retopo_policy': 'dual_only', 'dt': dt, 'n_steps': n_steps,
                't_end': t_end, 'refinement_outer': 2,
                'refinement_droplet': 2, 'K_d': K_d, 'K_o': K_o,
-               'wall_s': wall},
+               'box_shift': params.get('box_shift'), 'wall_s': wall},
     )
-    with open(os.path.join(_RESULTS, f'diags{suffix}.json'), 'w') as f:
+    with open(os.path.join(out_dir, f'diags{suffix}.json'), 'w') as f:
         json.dump(diag_list, f, default=lambda o: np.asarray(o).tolist())
     print(json.dumps({k: score[k] for k in (
         'l2_error_normalized', 'tail_growth', 'mass_drift', 'R_max_peak',
         'dual_vol_step0_jump', 'dual_vol_drift_post', 'summary')}),
         flush=True)
-    print(json.dumps(score['laneJ']), flush=True)
+    print(json.dumps(score['laneQ']), flush=True)
     return score
+
+
+# ---------------------------------------------------------------------------
+# Hydrostatic 3D column (lane P / lane T case of the hull-edge tie)
+# ---------------------------------------------------------------------------
+def run_hydrostatic(refine: int, n_tac: float, arms=HYDRO_ARMS) -> dict:
+    """``hydrostatic_3D`` (dual_only_bare, no fan cache; the preset reads
+    ``p_ij_simplex`` since laneQ, ``pij_ring`` is the preset as it was
+    before) and its remap arm (delaunay_material) under each explicit
+    source.  Reports the peak and end |u|, the end KE and the integrated
+    pressure error, with the wall time."""
+    from cases_dynamic.Hydrostatic_column.src._column import (
+        build_column, column_errors, remap_arm, run_column, CASES,
+    )
+    kw = CASES['hydrostatic_3D']
+    out: dict = {'refine': refine, 'n_tac': n_tac, 'arms': {}}
+    for base_name, base in (('preset', PRESETS['hydrostatic_3D']),
+                            ('remap', remap_arm(PRESETS['hydrostatic_3D']))):
+        for arm in arms:
+            rep = dict(ARMS[arm])
+            m = base.replace(**rep) if rep else base
+            col = build_column(3, refine, H=kw['H'], side_walls=kw['side_walls'],
+                               ic='drop')
+            t0 = time.perf_counter()
+            res = run_column(col, m, n_tac=n_tac)
+            wall = time.perf_counter() - t0
+            err = column_errors(col)
+            eff = effective_methods(col.HC, 3, m)
+            row = dict(
+                config=m.to_dict(), edge_area_source=eff['edge_area_source'],
+                n_steps=int(res['n_steps']), dt=float(res['dt']),
+                umax_peak=float(res['umax'].max()),
+                umax_end=float(res['umax'][-1]),
+                umax_last4=float(res['umax'][int(len(res['umax']) * (1 - 4 / n_tac)):].max())
+                if n_tac > 4 else float(res['umax'].max()),
+                ke_end=float(res['ke'][-1]), ke_peak=float(res['ke'].max()),
+                l2=float(err['l2']), l2_interior=float(err['l2_interior']),
+                rho_g_H=float(err['rho_g_H']), mass_drift=float(err['mass_drift']),
+                wall_s=wall, wall_per_step_s=wall / int(res['n_steps']),
+            )
+            out['arms'][f'{base_name}/{arm}'] = row
+            print(f"  [{base_name}/{arm}] src {row['edge_area_source']:12s} "
+                  f"umax peak {row['umax_peak']:.6e} end {row['umax_end']:.3e} "
+                  f"KE end {row['ke_end']:.12e} l2 {row['l2']:.3e} "
+                  f"{wall:.0f} s ({row['wall_per_step_s'] * 1e3:.0f} ms/step)",
+                  flush=True)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Dam break 3D smoke
+# ---------------------------------------------------------------------------
+def run_dambreak(n_steps: int, arms=('cache', 'pij_simplex', 'pij')) -> dict:
+    from cases_dynamic.dam_break.src._params import (
+        H, L, W, a, alpha_art, cfl, col_d, col_h, col_w, g, gamma as gam,
+        gravity_axis, K_g, K_l, mu_g, mu_l, n_refine_3d, P_atm, rho_g, rho_l,
+    )
+    from cases_dynamic.dam_break.src._setup import (
+        cfl_timestep, setup_dam_break_multiphase,
+    )
+    from ddgclib.data import compute_conservation
+
+    out: dict = {'n_steps': n_steps, 'arms': {}}
+    for arm in arms:
+        m = PRESETS['dam_break_3D']
+        rep = dict(ARMS[arm])
+        if rep:
+            m = m.replace(**rep)
+        HC, bV, mps, bc_set, dudt_fn, _r, params = setup_dam_break_multiphase(
+            dim=3, a=a, L=L, H=H, W=W, col_w=col_w, col_h=col_h, col_d=col_d,
+            rho_l=rho_l, rho_g=rho_g, mu_l=mu_l, mu_g=mu_g, gamma=gam,
+            K_l=K_l, K_g=K_g, g=g, gravity_axis=gravity_axis, P_atm=P_atm,
+            n_refine=n_refine_3d, alpha_art=alpha_art,
+            redistribute_mass=m.redistribute_mass)
+        c_s = np.sqrt(K_l / rho_l)
+        dt = cfl_timestep(HC, 3, c_s, cfl=cfl)
+        m0 = compute_conservation(HC, dim=3)['mass_total']
+        ke_hist = []
+
+        def cb(step, t, HC_cb, bV_cb=None, diagnostics=None, ke_hist=ke_hist):
+            ke_hist.append(sum(0.5 * v.m * float(np.dot(v.u[:3], v.u[:3]))
+                               for v in HC_cb.V if v.phase == 1))
+
+        t0 = time.perf_counter()
+        status = 'ok'
+        try:
+            m.integrate(HC, bV, dudt_fn, dt=dt, n_steps=n_steps, bc_set=bc_set,
+                        callback=cb, mps=mps)
+        except Exception as e:  # noqa: BLE001 - smoke report
+            status = f'aborted: {type(e).__name__}: {e}'
+        wall = time.perf_counter() - t0
+        row = dict(
+            config=m.to_dict(), status=status, dt=float(dt),
+            steps_done=len(ke_hist),
+            edge_area_source=effective_methods(HC, 3, m)['edge_area_source'],
+            mass_rel_drift=float(abs(compute_conservation(HC, dim=3)['mass_total'] - m0) / m0),
+            ke_liq_end=float(ke_hist[-1]) if ke_hist else None,
+            ke_liq_max=float(max(ke_hist)) if ke_hist else None,
+            umax_end=float(max(np.linalg.norm(v.u[:3]) for v in HC.V)),
+            wall_s=wall, wall_per_step_s=wall / max(len(ke_hist), 1),
+        )
+        out['arms'][arm] = row
+        print(f"  [{arm}] {status}; src {row['edge_area_source']}, steps "
+              f"{row['steps_done']}, KE_liq end {row['ke_liq_end']:.6e} max "
+              f"{row['ke_liq_max']:.6e}, |u|max {row['umax_end']:.4f}, mass "
+              f"drift {row['mass_rel_drift']:.1e}, {wall:.0f} s "
+              f"({row['wall_per_step_s'] * 1e3:.0f} ms/step)", flush=True)
+    return out
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument('task', choices=('static', 'a5b', 'dynamic'))
-    ap.add_argument('--arm', choices=('cache', 'pij', 'pij_simplex', 'all'),
-                    default='all')
+    ap.add_argument('task', choices=('static', 'a5b', 'dynamic', 'hydrostatic',
+                                     'dambreak'))
+    ap.add_argument('--arm', choices=tuple(ARMS) + ('all',), default='all')
     ap.add_argument('--n-steps', type=int, default=20)
+    ap.add_argument('--refine', type=int, default=1)
+    ap.add_argument('--n-tac', type=float, default=40.0)
+    ap.add_argument('--snapshots', action='store_true',
+                    help='dynamic: also write the StateHistory snapshots')
+    ap.add_argument('--out', default=_RESULTS,
+                    help='output directory (default results_3d/)')
     a = ap.parse_args()
-    os.makedirs(_RESULTS, exist_ok=True)
+    os.makedirs(a.out, exist_ok=True)
     if a.task == 'static':
         out = run_static()
-        path = os.path.join(_RESULTS, 'laneJ_static.json')
+        path = os.path.join(a.out, 'laneQ_static.json')
     elif a.task == 'a5b' and a.arm == 'all':
         out = run_a5b(a.n_steps)
-        path = os.path.join(_RESULTS, 'laneJ_a5b.json')
+        path = os.path.join(a.out, 'laneQ_a5b.json')
     elif a.task == 'a5b':
         out = run_a5b_arm(a.arm, a.n_steps)
-        path = os.path.join(_RESULTS, f'laneJ_a5b_{a.arm}.json')
+        path = os.path.join(a.out, f'laneQ_a5b_{a.arm}.json')
+    elif a.task == 'hydrostatic':
+        arms = HYDRO_ARMS if a.arm == 'all' else (a.arm,)
+        out = run_hydrostatic(a.refine, a.n_tac, arms)
+        path = os.path.join(a.out, f'laneQ_hydrostatic_r{a.refine}_t{a.n_tac:g}'
+                            + ('' if a.arm == 'all' else f'_{a.arm}') + '.json')
+    elif a.task == 'dambreak':
+        arms = ('cache', 'pij_simplex', 'pij') if a.arm == 'all' else (a.arm,)
+        out = run_dambreak(a.n_steps, arms)
+        path = os.path.join(a.out, 'laneQ_dambreak'
+                            + ('' if a.arm == 'all' else f'_{a.arm}')
+                            + f'_{a.n_steps}.json')
     else:
-        run_dynamic('pij' if a.arm == 'all' else a.arm)
+        run_dynamic('cache' if a.arm == 'all' else a.arm, a.out,
+                    snapshots=a.snapshots)
         sys.exit(0)
     with open(path, 'w') as f:
         json.dump(out, f, indent=2, default=float)

@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ddgclib.operators.stress import dual_area_vector, scalar_gradient_integrated
+from ddgclib.operators.stress import edge_area_vector, scalar_gradient_integrated
 
 __all__ = ["density_diffusion_step"]
 
@@ -65,7 +65,7 @@ def density_diffusion_step(HC, verts, delta: float, c0: float, dt: float,
             sumA = np.zeros(dim)
             absA = 0.0
             for w in v.nn:
-                A = dual_area_vector(v, w, HC, dim)
+                A = edge_area_vector(v, w, HC, dim)
                 sumA += A
                 absA += float(np.linalg.norm(A))
             closed[id(v)] = absA > 0.0 and float(np.linalg.norm(sumA)) < 1e-8 * absA
@@ -82,7 +82,7 @@ def density_diffusion_step(HC, verts, delta: float, c0: float, dt: float,
         for w in v.nn:
             if w not in vset or id(w) in done:
                 continue
-            A = dual_area_vector(v, w, HC, dim)
+            A = edge_area_vector(v, w, HC, dim)
             An = float(np.linalg.norm(A))
             if An == 0.0:
                 continue

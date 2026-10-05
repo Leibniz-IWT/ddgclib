@@ -77,8 +77,34 @@ def _orient_2d(A_ij: np.ndarray, x_i: np.ndarray, x_j: np.ndarray,
                    f"{AREA_ORIENTATIONS}")
 
 
-def dual_area_vector(v_i, v_j, HC, dim: int = 3,
+# 3D per-edge sources of dual_area_vector (method axis ``edge_area_source``):
+# the exact polygon read from HC._simplices, or the legacy ring walk with
+# its face-barycentre heuristic.  The retopology records the axis value on
+# HC._edge_area_source; the cache-filling values read the exact polygon
+# for any edge outside their cache.
+_EXACT_EDGE_SOURCES = ('p_ij', 'p_ij_simplex')
+
+
+def edge_area_vector(v_i, v_j, HC, dim: int = 3,
                      orientation: str = 'primal_edge') -> np.ndarray:
+    """``A_ij`` as the force operators read it: the entry of
+    ``HC._edge_area_cache`` when the retopology cached this directed edge,
+    else :func:`dual_area_vector`.  One lookup for every operator that
+    reads a dual face, so that all of them follow the axis
+    ``edge_area_source``."""
+    cache = getattr(HC, '_edge_area_cache', None)
+    if cache is not None:
+        row = cache.get(id(v_i))
+        if row is not None:
+            A_ij = row.get(id(v_j))
+            if A_ij is not None:
+                return A_ij
+    return dual_area_vector(v_i, v_j, HC, dim, orientation)
+
+
+def dual_area_vector(v_i, v_j, HC, dim: int = 3,
+                     orientation: str = 'primal_edge',
+                     source: str | None = None) -> np.ndarray:
     """Oriented dual area vector for the interface between parcels i and j.
 
     Computes A_ij, the total outward area vector of the dual face separating
@@ -102,9 +128,25 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3,
     In 3D the dual face is the DEC p_ij polygon: tet barycenters interleaved
     with face barycenters (x_i + x_j + x_k)/3.  This construction guarantees
     linear precision (machine eps) for barycentric duals on any tetrahedral
-    mesh.  See :func:`_dual_area_vector_3d_p_ij`.  Falls back to the legacy
-    e_star fan-walk (:func:`_dual_area_vector_3d_e_star`) for boundary or
-    degenerate edges.
+    mesh.  Which construction builds it is *source* (method axis
+    ``edge_area_source``, laneQ):
+
+    - ``'p_ij'`` / ``'p_ij_simplex'``: the polygon read from the
+      tetrahedra of ``HC._simplices`` around the edge
+      (:func:`_dual_area_vector_3d_simplex`): exact faces and ring order,
+      open chain through the edge midpoint on a hull edge, flat
+      tetrahedra oriented by their neighbours.  Requires the simplex
+      cache.
+    - ``'p_ij_ring'`` / ``'e_star_cache'`` / ``None`` on a mesh that no
+      retopology has tagged: the legacy ring walk over the shared dual
+      vertices with the nearest-barycentre face heuristic
+      (:func:`_dual_area_vector_3d_p_ij`; wrong face on some edges with
+      non-face 3-cycles, laneJ, and tie-decided on hull edges, laneT).
+      Falls back to the e_star fan-walk
+      (:func:`_dual_area_vector_3d_e_star`) for degenerate edges.
+
+    ``source=None`` reads ``HC._edge_area_source``, which the retopology
+    sets to the axis value that ran.
 
     Parameters
     ----------
@@ -116,6 +158,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3,
         Spatial dimension (1, 2, or 3).
     orientation : {'primal_edge', 'dual_midpoint'}
         2D sign rule (above).
+    source : {None, 'p_ij', 'p_ij_simplex', 'p_ij_ring', 'e_star_cache'}
+        3D construction (above); ignored in 1D / 2D.
 
     Returns
     -------
@@ -203,10 +247,88 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3,
                           0.5 * (vd1.x_a[:2] + vd2.x_a[:2]), orientation)
 
     elif dim == 3:
+        if source is None:
+            source = getattr(HC, '_edge_area_source', None)
+        if source in _EXACT_EDGE_SOURCES:
+            if getattr(HC, '_simplices', None) is None:
+                raise ValueError(
+                    f"edge_area_source={source!r} needs the top-simplex "
+                    "cache HC._simplices (a Delaunay retopology or a domain "
+                    "builder provides it); it is None")
+            return _dual_area_vector_3d_simplex(v_i, v_j, HC)
         return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
 
     else:
         raise NotImplementedError(f"dual_area_vector not implemented for dim={dim}")
+
+
+def _dual_area_vector_3d_simplex(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector of the edge from the tetrahedra around it.
+
+    The DEC ``p_ij`` polygon (tet barycentres interleaved with the
+    barycentres ``(x_i + x_j + x_k) / 3`` of the faces between consecutive
+    tets) with the ring order and the face vertices ``k`` read from the
+    link of the edge in ``HC._simplices``: the per-edge form of
+    ``hyperct.ddg.simplex_dual_face_areas`` (laneJ's construction, which
+    closes to 2e-16 and is linearly precise to 2e-15 where the
+    nearest-barycentre heuristic of :func:`_dual_area_vector_3d_p_ij`
+    picks a non-face vertex).  On a hull edge the link is an open chain
+    and the polygon runs from the edge midpoint over the first boundary
+    face barycentre, the tets, the last boundary face barycentre and back
+    (laneT's tie between the midpoint and a boundary face barycentre
+    does not arise).  A flat tetrahedron takes its place in the ring like
+    any other, so it is oriented by its neighbours.  Oriented so that
+    ``A_ij . (x_j - x_i) > 0`` (the sum over the tets is
+    ``|T| / 2`` each).  Needs ``HC._simplices``; an edge with a
+    non-manifold link falls back to the ring walk.
+    """
+    tets = [s for s in _vertex_simplices(HC).get(id(v_i), ())
+            if any(w is v_j for w in s)]
+    if not tets:
+        return np.zeros(3)
+    others = [tuple(w for w in T if w is not v_i and w is not v_j)
+              for T in tets]
+    count: dict = {}
+    for o in others:
+        for w in o:
+            count[id(w)] = count.get(id(w), 0) + 1
+    ends = [w for w in count if count[w] == 1]
+    if any(len(o) != 2 for o in others) or any(c > 2 for c in count.values()) \
+            or len(ends) not in (0, 2):
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+    n = len(tets)
+    # walk the link: start at an end of an open chain, else anywhere
+    if ends:
+        start = next(t for t in range(n) if any(id(w) == ends[0] for w in others[t]))
+        cur = next(w for w in others[start] if id(w) == ends[0])
+    else:
+        start, cur = 0, others[0][0]
+    x_i, x_j = v_i.x_a[:3], v_j.x_a[:3]
+    pts = []
+    if ends:
+        pts.append(0.5 * (x_i + x_j))
+        pts.append((x_i + x_j + cur.x_a[:3]) / 3.0)
+    used = [False] * n
+    t = start
+    for _ in range(n):
+        used[t] = True
+        T = tets[t]
+        pts.append((T[0].x_a[:3] + T[1].x_a[:3] + T[2].x_a[:3]
+                    + T[3].x_a[:3]) / 4.0)
+        cur = next(w for w in others[t] if w is not cur)
+        pts.append((x_i + x_j + cur.x_a[:3]) / 3.0)
+        t = next((u for u in range(n)
+                  if not used[u] and any(w is cur for w in others[u])), None)
+        if t is None:
+            break
+    if not all(used):
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+    P = np.array(pts)
+    c = P.mean(axis=0)
+    A_ij = 0.5 * np.cross(P - c, np.roll(P, -1, axis=0) - c).sum(axis=0)
+    if np.dot(A_ij, x_j - x_i) < 0:
+        A_ij = -A_ij
+    return A_ij
 
 
 def _dual_area_vector_3d_p_ij(v_i, v_j, HC) -> np.ndarray:

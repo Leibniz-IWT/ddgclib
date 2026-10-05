@@ -363,7 +363,7 @@ def _csf_dual_surface_tension(
     # sum of dual-face area vectors weighted by each face's interior-side
     # phase fraction.  For a 2-phase interface vertex with phase set
     # {0, 1}, "interior side" is the higher-phase index by convention.
-    from ddgclib.operators.stress import dual_area_vector
+    from ddgclib.operators.stress import edge_area_vector
     from ddgclib.geometry._dual_split_2d import edge_phase_area_fractions
     phases = sorted(int(k) for k in getattr(v, 'interface_phases', set()))
     if len(phases) < 2:
@@ -372,7 +372,9 @@ def _csf_dual_surface_tension(
 
     S_inner = np.zeros(dim)
     for v_j in v.nn:
-        A_ij = dual_area_vector(v, v_j, HC, dim)
+        # the face the per-phase pressure flux reads (cache, else the
+        # per-edge construction of the axis edge_area_source; laneQ)
+        A_ij = edge_area_vector(v, v_j, HC, dim)
         fractions = edge_phase_area_fractions(v, v_j, dim=dim, interface=HC)
         if inner_phase in fractions:
             S_inner += fractions[inner_phase] * A_ij[:dim]

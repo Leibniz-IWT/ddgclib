@@ -173,7 +173,14 @@ class TestFreeSurfaceEdgeAreaIsDecidedByATie:
     refinement 2 column by 2e-06 after 150 steps on FIXED connectivity
     (at refinement 1, where no edge joins two free-surface vertices, by
     6e-12 after 370 steps).  Not fixed in lane T: it changes the force on
-    every 3D free surface and with it the pins of lane P."""
+    every 3D free surface and with it the pins of lane P.
+
+    Lane Q (2026-10-05): the exact sources of the axis ``edge_area_source``
+    (``'p_ij'`` per edge, ``'p_ij_simplex'`` cached) read the polygon from
+    the tetrahedra and are exact on the hull edges too; the ring walk is
+    the registered value ``'p_ij_ring'`` (status broken) and still the
+    default of a mesh no retopology has tagged, which the first test
+    keeps locking."""
 
     @pytest.fixture(scope='class')
     def column(self):
@@ -185,9 +192,11 @@ class TestFreeSurfaceEdgeAreaIsDecidedByATie:
                             ic='drop')
 
     @staticmethod
-    def _errors(col, on_surface: bool) -> list[float]:
+    def _errors(col, on_surface: bool, area=None) -> list[float]:
         from ddgclib.operators.stress import dual_area_vector
         HC = col.HC
+        if area is None:
+            area = lambda v, nb: dual_area_vector(v, nb, HC, 3)  # noqa: E731
         errors = []
         for v in HC.V:
             if v in col.bV:
@@ -197,9 +206,8 @@ class TestFreeSurfaceEdgeAreaIsDecidedByATie:
                 if both != on_surface:
                     continue
                 ref = _per_tetrahedron_area(v, nb, HC)
-                errors.append(float(np.linalg.norm(
-                    dual_area_vector(v, nb, HC, 3) - ref)
-                    / np.linalg.norm(ref)))
+                errors.append(float(np.linalg.norm(area(v, nb) - ref)
+                                    / np.linalg.norm(ref)))
         return errors
 
     def test_edges_with_an_interior_endpoint_are_exact(self, column):
@@ -207,15 +215,35 @@ class TestFreeSurfaceEdgeAreaIsDecidedByATie:
         assert len(errors) == 1127
         assert max(errors) < 1e-14                    # measured 8.3e-16
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "3D p_ij ring: spurious face barycentre next to the edge midpoint "
-        "of a boundary edge, decided by a tie on the builder lattice (30 "
-        "of the 56 boundary edges at the 9 free-surface vertices off by "
-        "up to 0.373); lane T log, section 6"))
-    def test_edges_on_the_boundary_are_exact(self, column):
+    def test_ring_walk_is_off_on_the_boundary_edges(self, column):
+        """The legacy construction (the default of an untagged mesh and
+        the value 'p_ij_ring'): 30 of the 56 boundary edges at the 9
+        free-surface vertices off by up to 0.373 (lane T, section 6)."""
+        from ddgclib.operators.stress import dual_area_vector
         errors = self._errors(column, on_surface=True)
+        ring = self._errors(column, on_surface=True, area=lambda v, nb:
+                            dual_area_vector(v, nb, column.HC, 3,
+                                             source='p_ij_ring'))
+        assert errors == ring
         assert len(errors) == 56
-        assert max(errors) < 1e-14
+        assert sum(e > 1e-12 for e in errors) == 30
+        assert 0.37 < max(errors) < 0.38
+
+    def test_exact_sources_are_exact_on_the_boundary_edges(self, column):
+        """Lane Q: the per-edge polygon read from the tetrahedra
+        ('p_ij') and the vectorised cache ('p_ij_simplex') against the
+        per-tetrahedron sum, on the 56 free-surface edges."""
+        from hyperct.ddg import simplex_dual_face_areas
+        from ddgclib.operators.stress import dual_area_vector
+        HC = column.HC
+        per_edge = self._errors(column, on_surface=True, area=lambda v, nb:
+                                dual_area_vector(v, nb, HC, 3, source='p_ij'))
+        cache = simplex_dual_face_areas(HC, 3)
+        cached = self._errors(column, on_surface=True,
+                              area=lambda v, nb: cache[id(v)][id(nb)])
+        assert len(per_edge) == len(cached) == 56
+        assert max(per_edge) < 1e-14
+        assert max(cached) < 1e-14
 
 
 @pytest.mark.slow

@@ -67,6 +67,11 @@ _MEMBERSHIP_ADAPTIVE_MSG = (
 # because the multiprocessing backend owns a pool.
 _BACKEND_INSTANCES = {}
 
+# Values of the 3D method axis ``edge_area_source`` (laneQ); see
+# ``_retopologize``.  None = the legacy 'e_star_cache'.
+_EDGE_AREA_SOURCES = (None, 'e_star_cache', 'p_ij', 'p_ij_simplex',
+                      'p_ij_ring')
+
 
 def _resolve_backend(backend):
     """Backend name -> ``hyperct._backend`` instance (cached).  ``None``
@@ -84,7 +89,8 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   skip_triangulation=False,
                   pressure_model=None, redistribute_mass=False,
                   remesh_mode='delaunay', remesh_kwargs=None,
-                  retopo_remap=None, frozen_set='hull'):
+                  retopo_remap=None, frozen_set='hull',
+                  edge_area_source=None):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -213,6 +219,35 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
           a member, and a member off the hull is collapsed and
           smoothed like an interior vertex.
           See docs_temp/debug_session/laneL-frozen-set-membership.md.
+    edge_area_source : {None, 'e_star_cache', 'p_ij', 'p_ij_simplex', 'p_ij_ring'}
+        Source of the oriented dual face area vectors ``A_ij`` the force
+        operators read in 3D (method axis ``edge_area_source``, laneQ);
+        not read in 1D / 2D.  ``HC._edge_area_source`` records the value
+        that ran.
+
+        - ``None`` / ``'e_star_cache'`` (previous behaviour, bit-identical):
+          ``HC._edge_area_cache`` holds the ``batch_e_star(orient=True)``
+          fan areas of every edge at an interior vertex; the fan walk also
+          promotes a vertex whose dual fan fails to the boundary.  Edges
+          outside the cache (hull vertices) read the legacy ring walk.
+          Not linearly precise (laneJ: 3 to 25 % at the droplet cells).
+        - ``'p_ij_simplex'``: ``HC._edge_area_cache`` holds the exact
+          barycentric dual face of every directed edge of every vertex,
+          hull included, from ``hyperct.ddg.simplex_dual_face_areas`` (one
+          vectorised pass over ``HC._simplices``; needs the simplex cache
+          and barycentric duals).  No fan walk runs, so no fan-failure
+          promotion happens.
+        - ``'p_ij'``: no cache; every edge is built on demand from the
+          tetrahedra around it (``stress._dual_area_vector_3d_simplex``,
+          the same polygon, uncached).
+        - ``'p_ij_ring'``: no cache; every edge from the legacy ring walk
+          with its nearest-barycentre face heuristic (status broken:
+          laneJ F4b, laneT tie on hull edges).  Kept so that laneJ's
+          ``p_ij`` arm and every pre-laneQ number of a cache-less path
+          can be reproduced.
+
+        The dual volumes do not depend on the value (exact simplex
+        volumes whenever ``HC._simplices`` exists).
 
     Steps:
         0. (Optional) Merge close vertices via ``HC.V.merge_all``
@@ -238,6 +273,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             "frozen_set='membership' is not implemented on the periodic "
             "retopology path"
         )
+    if edge_area_source not in _EDGE_AREA_SOURCES:
+        raise ValueError(
+            f"edge_area_source must be one of {_EDGE_AREA_SOURCES}, got "
+            f"{edge_area_source!r}")
+    if edge_area_source is not None and (dim != 3 or periodic_axes):
+        raise ValueError(
+            "edge_area_source is a 3D axis of the non-periodic retopology "
+            f"(dim={dim}, periodic_axes={periodic_axes!r})")
     if membership and remesh_mode == 'adaptive' and not skip_triangulation:
         raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
     remap_active = retopo_remap == 'conservative' and not skip_triangulation
@@ -383,10 +426,24 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     try:
         from hyperct.ddg import batch_e_star
         interior = [v for v in HC.V if v not in dV]
-        edge_areas, failed, vols = batch_e_star(
-            interior, HC, dim=dim, backend=backend,
-            orient=True, compute_volumes=True,
-        )
+        if dim == 3 and edge_area_source == 'p_ij_simplex':
+            # NOTE(laneQ): exact dual faces of every edge in one pass over
+            # the simplex cache; no fan walk, so nothing is promoted.
+            from hyperct.ddg import simplex_dual_face_areas
+            from ddgclib.operators.stress import (
+                _use_exact_barycentric_volume,
+            )
+            if not _use_exact_barycentric_volume(HC):
+                raise ValueError(
+                    "edge_area_source='p_ij_simplex' needs HC._simplices "
+                    "with barycentric duals")
+            edge_areas = simplex_dual_face_areas(HC, dim)
+            failed, vols = set(), {}
+        else:
+            edge_areas, failed, vols = batch_e_star(
+                interior, HC, dim=dim, backend=backend,
+                orient=True, compute_volumes=True,
+            )
         for v in failed:
             v.boundary = True
             dV.add(v)
@@ -425,7 +482,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         else:
             for v in HC.V:
                 v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
-        HC._edge_area_cache = edge_areas
+        if edge_area_source in ('p_ij', 'p_ij_ring'):
+            # NOTE(laneQ): uncached sources (laneJ's no_cache wrapper):
+            # the force reads dual_area_vector on every edge.
+            HC._edge_area_cache = None
+        else:
+            HC._edge_area_cache = edge_areas
+        if dim == 3:
+            HC._edge_area_source = edge_area_source or 'e_star_cache'
     except (ImportError, NotImplementedError):
         from ddgclib.operators.stress import cache_dual_volumes
         cache_dual_volumes(HC, dim)
@@ -509,7 +573,7 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
-                     displacement_eps=None):
+                     displacement_eps=None, edge_area_source=None):
     """Dispatch topology management to custom or default function.
 
     Parameters
@@ -570,6 +634,9 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
 
         Suggested first cut for dynamic runs: ``1e-4 * h_min`` where
         ``h_min`` is the minimum edge length.
+    edge_area_source : str or None
+        Forwarded to :func:`_retopologize` (and, by name, to a callable
+        *retopologize_fn* that declares it).  See its docstring.
     """
     if retopologize_fn is False:
         return
@@ -621,6 +688,7 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                 ('domain_bounds', domain_bounds),
                 ('pressure_model', pressure_model),
                 ('redistribute_mass', redistribute_mass),
+                ('edge_area_source', edge_area_source),
             ):
                 if (name in params and name not in bound_kw
                         and params[name].kind is not
@@ -639,7 +707,8 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                       pressure_model=pressure_model,
                       redistribute_mass=redistribute_mass,
                       remesh_mode=remesh_mode,
-                      remesh_kwargs=remesh_kwargs)
+                      remesh_kwargs=remesh_kwargs,
+                      edge_area_source=edge_area_source)
 
     if displacement_eps is not None and displacement_eps > 0:
         _snapshot_retopo_positions(HC)
@@ -653,7 +722,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              split_method='neighbour_count',
                              retopo_remap=None,
                              projection_every=1,
-                             frozen_set='hull'):
+                             frozen_set='hull',
+                             edge_area_source=None):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -760,6 +830,10 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         Forwarded to every :func:`_retopologize` call of this function
         (default ``'hull'``: previous behaviour).  See its docstring.
         ``'membership'`` with ``remesh_mode='adaptive'`` raises.
+    edge_area_source : str or None
+        Forwarded to every :func:`_retopologize` call of this function
+        (3D source of the dual face areas; default ``None``: previous
+        behaviour).  See its docstring.
     """
     if retopo_remap not in (None, 'conservative'):
         raise ValueError(
@@ -827,7 +901,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         # anchor below folds into the per-phase volume targets.
         _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
                       backend=backend, skip_triangulation=True,
-                      frozen_set=frozen_set)
+                      frozen_set=frozen_set,
+                      edge_area_source=edge_area_source)
         mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
         _vol_mid = phase_volume_totals(HC, mps.n_phases)
         if not project_now:
@@ -851,7 +926,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                   skip_triangulation=skip_triangulation,
                   remesh_mode=remesh_mode,
                   remesh_kwargs=remesh_kwargs,
-                  frozen_set=frozen_set)
+                  frozen_set=frozen_set,
+                  edge_area_source=edge_area_source)
 
     # Refresh multiphase state
     if mps is not None:
@@ -1108,6 +1184,7 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
           displacement_eps=None, density_diffusion=None,
+          edge_area_source=None,
           **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -1178,7 +1255,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         if density_diffusion:
             if not hasattr(pressure_model, 'sound_speed'):
@@ -1218,6 +1296,7 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
                      displacement_eps=None, density_diffusion=None,
+                     edge_area_source=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
@@ -1283,7 +1362,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         if density_diffusion:
             _density_diffusion(HC, verts, density_diffusion, pressure_model, dt, dim)
@@ -1318,7 +1398,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           domain_bounds=None, skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
-          displacement_eps=None,
+          displacement_eps=None, edge_area_source=None,
           **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
@@ -1403,7 +1483,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -1464,7 +1545,7 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         domain_bounds=None, skip_triangulation=False,
                         pressure_model=None, redistribute_mass=False,
                         remesh_mode='delaunay', remesh_kwargs=None,
-                        displacement_eps=None,
+                        displacement_eps=None, edge_area_source=None,
                         **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
@@ -1516,7 +1597,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -1542,7 +1624,7 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    domain_bounds=None, skip_triangulation=False,
                    pressure_model=None, redistribute_mass=False,
                    remesh_mode='delaunay', remesh_kwargs=None,
-                   displacement_eps=None,
+                   displacement_eps=None, edge_area_source=None,
                    **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
@@ -1629,7 +1711,8 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

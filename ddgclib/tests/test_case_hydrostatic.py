@@ -357,12 +357,15 @@ class TestColumn3D:
         """Refinement 1, 4 acoustic times from the equilibrium masses.
         The preset uses connectivity='dual_only_bare': the 3D branch of
         'dual_only' zeroes the dual volume of every frozen vertex, so the
-        wall cells would read the reference pressure P0."""
+        wall cells would read the reference pressure P0.  Since lane Q
+        it reads the exact dual faces (edge_area_source='p_ij_simplex',
+        cached by the bare refresh), not the ring walk."""
         from ddgclib.methods import PRESETS, effective_methods
         col, res, err = _column_run('hydrostatic_3D', 1, 4.0, 'equilibrium')
         eff = effective_methods(col.HC, 3, PRESETS['hydrostatic_3D'])
         assert eff['boundary_dual_vol'] == 'half_cell'
-        assert eff['edge_area_source'] == 'p_ij_ring_3d'
+        assert eff['edge_area_source'] == 'p_ij_simplex'
+        assert eff['edge_area_cache_present'] is True
         assert len(col.bV) == 25 and len(col.free) == 10
         assert all(v.dual_vol > 0.0 for v in col.bV)
         assert res['umax'].max() < 2e-4                 # measured 7.5e-05
@@ -415,14 +418,19 @@ class TestColumn3D:
         later was pinned: the reconnecting 3D arm was reproducible from
         process to process to two digits only (lane P log, section 11).
         It is bit-identical in every interpreter now, so the kinetic
-        energy at the end of the run is pinned too.  Both pins are
-        tie-decided numbers: the mesh is structured (cospherical points,
-        and the free-surface edge areas of the lane T log, section 6),
-        and a 1e-15 shift of the interior vertices moves the peak by up
-        to 1.25e-03 relative and the end value by 6.9e-04 (8 seeds,
-        ``diagnose_determinism.py sweep pin_hydro3d_remap --perturb
-        1e-15``).  A change of a summation order upstream may move them
-        by that much and no more (protocol rule 8)."""
+        energy at the end of the run is pinned too.  Until lane Q both
+        pins were tie-decided numbers: the mesh is structured
+        (cospherical points) and the ring walk put a spurious face
+        barycentre into the polygon of 30 of the 56 free-surface edges
+        (lane T log, section 6), so a 1e-15 shift of the interior
+        vertices moved the peak by up to 1.25e-03 relative and the end
+        value by 6.9e-04 (8 seeds, ``diagnose_determinism.py sweep
+        pin_hydro3d_remap --perturb 1e-15``).  Lane Q (2026-10-05) reads
+        the exact dual faces (``edge_area_source='p_ij_simplex'``) and
+        re-pinned both: peak 0.15658060026054665 -> 0.15305813130485327,
+        end 0.5431445985762776 -> 0.528851067635385 (the removed hull-edge
+        areas, beyond the perturbation range; the old values reproduce
+        with ``edge_area_source='p_ij_ring'``)."""
         col, res, err = _column_run('hydrostatic_3D', 2, 2.0, 'drop', 'remap')
         col_p, res_p, _ = _column_run('hydrostatic_3D', 2, 2.0, 'drop')
         assert len(col.bV) == len(col_p.bV) == 89
@@ -490,17 +498,30 @@ PIN_1D_KE_END = 8.07861451666529
 PIN_2D_UMAX_PEAK = 0.1951860472291084
 PIN_2D_KE_END = 3.1650897086706908e-06
 PIN_2DP_UMAX_PEAK = 2.631506910977075e-05
-PIN_3D_UMAX_PEAK = 0.08910127097486757
+# RE-PIN 2026-10-05 (lane Q, hydrostatic_3D on edge_area_source=
+# 'p_ij_simplex'): the refinement 1 column has no edge between two
+# free-surface vertices, so the exact faces differ from the ring walk by
+# round-off only; the run amplifies that to 1e-16 (peak) and 1.2e-11
+# (KE at 40 t_ac), the order lane T measured for a 1e-15 shift.
+# Before: 0.08910127097486757 / 6.206365156298652e-06 (reproduced by
+# edge_area_source='p_ij_ring').
+PIN_3D_UMAX_PEAK = 0.08910127097486756
 PIN_2D_KE_40 = 9.872765069804785e-07
 PIN_2D_REMAP_KE_40 = 2.721558596123262e-06
 # Pinned 2026-10-01 (lane P, review fix): remap arm of hydrostatic_3D
 # (connectivity='delaunay_material', remap='conservative',
 # redistribute_mass=True), refinement 2, 2 acoustic times.
-PIN_3D_REMAP_UMAX_PEAK = 0.15658060026054665
+# RE-PIN 2026-10-05 (lane Q): 0.15658060026054665 -> 0.15305813130485327
+# with the exact dual faces (the ring walk had 30 of the 56 free-surface
+# edge areas off by up to 37 %, lane T).
+PIN_3D_REMAP_UMAX_PEAK = 0.15305813130485327
 # Pinned 2026-10-02 (lane T): end-of-run values of the two 3D runs above,
 # possible since 3D runs are bit-identical between interpreters
 # (ddgclib/tests/test_determinism.py).  Kinetic energy of the free
 # vertices after 40 acoustic times (preset, refinement 1) and after 2
 # acoustic times (remap arm, refinement 2).
-PIN_3D_KE_40 = 6.206365156298652e-06
-PIN_3D_REMAP_KE_END = 0.5431445985762776
+# RE-PIN 2026-10-05 (lane Q): 6.206365156298652e-06 -> 6.2063651562987255e-06
+# (round-off, see PIN_3D_UMAX_PEAK), 0.5431445985762776 ->
+# 0.528851067635385 (the hull-edge areas, see PIN_3D_REMAP_UMAX_PEAK).
+PIN_3D_KE_40 = 6.2063651562987255e-06
+PIN_3D_REMAP_KE_END = 0.528851067635385

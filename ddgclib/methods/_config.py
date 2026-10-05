@@ -63,6 +63,13 @@ _RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material')
 # are off the hull (measured, laneL fix round 1).
 _HULL_REBUILDING = ('delaunay',)
 
+# Connectivity values whose retopology function applies the 3D axis
+# edge_area_source (laneQ), and the subset that builds the batch_e_star
+# fan cache ('e_star_cache').
+_EDGE_AREA_CONNECTIVITIES = ('delaunay', 'dual_only', 'dual_only_bare',
+                             'delaunay_material')
+_FAN_CACHE_CONNECTIVITIES = ('delaunay', 'dual_only')
+
 
 @dataclass(frozen=True)
 class SolverMethods:
@@ -88,6 +95,7 @@ class SolverMethods:
     pressure_flux: str = 'centred'
     viscous_flux: str = 'two_point'
     area_orientation: str = 'primal_edge'
+    edge_area_source: str | None = None
     density_diffusion: float | None = None
     displacement_eps: float | None = None
     merge_cdist: float | None = None
@@ -115,6 +123,35 @@ class SolverMethods:
         self._check_choice('viscous_flux', self.viscous_flux)
         self._check_choice('area_orientation', self.area_orientation)
         self._check_choice('backend', self.backend)
+
+        if self.edge_area_source is not None:
+            # 3D axis (laneQ): the retopology that runs must be one that
+            # applies it, and the fan cache exists only where it is built.
+            if self.dim != 3:
+                raise ValueError(
+                    "edge_area_source is a 3D axis (2D reads the shared dual "
+                    "vertices, 1D the interval): leave it None")
+            self._check_choice('edge_area_source', self.edge_area_source)
+            if self.connectivity not in _EDGE_AREA_CONNECTIVITIES:
+                raise ValueError(
+                    f"edge_area_source is not applied by connectivity="
+                    f"{self.connectivity!r} ('frozen' never rebuilds the "
+                    "duals, 'periodic' and 'custom' do not forward it, "
+                    "'adaptive' is 2D only); it "
+                    f"is implemented for {_EDGE_AREA_CONNECTIVITIES}")
+            if (self.edge_area_source == 'e_star_cache'
+                    and self.connectivity not in _FAN_CACHE_CONNECTIVITIES):
+                raise ValueError(
+                    "edge_area_source='e_star_cache' is built by the "
+                    f"retopology of connectivity {_FAN_CACHE_CONNECTIVITIES} "
+                    f"only; {self.connectivity!r} builds no fan cache: use "
+                    "'p_ij_simplex', 'p_ij' or 'p_ij_ring'")
+            if (self.backend is not None
+                    and self.edge_area_source != 'e_star_cache'):
+                raise ValueError(
+                    "backend only reaches the batch_e_star fan cache "
+                    f"(edge_area_source='e_star_cache'); "
+                    f"{self.edge_area_source!r} is computed by numpy")
 
         if self.density_diffusion is not None and not self.density_diffusion > 0:
             raise ValueError("density_diffusion must be None or > 0")
@@ -474,6 +511,9 @@ class SolverMethods:
             'backend': self.backend,
             'workers': self.workers,
             'boundary_filter': boundary_filter,
+            # 3D dual face source (laneQ): forwarded by name to every
+            # retopology function that applies it; None = the path's legacy
+            'edge_area_source': self.edge_area_source,
         }
         if self.connectivity == 'periodic' and self.phases == 'single':
             if domain_bounds is None:

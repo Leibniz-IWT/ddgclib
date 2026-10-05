@@ -119,7 +119,18 @@ PRESETS: dict[str, SolverMethods] = {
               'setup choice box_shift="evict" reproduces the old baseline in '
               'every key. laneG: the score is a bump/over-decay '
               'cancellation; do not read as inflation (unchanged by the '
-              'corner: 4e-6 relative).',
+              'corner: 4e-6 relative). laneQ 2026-10-05: edge_area_source '
+              'stays None (= the batch_e_star fan cache, not linearly '
+              'precise); the exact faces (.replace(edge_area_source='
+              '"p_ij_simplex")) score l2 0.28653087631979274 / tail '
+              '0.08825446509925354 with the final inflation halved (R_max at '
+              't_end 0.010083 against 0.010187) and the early bump cut (q2 '
+              '+0.245 -> +0.093), i.e. the cancellation exposed; with '
+              'redistribute_mass=False as well l2 0.32625 / tail 0.00955 '
+              '(one-signed over-decay, no overshoot, mass drift 1e-16); with '
+              'projection_every=2 l2 0.34581 / tail 0.14696 (inflates). No '
+              'arm passes the flip rule; measured through '
+              'diagnose_3d_edge_area_source.py dynamic.',
     ),
     'oscillating_droplet_3D_delaunay': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
@@ -142,7 +153,13 @@ PRESETS: dict[str, SolverMethods] = {
         notes='Pinned floors 6.0153e-05 (step 0) / 7.274134e-05 (plateau; '
               'laneB 2026-10-05 on the full outer mesh, 475 vertices; laneA '
               'pinned 7.274172e-05 on the lossy 472-vertex mesh, reproduced by '
-              'box_shift="evict"). Step 0 is bit-identical between the meshes.',
+              'box_shift="evict"). Step 0 is bit-identical between the meshes. '
+              'laneQ 2026-10-05: the plateau on the exact dual faces '
+              '(.replace(edge_area_source="p_ij_simplex") or "p_ij") is '
+              '6.2838104071e-05 (-13.6 %; the fan cache carries 79 % of the '
+              'excess over the frozen-mesh floor 6.0153e-05), on the legacy '
+              'ring walk ("p_ij_ring") 6.2838085762e-05; not flipped with the '
+              'droplet default.',
     ),
     # ------------------------------------------------------------------
     # dam break
@@ -373,16 +390,31 @@ PRESETS: dict[str, SolverMethods] = {
     ),
     'hydrostatic_3D': SolverMethods(
         dim=3, phases='single', integrator='symplectic_euler',
-        connectivity='dual_only_bare',
+        connectivity='dual_only_bare', edge_area_source='p_ij_simplex',
         label=_HY + 'Hydrostatic_3D.py',
         notes='dual_only_bare, not dual_only: the 3D branch of dual_only '
               'zeroes the dual volume of frozen vertices, so wall cells would '
-              'read P0 (measured L2 1.5e4 Pa). Here: wall half cells, p_ij '
-              'dual faces, boundary_filter = walls, free top. 189 vertices, '
-              '100 t_ac: max|u| 0.144 -> 2.4e-4 from uniform density, 3.2e-5 '
-              '-> 5.4e-7 from the equilibrium masses (integrated L2 0.99 Pa; '
-              'refinement 1: 2.15 Pa). 3D cell integrals of ddgclib.analytical '
-              'are point value x volume (laneP).',
+              'read P0 (measured L2 1.5e4 Pa). Here: wall half cells, exact '
+              'p_ij dual faces, boundary_filter = walls, free top. 189 '
+              'vertices, 100 t_ac: max|u| 0.144 -> 2.4e-4 from uniform '
+              'density, 3.2e-5 -> 5.4e-7 from the equilibrium masses '
+              '(integrated L2 0.99 Pa; refinement 1: 2.15 Pa). 3D cell '
+              'integrals of ddgclib.analytical are point value x volume '
+              '(laneP). laneQ 2026-10-05: edge_area_source="p_ij_simplex" '
+              '(the exact dual face of every edge, hull edges included, from '
+              'hyperct.ddg.simplex_dual_face_areas) replaces the ring walk, '
+              'whose hull-edge tie moved this column by 2e-6 under a 1e-15 '
+              'shift (laneT). Refinement 1 pins move in round-off only (peak '
+              '0.08910127097486757 -> 0.08910127097486756, KE at 40 t_ac '
+              '6.206365156298652e-06 -> 6.2063651562987255e-06); the remap '
+              'arm at refinement 2 (2 t_ac) moves from peak '
+              '0.15658060026054665 / KE end 0.5431445985762776 to '
+              '0.15305813130485327 / 0.528851067635385 (-2.2 % / -2.6 %, '
+              'beyond the 1.25e-3 perturbation range: the 37 % hull-edge '
+              'areas are gone). 2.5x faster per step (22 against 55 ms at '
+              'refinement 1, 159 against 550 at refinement 2). '
+              '.replace(edge_area_source="p_ij_ring") reproduces every '
+              'pre-laneQ number of this preset to the bit.',
     ),
 }
 

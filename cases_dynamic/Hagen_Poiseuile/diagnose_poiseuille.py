@@ -57,7 +57,7 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, '..', '..'))
 
-from ddgclib.methods import PRESETS, SolverMethods  # noqa: E402
+from ddgclib.methods import PRESETS  # noqa: E402
 from cases_dynamic.Hagen_Poiseuile.src._run import run_developing  # noqa: E402
 
 _OUT = os.path.join(_HERE, 'results', 'laneH')
@@ -230,32 +230,30 @@ def arms2d(args) -> None:
 
 
 def arms3d(args) -> None:
-    from ddgclib.dynamic_integrators._integrators_dynamic import _retopologize
-
     preset = PRESETS['hagen_poiseuille_3D']
     kw = dict(dim=3, L=3.0, mu=0.1, n_refine=args.refine or 1, dt=0.01)
     n = args.steps or 600
     print(f"3D, {kw}, {n} steps")
 
-    def ring(HC, bV, dim, **_kw):
-        # delaunay + membership, then force the p_ij ring (no area cache)
-        _retopologize(HC, bV, dim, frozen_set='membership')
-        HC._edge_area_cache = None
-
+    # The centred pressure flux reads the dual faces; the arms differ in
+    # the axis edge_area_source (laneQ; until then the ring arm was a
+    # connectivity='custom' wrapper that cleared the cache, which the
+    # value 'p_ij_ring' reproduces).
+    centred = preset.replace(pressure_flux='centred')
     arms = [
-        ('preset', preset, {}),
-        ("pressure_flux='centred' (e_star cache)",
-         preset.replace(pressure_flux='centred'), {}),
+        ('preset', preset),
+        ("pressure_flux='centred' (e_star cache)", centred),
         ("pressure_flux='centred' (p_ij ring)",
-         SolverMethods(dim=3, connectivity='custom',
-                       viscous_flux='simplex_gradient',
-                       label='delaunay + membership, cache cleared'),
-         dict(custom=ring)),
+         centred.replace(edge_area_source='p_ij_ring')),
+        ("pressure_flux='centred' (p_ij simplex cache)",
+         centred.replace(edge_area_source='p_ij_simplex')),
+        ("pressure_flux='centred' (p_ij per edge)",
+         centred.replace(edge_area_source='p_ij')),
         ("viscous_flux='two_point'",
-         preset.replace(viscous_flux='two_point'), {}),
+         preset.replace(viscous_flux='two_point')),
     ]
-    rows = [_run(label, methods, n, **extra, **kw)
-            for label, methods, extra in arms if (args.only or '') in label]
+    rows = [_run(label, methods, n, **kw)
+            for label, methods in arms if (args.only or '') in label]
     _save('arms3d', rows, args.tag)
 
 
