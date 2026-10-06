@@ -24,6 +24,7 @@ _EB = 'cases_dynamic/electrolysis_bubble/'
 _SP = 'cases_dynamic/shearing_plate_droplet/'
 _HP = 'cases_dynamic/Hagen_Poiseuile'
 _HY = 'cases_dynamic/Hydrostatic_column/'
+_CR = 'cases_dynamic/capillary_rise/'
 
 PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
@@ -530,6 +531,32 @@ PRESETS: dict[str, SolverMethods] = {
               'refinement 1, 159 against 550 at refinement 2). '
               '.replace(edge_area_source="p_ij_ring") reproduces every '
               'pre-laneQ number of this preset to the bit.',
+    ),
+    # ------------------------------------------------------------------
+    # static capillary rise (single phase, EOS, free surface with tension)
+    # ------------------------------------------------------------------
+    'capillary_rise_static_2D': SolverMethods(
+        dim=2, phases='single', integrator='symplectic_euler',
+        connectivity='dual_only', contact_line='energy_gradient',
+        label=_CR + 'capillary_rise_2D.py',
+        notes='laneI 2026-10-06. Slit of width 4 mm (r = 2 mm), water '
+              '(theta 9.99 deg), 3 extruded unit cells (reservoir band '
+              '8.3 mm below y = 0 + Jurin 3.67 mm), walls frozen by '
+              'membership (boundary_filter), band on HydrostaticReservoirBC, '
+              'contact vertices on AxialSlideBC, Tait n = 1 with c0 = 10 '
+              'sqrt(g h_J), gravity as body_force, mu = alpha rho c0 dx. '
+              'Measurements: laneI log.',
+    ),
+    'capillary_rise_static_3D': SolverMethods(
+        dim=3, phases='single', integrator='symplectic_euler',
+        connectivity='dual_only_bare', edge_area_source='p_ij_simplex',
+        contact_line='energy_gradient',
+        label=_CR + 'capillary_rise_3D.py',
+        notes='laneI 2026-10-06. Round tube r = 2 mm (cylinder_volume '
+              'cross-section, extruded), water, 3 unit cells (band 4.7 mm '
+              '+ Jurin 7.33 mm); dual_only_bare with the exact p_ij faces '
+              'as hydrostatic_3D (dual_only zeroes the wall half cells). '
+              'Measurements: laneI log.',
     ),
 }
 

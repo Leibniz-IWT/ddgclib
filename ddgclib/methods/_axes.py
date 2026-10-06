@@ -1171,6 +1171,66 @@ _AXES: list[MethodAxis] = [
         ),
     ),
     MethodAxis(
+        name='contact_line', title='Free-surface tension and contact-angle force',
+        group='forces', default=None, applies_to='single',
+        control='free_surface= on SolverMethods.dudt_fn (a '
+                'ddgclib.operators.free_surface.FreeSurface built by the '
+                'setup from gamma, theta and the wall / free / contact vertex '
+                'sets); added to the stress acceleration as F / m like '
+                'body_force',
+        notes='laneI 2026-10-06 (' + _LANE + 'laneI-static-capillary-rise.md). '
+              'The single-phase mesh has no second phase to carry a '
+              'curvature stencil; surface tension and wall adhesion enter as '
+              'the gradient of the capillary energy of the boundary facets '
+              'of the simplex cache. The wall-normal part on a contact '
+              'vertex is the wall reaction, discarded by AxialSlideBC.',
+        options=(
+            _opt(None, 'No free-surface tension: the free surface carries '
+                 'the pressure of its open dual fan only (hydrostatic '
+                 'column, dam break)', 'validated',
+                 'ddgclib/methods/_config.py:SolverMethods.dudt_fn',
+                 'every single-phase pin', phases='single'),
+            _opt('energy_gradient', 'F_i = -d/dx_i [gamma A_free - gamma '
+                 'cos(theta) A_wet] over the boundary facets: gamma '
+                 '(t_next - t_prev) on a 2D surface vertex (the integrated '
+                 'curvature normal), the cotangent mean-curvature normal in '
+                 '3D, plus gamma cos(theta) per unit contact-line length '
+                 'along the wall on a contact vertex (Young). Facets are '
+                 'reread when the simplex cache changes', 'experimental',
+                 'ddgclib/operators/free_surface.py:FreeSurface',
+                 'laneI 2026-10-06, static capillary rise (water, r = 2 mm, '
+                 'presets capillary_rise_static_2D / _3D, dual_only / '
+                 'dual_only_bare). The force is the exact negative gradient '
+                 'of the capillary energy to 1e-11 in 2D and 3D '
+                 '(test_free_surface.py). 2D slit, refinement 2 (113 '
+                 'vertices, 5 surface vertices), 300 t_ac, alpha_art 0.05: '
+                 'from the flat meniscus the volume-averaged height settles '
+                 'at +1.1e-4 of the compressible Young-Laplace reference '
+                 '(max|u| 2.3e-6 m/s, max|a| 6.9e-8), from the pre-shaped '
+                 'meniscus it creeps to +2.9e-3 (contact-line creep, max|u| '
+                 '1.1e-4 still falling); refinement 3: laneI log section 4. '
+                 'The discrete meniscus has its contact point 6 % below the '
+                 'continuum one at refinement 2 (the first polyline edge '
+                 'carries the whole contact angle). 3D octagonal tube '
+                 '(refinement 1, 87 vertices), 100 t_ac: -1.1e-2 against the '
+                 'force balance of the discrete cross-section (+7.1e-2 '
+                 'against the round tube: the octagon has 8 % more '
+                 'perimeter per area). Reconnecting arm (delaunay_material '
+                 '+ conservative remap, 2D refinement 2, 300 t_ac): settles '
+                 'in 40 t_ac without creep but 5.1e-2 too high (the '
+                 'reconnection changes the mass budget of the band; '
+                 'measured-worse for this case). Known limit: on a fixed '
+                 'connectivity the slow circulation of the creeping '
+                 'meniscus squeezes the cell under the apex (2D refinement '
+                 '2, alpha 0.05: the interior vertex 9 um under the apex '
+                 'at 250 t_ac, bursts of max|u| 1.5e-2 that die out; at refinement 3 '
+                 'the same drift squeezes two interior cells and the run '
+                 'blows up at 177 t_ac, while the flat start settles to '
+                 '+3.0e-5 with max|a| 5.4e-8)',
+                 dims=(2, 3), phases='single'),
+        ),
+    ),
+    MethodAxis(
         name='density_diffusion', title='Gradient-corrected density diffusion',
         group='thermodynamics', default=None, kind='float', applies_to='single',
         control='density_diffusion= integrator kwarg (euler, symplectic_euler); '

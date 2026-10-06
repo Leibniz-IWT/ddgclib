@@ -337,6 +337,102 @@ class FreeSlipWallBC(BoundaryCondition):
         return count
 
 
+class AxialSlideBC(BoundaryCondition):
+    """Vertex that slides along a straight line parallel to *axis*: a
+    contact-line vertex on a slit wall (2D) or on an edge of a prismatic
+    tube wall (3D).
+
+    Each step the target vertices get their lateral (non-*axis*) velocity
+    components zeroed and their lateral coordinates put back on the
+    anchors captured at construction; the axial component is left to
+    the integrator.  Like :class:`FreeSlipWallBC` it stands for the wall
+    reaction (the lateral part of the force on the open dual cell of the
+    vertex), so only that part is discarded.  The vertices must NOT be
+    members of ``bV``.  Vertices are held by identity (a vertex re-hashes
+    when it moves); *target_vertices* narrows the anchored set and is
+    never used for membership tests.
+
+    Parameters
+    ----------
+    axis : int
+        The free direction.
+    vertices : iterable of vertices
+        The vertices to anchor, at their current lateral coordinates.
+    """
+
+    def __init__(self, axis: int, vertices):
+        super().__init__(axis=int(axis))
+        self._anchored = [(v, tuple(float(c) for c in v.x)) for v in vertices]
+        self._ids = {id(v) for v, _ in self._anchored}
+
+    def apply(self, mesh, dt, target_vertices=None):
+        if target_vertices is not None:
+            wanted = {id(v) for v in target_vertices}
+            pairs = [p for p in self._anchored if id(p[0]) in wanted]
+        else:
+            pairs = self._anchored
+        count = 0
+        for v, anchor in pairs:
+            new_x = list(v.x)
+            moved = False
+            for ax in range(len(new_x)):
+                if ax == self.axis:
+                    continue
+                v.u[ax] = 0.0
+                if new_x[ax] != anchor[ax]:
+                    new_x[ax] = anchor[ax]
+                    moved = True
+            if moved:
+                mesh.V.move(v, tuple(new_x))
+            count += 1
+        return count
+
+
+class HydrostaticReservoirBC(BoundaryCondition):
+    """Lagrangian pressure reservoir: a band of vertices held on the
+    compressible hydrostatic profile.
+
+    Each step every target vertex whose coordinate along the gravity axis
+    of *ic* is below *level* gets the mass of the profile at its current
+    dual volume, ``m = rho(P(y)) V_i`` (the per-vertex rule of
+    :class:`ddgclib.initial_conditions.HydrostaticEOSMass`, the same
+    formula the setup used).  The band therefore supplies or absorbs the
+    mass the fluid above it needs and keeps ``P = P(y)`` there: the
+    truncation of a column that continues below the band, or a reservoir
+    whose free surface is at ``P(y) = 0``.  The mass of the mesh is not
+    conserved; the running total of the change is ``self.injected``.
+
+    Register it with the whole vertex set (``bc_set.add(bc, HC.V)``) or
+    with the band; the dual volume it reads is the one of the last force
+    evaluation (one step old).
+
+    Parameters
+    ----------
+    ic : HydrostaticEOSMass
+        The profile (EOS, reference height and pressure, gravity axis).
+    level : float
+        Vertices with ``x[ic.gravity_axis] < level`` are reset.
+    """
+
+    def __init__(self, ic, level: float):
+        super().__init__(axis=int(ic.gravity_axis))
+        self.ic = ic
+        self.level = float(level)
+        self.injected = 0.0
+
+    def apply(self, mesh, dt, target_vertices=None):
+        verts = target_vertices if target_vertices is not None else mesh.V
+        count = 0
+        for v in list(verts):
+            if v.x_a[self.axis] >= self.level:
+                continue
+            m_old = float(v.m)
+            self.ic.assign(v)
+            self.injected += float(v.m) - m_old
+            count += 1
+        return count
+
+
 class DirichletVelocityBC(BoundaryCondition):
     """Fixed velocity on boundary vertices.
 

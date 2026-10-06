@@ -5,6 +5,7 @@ import math
 from hyperct import Complex
 from ddgclib._misc import _set_boundary
 from hyperct.ddg import compute_vd
+from ddgclib.geometry import ensure_simplex_cache
 
 
 
@@ -92,6 +93,8 @@ def unit_cylinder(r, refinements=1, height=5e-3, up='z', distr_law='sinusoidal')
         #print(f'nv[2] = {nv[2]}')
         HC.V.move(v, tuple(nv))
 
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, 3)
     return HC
 
 
@@ -180,4 +183,6 @@ def cube_to_tube(r, refinements=1, height=5e-3):
         #print(f'nv[2] = {nv[2]}')
         HC.V.move(v, tuple(nv))
 
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, 3)
     return HC

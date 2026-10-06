@@ -13,6 +13,7 @@ Initial conditions:
 
 import numpy as np
 from hyperct import Complex
+from ddgclib.geometry import ensure_simplex_cache
 
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet,
@@ -84,6 +85,8 @@ def setup_cube_flow(
     HC.triangulate()
     for _ in range(n_refine):
         HC.refine_all()
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, dim)
 
     bV = identify_cube_boundaries(HC, 0.0, L, dim=dim)
 
@@ -103,6 +106,7 @@ def setup_cube_flow(
     unit_mesh.triangulate()
     for _ in range(n_refine):
         unit_mesh.refine_all()
+    ensure_simplex_cache(unit_mesh, dim)
     # Apply ICs to unit mesh so ghost vertices carry correct field values
     unit_bV = identify_cube_boundaries(unit_mesh, 0.0, L, dim=dim)
     ic.apply(unit_mesh, unit_bV)

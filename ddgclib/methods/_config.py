@@ -103,6 +103,7 @@ class SolverMethods:
     area_orientation: str = 'primal_edge'
     edge_area_source: str | None = None
     density_diffusion: float | None = None
+    contact_line: str | None = None
     displacement_eps: float | None = None
     merge_cdist: float | None = None
     remesh_kwargs: dict[str, Any] | None = None
@@ -163,6 +164,14 @@ class SolverMethods:
 
         if self.density_diffusion is not None and not self.density_diffusion > 0:
             raise ValueError("density_diffusion must be None or > 0")
+        if self.contact_line is not None:
+            # laneI: the free-surface energy gradient is a single-phase
+            # operator on the boundary facets of the simplex cache.
+            if self.phases != 'single':
+                raise ValueError("contact_line applies to phases='single' "
+                                 "only (the multiphase force carries its "
+                                 "own curvature_path)")
+            self._check_choice('contact_line', self.contact_line)
         if self.phases == 'multi':
             if self.pressure_flux != AXES['pressure_flux'].default:
                 raise ValueError("pressure_flux applies to phases='single' only "
@@ -571,7 +580,7 @@ class SolverMethods:
 
     def dudt_fn(self, HC, *, mu: float | None = None, mps=None,
                 pressure_model=None,
-                body_force: Any = None) -> Callable:
+                body_force: Any = None, free_surface=None) -> Callable:
         """Acceleration function bound the canonical way.
 
         single-phase: ``partial(dudt_i, dim, mu, HC, pressure_model
@@ -582,7 +591,17 @@ class SolverMethods:
 
         *body_force* (per unit mass, e.g. ``[0, -9.81]``) wraps the
         result as ``a + g`` exactly like the dam-break setup does.
+        *free_surface* (a :class:`ddgclib.operators.free_surface
+        .FreeSurface`, required by and only by
+        ``contact_line='energy_gradient'``) adds its force as
+        ``F / m`` (laneI).
         """
+        if (self.contact_line is not None) != (free_surface is not None):
+            raise ValueError(
+                "contact_line='energy_gradient' needs free_surface=FreeSurface"
+                if free_surface is None else
+                "free_surface given but contact_line is None: set "
+                "contact_line='energy_gradient' so the force is recorded")
         if self.phases == 'single':
             if mu is None:
                 raise ValueError("single-phase dudt_fn needs mu=")
@@ -615,19 +634,32 @@ class SolverMethods:
             if self.face_closure != AXES['face_closure'].default:
                 kw['face_closure'] = self.face_closure
             fn = partial(multiphase_dudt_i, **kw)
-        if body_force is None:
+        if body_force is None and free_surface is None:
             return fn
+        _stress_fn = fn
+        if free_surface is not None:
+            _surface = free_surface.force
+
+            def fn(v):
+                return _stress_fn(v) + _surface(v) / v.m
+
+            fn.stress_fn = _stress_fn            # type: ignore[attr-defined]
+            fn.free_surface = free_surface       # type: ignore[attr-defined]
+            if body_force is None:
+                return fn
         g_vec = np.asarray(body_force, dtype=float)
         if g_vec.shape != (self.dim,):
             raise ValueError(f"body_force must have exactly {self.dim} "
                              f"components, got shape {g_vec.shape}")
-        _stress_fn = fn
+        _inner = fn
 
         def dudt_with_body_force(v):
-            return _stress_fn(v) + g_vec
+            return _inner(v) + g_vec
 
         dudt_with_body_force.stress_fn = _stress_fn  # type: ignore[attr-defined]
         dudt_with_body_force.body_force = g_vec     # type: ignore[attr-defined]
+        if free_surface is not None:
+            dudt_with_body_force.free_surface = free_surface  # type: ignore[attr-defined]
         return dudt_with_body_force
 
     def integrate(self, HC, bV, dudt_fn, *, dt: float,

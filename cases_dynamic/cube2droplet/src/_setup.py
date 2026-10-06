@@ -11,6 +11,7 @@ from functools import partial
 import numpy as np
 
 from hyperct import Complex
+from ddgclib.geometry import ensure_simplex_cache
 from hyperct.ddg import compute_vd
 
 from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
@@ -95,6 +96,8 @@ def setup_cube_to_droplet(
     HC.triangulate()
     for _ in range(n_refine):
         HC.refine_all()
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, dim)
 
     bV = HC.boundary()
     for v in HC.V:

@@ -10,6 +10,7 @@ old _analytical_equil.py.
 
 import numpy as np
 from hyperct import Complex
+from ddgclib.geometry import ensure_simplex_cache
 
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet,
@@ -63,6 +64,8 @@ def setup_poiseuille_2d(
     HC.triangulate()
     for _ in range(n_refine):
         HC.refine_all()
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, 2)
 
     bV = identify_cube_boundaries(HC, lb=0.0, ub=max(L, h), dim=2)
     # More precise: find all boundary verts at domain edges
@@ -162,6 +165,7 @@ def setup_poiseuille_2d_lagrangian(
         return HC_unit
 
     HC = extrude(unit(), L, axis=0, cdist=1e-10)
+    ensure_simplex_cache(HC, dim)
     bV = HC.boundary(HC.V)
     for v in HC.V:
         v.boundary = v in bV
@@ -261,7 +265,7 @@ def setup_poiseuille_developing(
         ``frozen_set='membership'`` (preset ``hagen_poiseuille_2D`` /
         ``_3D``).
     """
-    from hyperct.ddg import compute_vd, rebuild_simplex_cache_2d
+    from hyperct.ddg import compute_vd
     from scipy.spatial import cKDTree
 
     from ddgclib._boundary_conditions import (
@@ -298,7 +302,7 @@ def setup_poiseuille_developing(
             return HC_unit
 
         HC = extrude(unit(), n_cells, axis=axis, cdist=1e-10)
-        rebuild_simplex_cache_2d(HC)
+        ensure_simplex_cache(HC, dim)
         unit_mesh = unit()
 
         def wall_criterion(v):

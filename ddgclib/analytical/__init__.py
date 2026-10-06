@@ -36,6 +36,13 @@ from ._integrated_comparison import (
     integrated_phase_pressure_jump,
 )
 
+from ._meniscus import (
+    MeniscusProfile,
+    young_laplace_meniscus,
+    hydrostatic_pressure_tait,
+    jurin_height,
+)
+
 __all__ = [
     "integrated_gradient_1d",
     "integrated_gradient_2d",
@@ -45,6 +52,10 @@ __all__ = [
     "compare_stress_force",
     "volume_averaged_scalar",
     "integrated_phase_pressure_jump",
+    "MeniscusProfile",
+    "young_laplace_meniscus",
+    "hydrostatic_pressure_tait",
+    "jurin_height",
 ]
 
 try:
