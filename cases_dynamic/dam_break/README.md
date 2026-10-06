@@ -90,36 +90,49 @@ python -m ddgclib.scripts.view_polyscope \
 
 ## Parameters
 
-See ``src/_params.py``.  The default column is ``a × 2a`` with
+See ``src/_params.py``.  The default column is the square ``a × a``
+(Martin and Moyce column with headspace, laneF 2026-07-30) with
 ``a = 0.05 m`` (water, gamma = 0.072 N/m); the tank is ``4a × 2a``
-in 2D and ``4a × 2a × 2a`` in 3D.
+in 2D and ``4a × 2a × 2a`` in 3D.  ``t_end = 0.2 s`` (about 2.8
+``t_ref = sqrt(a / g)``), ``cfl = 0.1``, ``alpha_art = 0.3``.
 
-``t_end`` defaults to a **short** run (``0.02 s``, i.e. ``~0.2
-t_ref``) so the smoke test passes out of the box.  See the
-stability note below before extending it.
+## Methods and status
 
-## Stability note
+The multiphase runners consume the presets ``dam_break_2D``
+(per-step Delaunay + conservative remap, ``frozen_set='membership'``)
+and ``dam_break_3D`` (``dual_only``, exact dual faces
+``edge_area_source='p_ij_simplex'``) from ``ddgclib.methods`` and
+write ``results/methods_2D.json`` / ``methods_3D.json``.  The axes
+``phase_ledger='volume'`` and ``face_closure='renormalise'`` (defaults
+since laneF, 2026-10-05) are what let the 2D run survive its
+reconnections at ``alpha_art`` 0.2 and 0.1; the old values are kept as
+``'snapshot'`` / ``'skip'`` (status broken) for reproduction.  The
+hydrostatic per-phase mass preload is made on the vote labels the
+integrator uses (3D: the spatial-criterion labels differ).
 
-The current DDG FVM stress operator develops large spurious
-accelerations at free-surface and multiphase-interface corner
-vertices where the barycentric dual cell is truncated.  The dam
-break is a demanding test in this regard because it has two
-adjacent free surfaces meeting at a (possibly moving) corner.
+Regression pins (``ddgclib/tests/test_case_dam_break.py``): 2D at
+refinement 2 / alpha 0.1 (fast) and at the shipped refinement 3 /
+alpha 0.2 over the full horizon (slow); 3D 50-step smoke (fast) and
+full horizon (slow).  Diagnostics: ``diagnose_sliver_ejection.py``
+(per-vertex force trace, hole census, ``--replace axis=value`` arms,
+``--dim 3``) and ``diagnose_phase_ledger.py`` (presence-change census
+of the shipped multiphase cases).  Lane log:
+``docs_temp/debug_session/laneF-ledger-and-face-closure.md``.
 
-To keep the out-of-the-box run tractable this case uses:
+## Known limits
 
-- artificial viscosity ``alpha_art = 2.0`` (SPH-style,
-  ``mu_art = alpha * rho * c_s * dx``);
-- a short ``t_end = 0.02 s`` and a small CFL factor ``cfl = 0.1``;
-- ``skip_triangulation=True`` in the multiphase variants to keep
-  the initial Delaunay connectivity frozen (avoids cross-phase
-  edges from re-triangulation — see
-  ``FEATURES.md: AMR remeshing``);
-- a ``boundary_filter`` in the single-phase variants so only the
-  tank walls are frozen while the free surface advects;
-- a ``try/except`` around the integration loop so partial output
-  is still saved if the simulation diverges.
-
-For longer / higher-fidelity runs the case needs the interface
-curvature and dual-split improvements listed under ``Planned`` in
-``FEATURES.md``.
+- The liquid toe becomes one cell thick during the collapse at
+  ``alpha_art <= 0.2`` (refinement 3).  Under the ``neighbour_count``
+  split its vertices then lose their liquid sub-volume, the volume
+  ledger releases their mass into the liquid pool and the interface
+  pressure jump kicks the light vertices: a transient of about 0.01 s
+  (KE of liquid plus interface 3.1e-3 -> 3.5e-2 J at alpha 0.2) and a
+  front measure that retreats.  ``split_method='simplex'`` keeps the
+  tongue (opt-in; changes every run).
+- Refinement 4 is not carried through the horizon (laneF known
+  limit, see the lane log).
+- The 3D wall cells are zeroed under ``dual_only``, so the measured
+  liquid volume is about half the column; the 3D column creeps
+  (effective viscosity 105.8 Pa s).
+- The single-phase ``*_no_air`` runners are laneK's measured-unstable
+  configuration and are unvalidated.

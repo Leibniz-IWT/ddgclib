@@ -723,7 +723,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              retopo_remap=None,
                              projection_every=1,
                              frozen_set='hull',
-                             edge_area_source=None):
+                             edge_area_source=None,
+                             phase_ledger='volume'):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -834,11 +835,30 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         Forwarded to every :func:`_retopologize` call of this function
         (3D source of the dual face areas; default ``None``: previous
         behaviour).  See its docstring.
+    phase_ledger : {'snapshot', 'volume', 'adopt'}
+        What the per-phase redistribution does with a phase that
+        appears at or disappears from a vertex across the rebuild
+        (method axis ``phase_ledger``; ``ledger=`` of
+        :func:`~ddgclib.operators.mass_redistribution.redistribute_mass_multiphase`).
+        ``'snapshot'`` (default, previous behaviour): the new phase gets
+        no mass and reads ``p_phase = 0`` absolute, a pressure hole of
+        ``P0`` that ejects the neighbouring cell at atmospheric
+        reference pressure (laneF 2026-10-05).  ``'volume'``: the new
+        phase is targeted at the local pressure and a lost phase
+        releases its mass, inside the exact per-phase conservation;
+        under the remap the restore keeps the adopted pressure.
+        ``'adopt'``: the same for a new phase, a lost phase keeps its
+        mass as inertia.
     """
     if retopo_remap not in (None, 'conservative'):
         raise ValueError(
             f"retopo_remap must be None or 'conservative', "
             f"got {retopo_remap!r}"
+        )
+    if phase_ledger not in ('snapshot', 'volume', 'adopt'):
+        raise ValueError(
+            f"phase_ledger must be 'snapshot', 'volume' or 'adopt', got "
+            f"{phase_ledger!r}"
         )
     if (frozen_set == 'membership' and remesh_mode == 'adaptive'
             and not skip_triangulation):
@@ -946,6 +966,7 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
             )
             _redist_diag = redistribute_mass_multiphase(
                 HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
+                ledger=phase_ledger,
             )
             if remap_active:
                 # Stage 2 closure, part 1 — volume-gauge update: the
@@ -976,7 +997,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                     phase_volume_totals,
                     restore_pressure_multiphase,
                 )
-                restore_pressure_multiphase(HC, mps, _p_snap)
+                restore_pressure_multiphase(
+                    HC, mps, _p_snap, adopted=_redist_diag['adopted'])
                 # Stage 2 closure, part 3 — level anchor: pin each
                 # phase's pressure LEVEL to the volume strain relative
                 # to the artifact-corrected per-phase volume targets

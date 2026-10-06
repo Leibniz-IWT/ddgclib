@@ -542,7 +542,10 @@ def run_dambreak(n_steps: int, arms=('cache', 'pij_simplex', 'pij')) -> dict:
     out: dict = {'n_steps': n_steps, 'arms': {}}
     for arm in arms:
         m = PRESETS['dam_break_3D']
-        rep = dict(ARMS[arm])
+        # laneF (2026-10-05): the preset reads the exact faces now, so the
+        # 'cache' arm names the fan cache explicitly instead of inheriting
+        # the preset's source.
+        rep = dict(ARMS[arm]) or dict(edge_area_source='e_star_cache')
         if rep:
             m = m.replace(**rep)
         HC, bV, mps, bc_set, dudt_fn, _r, params = setup_dam_break_multiphase(

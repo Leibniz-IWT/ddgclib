@@ -185,14 +185,45 @@ PRESETS: dict[str, SolverMethods] = {
               'run aborts with the same QhullError after 1303 / 3030 steps '
               '(numbers of fix round 1, where the tied simplex vote became '
               'deterministic; equal in every process). The walls are not '
-              'what fails there.',
+              'what fails there. laneF 2026-10-05: the ejection was not a '
+              'sliver cell but two ledger defects at one flip (axes '
+              'phase_ledger and face_closure, both defaults now): the shipped '
+              'run is bit-identical (952d4544676ca366, no presence change '
+              'along it), alpha_art 0.2 and 0.1 complete the horizon (1585 '
+              'steps) with no vertex outside and |u|max 1.00 / 1.40 m/s; the '
+              'toe event (the liquid tongue goes one cell thick at t = 0.180 '
+              '/ 0.097 s) costs a transient: the released toe vertices are '
+              'kicked by the interface pressure jump, KE of liquid plus '
+              'interface 3.1e-3 -> 3.5e-2 J for ~0.01 s at alpha 0.2 '
+              '(diagnose_sliver_ejection.py --alpha 0.2 / 0.1). '
+              'split_method="simplex" keeps the tongue (opt-in, changes '
+              'every run).',
     ),
     'dam_break_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
+        edge_area_source='p_ij_simplex',
         label=_DB + 'dam_break_3D.py',
         notes='Frozen connectivity (was skip_triangulation=True at integrator '
-              'level). Not re-run since laneF; April outputs only.',
+              'level). laneF 2026-10-05: edge_area_source="p_ij_simplex" '
+              '(the exact dual faces of laneQ). On the batch_e_star fan cache '
+              'the shipped run blew up at step 4 (laneQ: NaN after 17): its '
+              '1 % closure defect times the ABSOLUTE pressure 101325 Pa is '
+              '0.26 N on a 2e-5 kg air cell, 1000x the body force on it '
+              '(invisible at P0 = 0). With the exact faces the run still '
+              'ejected at step 96 until the setup preloaded the hydrostatic '
+              'masses on the vote labels (the criterion labels differ in 3D: '
+              'p_liq 101203 to 120945 Pa at t = 0, the EOS clip) and zeroed '
+              'the phases the vote gives no sub-volume. Full horizon (793 '
+              'steps, refinement 2): KE_liq peak 4.079e-06 J at 0.0144 s, '
+              '|u|max 0.062 m/s, |a|max 96 m/s^2 at step 0 decaying to 0.03, '
+              'front +5.0 mm, mass drift -2.6e-15, liquid level 101547 -> '
+              '101429 Pa, final-state digest 639c87c7700c2c71 '
+              '(diagnose_sliver_ejection.py --dim 3). The column creeps '
+              '(mu_l_eff 105.8 Pa s). split_method="simplex" is as clean '
+              '(adc368cdb99b3f4a, |u|max 0.057) and not adopted. The 3D '
+              'wall cells are zeroed (dual_only), so the measured liquid '
+              'volume is 6.06e-5 of the 1.25e-4 m^3 column.',
     ),
     'dam_break_2D_no_air': SolverMethods(
         dim=2, phases='single', integrator='symplectic_euler',

@@ -360,5 +360,198 @@ class TestIntegrationWithRetopologize(unittest.TestCase):
         self.assertAlmostEqual(M_before, M_after, places=8)
 
 
+class TestPhaseLedger(unittest.TestCase):
+    """The ``ledger=`` rule of ``redistribute_mass_multiphase`` (method
+    axis ``phase_ledger``, laneF 2026-10-05).
+
+    A reconnection can give a vertex a sub-volume of a phase it had no
+    mass of (the phase APPEARS there) or take the last sub-volume of a
+    phase it still carries mass of (the phase DISAPPEARS).  Under the
+    historic ``'snapshot'`` rule the appeared phase stays massless, so
+    ``compute_phase_pressures`` publishes ``p_phase[k] = 0`` absolute for
+    a sub-volume the force reads as present: a pressure hole of ``P0``
+    (the dam-break ejection).  Under ``'volume'`` the mass follows the
+    sub-volume.
+    """
+
+    P0 = 101325.0
+
+    def _two_phase_mesh(self):
+        """Left half phase 0 (gas), right half phase 1 (liquid); every
+        vertex a bulk vertex of its phase at the reference pressure."""
+        from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
+        from ddgclib.operators.mass_redistribution import (
+            snapshot_geometry_multiphase,
+        )
+        HC, bV = _make_2d_mesh(refinement=2)
+        eos_g = TaitMurnaghan(rho0=1.225, P0=self.P0, K=120.0, n=1.0,
+                              rho_clip=(0.2, 5.0))
+        eos_l = TaitMurnaghan(rho0=1000.0, P0=self.P0, K=1e5, n=1.0,
+                              rho_clip=(0.8, 1.2))
+        mps = MultiphaseSystem(phases=[
+            PhaseProperties(eos=eos_g, mu=1e-5, rho0=1.225, name='gas'),
+            PhaseProperties(eos=eos_l, mu=1e-3, rho0=1000.0, name='liq')],
+            gamma={(0, 1): 0.0})
+        for v in HC.V:
+            k = 0 if v.x_a[0] < 0.5 else 1
+            vol = float(v.dual_vol)
+            v.phase = k
+            v.is_interface = False
+            v.dual_vol_phase = np.zeros(2)
+            v.dual_vol_phase[k] = vol
+            v.m_phase = np.zeros(2)
+            v.m_phase[k] = mps.phases[k].rho0 * vol
+            v.p_phase = np.zeros(2)
+            v.p_phase[k] = self.P0
+            v.rho_phase = np.zeros(2)
+            v.interface_phases = frozenset()
+            v.m = float(v.m_phase.sum())
+        snap = snapshot_geometry_multiphase(HC, 2)
+        return HC, bV, mps, snap
+
+    def _presence_change(self, HC, bV):
+        """After the 'rebuild': one interior gas vertex at the seam gains a
+        liquid sub-volume (no liquid mass), one interior liquid vertex
+        loses its sub-volume (keeps its mass).  Returns the two."""
+        interior = [v for v in HC.V if v not in bV]
+        gained = min((v for v in interior if v.x_a[0] < 0.5),
+                     key=lambda v: 0.5 - v.x_a[0])
+        lost = min((v for v in interior if v.x_a[0] >= 0.5),
+                   key=lambda v: v.x_a[0] - 0.5)
+        vol = float(gained.dual_vol)
+        gained.dual_vol_phase = np.array([0.7 * vol, 0.3 * vol])
+        lost.dual_vol_phase = np.zeros(2)
+        return gained, lost
+
+    def test_snapshot_rule_leaves_a_hole_and_a_stranded_mass(self):
+        from ddgclib.operators.multiphase_stress import _phase_present_at
+        HC, bV, mps, snap = self._two_phase_mesh()
+        M0 = np.sum([v.m_phase for v in HC.V], axis=0)
+        gained, lost = self._presence_change(HC, bV)
+        m_lost_before = float(lost.m_phase[1])
+        diag = redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='snapshot')
+        self.assertEqual(diag['adopted'], {})
+        # the appeared phase has a sub-volume but no mass ...
+        self.assertEqual(float(gained.m_phase[1]), 0.0)
+        mps.compute_phase_pressures(HC)
+        # ... so it publishes 0 Pa ABSOLUTE while the force reads it as
+        # present: the hole
+        self.assertEqual(float(gained.p_phase[1]), 0.0)
+        self.assertTrue(_phase_present_at(gained, 1))
+        # the lost phase keeps its mass without a sub-volume
+        self.assertEqual(float(lost.m_phase[1]), m_lost_before)
+        self.assertEqual(float(lost.dual_vol_phase[1]), 0.0)
+        M1 = np.sum([v.m_phase for v in HC.V], axis=0)
+        np.testing.assert_allclose(M1, M0, rtol=1e-12)
+
+    def test_volume_rule_mass_follows_the_sub_volume(self):
+        from ddgclib.operators.mass_redistribution import (
+            restore_pressure_multiphase,
+        )
+        HC, bV, mps, snap = self._two_phase_mesh()
+        M0 = np.sum([v.m_phase for v in HC.V], axis=0)
+        gained, lost = self._presence_change(HC, bV)
+        diag = redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='volume')
+        # the appeared phase was targeted at the local pressure of its
+        # neighbours (all at P0) and carries the matching mass
+        self.assertEqual(list(diag['adopted']), [id(gained)])
+        self.assertEqual(list(diag['adopted'][id(gained)]), [1])
+        self.assertAlmostEqual(diag['adopted'][id(gained)][1], self.P0,
+                               places=6)
+        rho_l = float(mps.phases[1].eos.density(self.P0))
+        d1 = diag['per_phase_diagnostics'][1]
+        # target rho(p_local) * sub-volume, times the conserving rescale
+        # of the phase (the released cell is shared out over the pool)
+        self.assertAlmostEqual(
+            float(gained.m_phase[1])
+            / (rho_l * gained.dual_vol_phase[1] * d1['scale_factor']),
+            1.0, places=9)
+        self.assertGreater(d1['scale_factor'], 1.0)
+        # the lost phase released its mass to the pool
+        self.assertEqual(float(lost.m_phase[1]), 0.0)
+        self.assertGreater(d1['mass_released'], 0.0)
+        self.assertEqual(d1['n_adopted'], 1)
+        # exact per-phase conservation, holes and strandings gone
+        M1 = np.sum([v.m_phase for v in HC.V], axis=0)
+        np.testing.assert_allclose(M1, M0, rtol=1e-12)
+        for v in HC.V:
+            for k in range(2):
+                self.assertEqual(v.dual_vol_phase[k] > 1e-30,
+                                 v.m_phase[k] > 1e-30)
+        # the remap's restore keeps the adopted pressure
+        mps.compute_phase_pressures(HC)
+        self.assertGreater(float(gained.p_phase[1]), 0.9 * self.P0)
+        restore_pressure_multiphase(HC, mps, snap, adopted=diag['adopted'])
+        self.assertAlmostEqual(float(gained.p_phase[1]), self.P0, places=6)
+
+    def test_volume_rule_adopts_the_local_pressure(self):
+        """The adopted pressure is the sub-volume weighted mean of the
+        snapshot pressure over the neighbours that had the phase."""
+        HC, bV, mps, snap = self._two_phase_mesh()
+        gained, lost = self._presence_change(HC, bV)
+        num = den = 0.0
+        for w in gained.nn:
+            if snap[id(w)]['dual_vol_phase'][1] > 0.0:
+                snap[id(w)]['p_phase'][1] = self.P0 + 100.0 * w.x_a[1]
+                num += snap[id(w)]['p_phase'][1] * snap[id(w)]['dual_vol_phase'][1]
+                den += snap[id(w)]['dual_vol_phase'][1]
+        self.assertGreater(den, 0.0)
+        diag = redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='volume')
+        self.assertAlmostEqual(diag['adopted'][id(gained)][1], num / den,
+                               places=9)
+
+    def test_rules_agree_to_the_bit_without_a_presence_change(self):
+        HC, bV, mps, snap = self._two_phase_mesh()
+        rng = np.random.RandomState(7)
+        for v in HC.V:
+            if v not in bV:
+                HC.V.move(v, tuple(v.x_a[:2] + rng.randn(2) * 1e-3))
+        compute_vd(HC, method="barycentric")
+        cache_dual_volumes(HC, dim=2)
+        for v in HC.V:
+            v.dual_vol_phase = np.zeros(2)
+            v.dual_vol_phase[v.phase] = float(v.dual_vol)
+        before = {id(v): v.m_phase.copy() for v in HC.V}
+        redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='snapshot')
+        after_snapshot = {id(v): v.m_phase.copy() for v in HC.V}
+        for v in HC.V:
+            v.m_phase = before[id(v)].copy()
+        diag = redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='volume')
+        self.assertEqual(diag['adopted'], {})
+        for v in HC.V:
+            np.testing.assert_array_equal(v.m_phase, after_snapshot[id(v)])
+
+    def test_adopt_rule_keeps_the_lost_mass_as_inertia(self):
+        HC, bV, mps, snap = self._two_phase_mesh()
+        M0 = np.sum([v.m_phase for v in HC.V], axis=0)
+        gained, lost = self._presence_change(HC, bV)
+        m_lost_before = float(lost.m_phase[1])
+        diag = redistribute_mass_multiphase(
+            HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='adopt')
+        self.assertEqual(list(diag['adopted']), [id(gained)])
+        self.assertGreater(float(gained.m_phase[1]), 0.0)
+        self.assertEqual(float(lost.m_phase[1]), m_lost_before)
+        self.assertEqual(diag['per_phase_diagnostics'][1]['mass_released'],
+                         0.0)
+        M1 = np.sum([v.m_phase for v in HC.V], axis=0)
+        np.testing.assert_allclose(M1, M0, rtol=1e-12)
+
+    def test_unknown_rule_is_refused(self):
+        HC, bV, mps, snap = self._two_phase_mesh()
+        with self.assertRaises(ValueError):
+            redistribute_mass_multiphase(
+                HC, 2, mps, bV=bV, pressure_snapshot=snap, ledger='other')
+        with self.assertRaises(ValueError):
+            redistribute_mass_multiphase(
+                HC, 2, mps, bV=bV,
+                pressure_snapshot=snapshot_pressure_multiphase(HC, 2),
+                ledger='volume')
+
+
 if __name__ == '__main__':
     unittest.main()

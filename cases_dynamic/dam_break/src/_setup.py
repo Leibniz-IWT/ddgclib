@@ -194,6 +194,19 @@ def setup_dam_break_multiphase(
     from ddgclib.dynamic_integrators._integrators_dynamic import _retopologize
     _retopologize(HC, bV_walls, dim)
     mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
+    # NOTE(laneF-vote-labels, 2026-10-05): the refresh above labels the
+    # simplices with the spatial criterion; every refresh the integrator
+    # runs labels them by the vertex vote (assign_simplex_phases_from_
+    # vertices).  In 3D the two differ (laneS: 9 of 189 vertices change
+    # label), so a preload on the criterion sub-volumes is not
+    # hydrostatic on the vote sub-volumes: measured p_liq 101203 to
+    # 120945 Pa (the EOS clip, +9.6 kPa) at t = 0 instead of P_atm + the
+    # head, which blew the 3D column apart (|a| 4e3 m/s^2 at step 0).
+    # One vote refresh BEFORE the preload puts the masses on the labels
+    # that run.  In 2D the vote reproduces the criterion labels, so the
+    # setup state is bit-identical (digest 952d4544676ca366 of the
+    # shipped run).
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
 
     # Hydrostatic targets (linear EOS n=1 -> exact closed-form density).
     # Gas: atmospheric column over the full tank height.  Liquid:
@@ -212,6 +225,13 @@ def setup_dam_break_multiphase(
             if vol_k > 1e-30:
                 rho_k = float(mps.phases[k].eos.density(_p_target[k](y)))
                 v.m_phase[k] = rho_k * vol_k
+            else:
+                # NOTE(laneF-vote-labels): no mass where the vote
+                # sub-volume is zero.  The criterion-label refresh above
+                # left liquid mass on 3D vertices the vote gives no
+                # liquid, and the volume ledger released it into the
+                # pool at step 0 (+8.7 % liquid mass, +8.5 kPa).
+                v.m_phase[k] = 0.0
         v.m = float(np.sum(v.m_phase))
 
     # Final refresh: recompute per-phase pressures from the preloaded

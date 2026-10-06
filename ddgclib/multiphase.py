@@ -455,10 +455,46 @@ class MultiphaseSystem:
           interface tangent plane through ``v`` (see
           :func:`ddgclib.geometry._dual_split_3d.split_dual_polyhedron_3d`) —
           exact on locally planar interfaces, ``O(h^2)`` on curved ones.
+        - ``'simplex'`` (laneF 2026-10-05): the barycentric dual cell is
+          the union of its pieces in the incident top-simplices, one
+          ``|T| / (dim + 1)`` per simplex, and each piece belongs to the
+          phase the simplex is labelled with (:attr:`simplex_phase`, the
+          same labels that define the interface).  Sub-volume presence
+          then equals ``interface_phases``, so a one-cell-thick liquid
+          tongue whose vertices are all interface vertices keeps its
+          liquid sub-volume (under ``'neighbour_count'`` it reads zero:
+          no bulk neighbour).  The shares are rescaled to ``v.dual_vol``
+          (a no-op up to round-off on an interior cell and on a 2D half
+          cell; it zeroes a hull vertex whose cell the 3D retopology
+          zeroes), so the sub-volumes partition ``v.dual_vol`` under
+          either boundary convention.  Needs the top-simplex cache
+          ``HC._simplices`` (falls back to :func:`iter_top_simplices`).
 
         Sets ``v.dual_vol_phase[k]`` for every vertex.
         """
         n = self.n_phases
+        if method == 'simplex':
+            from math import factorial
+            for v in HC.V:
+                v.dual_vol_phase = np.zeros(n)
+            simplices = getattr(HC, '_simplices', None)
+            if not simplices:
+                simplices = iter_top_simplices(HC, dim)
+            for simplex in simplices:
+                k = self.simplex_phase.get(_simplex_key(simplex))
+                if k is None or not (0 <= k < n):
+                    continue
+                pts = np.array([u.x_a[:dim] for u in simplex], dtype=float)
+                share = (abs(float(np.linalg.det(pts[1:] - pts[0])))
+                         / factorial(dim) / (dim + 1))
+                for u in simplex:
+                    u.dual_vol_phase[k] += share
+            for v in HC.V:
+                total = float(v.dual_vol_phase.sum())
+                vol = float(getattr(v, 'dual_vol', 0.0))
+                if total > 0.0:
+                    v.dual_vol_phase *= vol / total
+            return
         if method == 'exact':
             if dim == 2:
                 from ddgclib.geometry._dual_split_2d import (

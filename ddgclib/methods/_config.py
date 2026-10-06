@@ -51,7 +51,8 @@ __all__ = ['SolverMethods']
 
 # Fields that are only meaningful for the multiphase pipeline.  For a
 # single-phase config they must stay at their defaults.
-_MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path')
+_MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path',
+               'phase_ledger', 'face_closure')
 
 # Connectivity values whose retopology function runs the multiphase
 # redistribution block (so remap / projection_every can apply).
@@ -93,7 +94,9 @@ class SolverMethods:
     projection_every: int = 1
     redistribute_mass: bool = False
     split_method: str = 'neighbour_count'
+    phase_ledger: str = 'volume'
     curvature_path: str = 'integrated'
+    face_closure: str = 'renormalise'
     pressure_flux: str = 'centred'
     viscous_flux: str = 'two_point'
     area_orientation: str = 'primal_edge'
@@ -120,7 +123,9 @@ class SolverMethods:
         self._check_choice('remap', self.remap)
         self._check_choice('frozen_set', self.frozen_set)
         self._check_choice('split_method', self.split_method)
+        self._check_choice('phase_ledger', self.phase_ledger)
         self._check_choice('curvature_path', self.curvature_path)
+        self._check_choice('face_closure', self.face_closure)
         self._check_choice('pressure_flux', self.pressure_flux)
         self._check_choice('viscous_flux', self.viscous_flux)
         self._check_choice('area_orientation', self.area_orientation)
@@ -256,6 +261,13 @@ class SolverMethods:
                 f"their bV is persistent already; 'adaptive' creates wall "
                 f"vertices that are not members and remeshes members that "
                 f"are off the hull")
+
+        if (self.phase_ledger != AXES['phase_ledger'].default
+                and not self.redistribute_mass):
+            raise ValueError(
+                f"phase_ledger={self.phase_ledger!r} is applied inside the "
+                "per-phase redistribution: it requires "
+                "redistribute_mass=True")
 
         if self.remap == 'conservative':
             if not self.redistribute_mass:
@@ -424,7 +436,9 @@ class SolverMethods:
         ``frozen_set='membership'`` adds ``frozen_set=`` to the single-phase
         or multiphase partial (a single-phase config then always gets a
         ``partial(_retopologize, ...)``); the default ``'hull'`` binds
-        nothing, so the objects above are unchanged.
+        nothing, so the objects above are unchanged.  Likewise a
+        non-default ``phase_ledger`` adds ``phase_ledger=`` to the two
+        multiphase partials that redistribute.
         """
         if self.connectivity == 'frozen':
             return False
@@ -446,6 +460,7 @@ class SolverMethods:
             return partial(retopologize_material_delaunay,
                            retopo_remap=self.remap)
         membership = self.frozen_set != AXES['frozen_set'].default
+        ledger = self.phase_ledger != AXES['phase_ledger'].default
         if self.phases == 'single':
             if self.remap is None and not membership:
                 return None
@@ -464,13 +479,16 @@ class SolverMethods:
             if domain_bounds is None:
                 raise ValueError("periodic multiphase needs domain_bounds=")
             from ddgclib.methods._retopo import retopologize_multiphase_periodic
-            return partial(
-                retopologize_multiphase_periodic, mps=mps,
+            kw_p: dict[str, Any] = dict(
+                mps=mps,
                 periodic_axes=list(self.periodic_axes),
                 domain_bounds=[tuple(b) for b in domain_bounds],
                 split_method=self.split_method,
                 redistribute_mass=self.redistribute_mass,
             )
+            if ledger:
+                kw_p['phase_ledger'] = self.phase_ledger
+            return partial(retopologize_multiphase_periodic, **kw_p)
         from ddgclib.dynamic_integrators._integrators_dynamic import (
             _retopologize_multiphase,
         )
@@ -487,6 +505,8 @@ class SolverMethods:
             kw['projection_every'] = self.projection_every
         if membership:
             kw['frozen_set'] = self.frozen_set
+        if ledger:
+            kw['phase_ledger'] = self.phase_ledger
         return partial(_retopologize_multiphase, **kw)
 
     def integrator_kwargs(self, mps=None, custom: Callable | None = None,
@@ -542,7 +562,8 @@ class SolverMethods:
         single-phase: ``partial(dudt_i, dim, mu, HC, pressure_model
         [, pressure_flux][, viscous_flux][, area_orientation])``
         multiphase:   ``partial(multiphase_dudt_i, dim, mps, HC,
-        pressure_model[, curvature_path][, area_orientation])``
+        pressure_model[, curvature_path][, area_orientation]
+        [, face_closure])``
 
         *body_force* (per unit mass, e.g. ``[0, -9.81]``) wraps the
         result as ``a + g`` exactly like the dam-break setup does.
@@ -576,6 +597,8 @@ class SolverMethods:
                 kw['curvature_path'] = self.curvature_path
             if self.area_orientation != AXES['area_orientation'].default:
                 kw['area_orientation'] = self.area_orientation
+            if self.face_closure != AXES['face_closure'].default:
+                kw['face_closure'] = self.face_closure
             fn = partial(multiphase_dudt_i, **kw)
         if body_force is None:
             return fn

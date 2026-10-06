@@ -460,7 +460,8 @@ def retopologize_multiphase_periodic(HC, bV, dim, mps=None, periodic_axes=None,
                                      split_method='neighbour_count',
                                      redistribute_mass=False,
                                      remesh_mode='delaunay',
-                                     remesh_kwargs=None):
+                                     remesh_kwargs=None,
+                                     phase_ledger='volume'):
     """Periodic ghost-cell Delaunay + multiphase refresh (+ redistribution).
 
     Mirrors ``_retopologize_multiphase`` with :func:`retopologize_periodic`
@@ -468,7 +469,9 @@ def retopologize_multiphase_periodic(HC, bV, dim, mps=None, periodic_axes=None,
     the pre-call per-phase ``dual_vol_phase`` is snapshotted and used as the
     gating mask in ``redistribute_mass_multiphase`` so per-phase pressure is
     preserved across reconnection.  *remesh_mode*/*remesh_kwargs* are
-    ignored (periodic adaptive remesh is not implemented).
+    ignored (periodic adaptive remesh is not implemented).  *phase_ledger*
+    is the ``ledger=`` rule of that redistribution (method axis
+    ``phase_ledger``; default the historic ``'snapshot'``).
     """
     if periodic_axes is None or domain_bounds is None:
         raise ValueError("retopologize_multiphase_periodic needs periodic_axes "
@@ -496,5 +499,6 @@ def retopologize_multiphase_periodic(HC, bV, dim, mps=None, periodic_axes=None,
             )
             redistribute_mass_multiphase(
                 HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
+                ledger=phase_ledger,
             )
             mps.compute_phase_pressures(HC)

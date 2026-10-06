@@ -113,6 +113,31 @@ def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
     return float(v.p_phase[k])
 
 
+#: Rules for a sub-face whose phase is present at neither end (method
+#: axis ``face_closure``), see :func:`multiphase_stress_force`.
+FACE_CLOSURES = ('skip', 'renormalise')
+
+
+def _close_fractions(fractions, present_i, present_j):
+    """Renormalise *fractions* over the phases present at either end.
+
+    ``present_i`` / ``present_j`` are ``k -> bool`` callables.  Returns
+    *fractions* itself when every listed phase is present at one end
+    (the common case, bit-identical to the old loop).  A sub-face whose
+    phase is present at neither end would otherwise be dropped from
+    both sides and leave the cell open by ``frac * A_ij``; its share
+    goes to the listed phases that are present, or, if none is, equally
+    to the phases present at either end.
+    """
+    keep = {k: f for k, f in fractions.items() if present_i(k) or present_j(k)}
+    if len(keep) == len(fractions):
+        return fractions
+    total = sum(keep.values())
+    if total > 0.0:
+        return {k: f / total for k, f in keep.items()}
+    return fractions
+
+
 def _face_viscosity_for_phase(
     mps, _v_i, _v_j, k: int,
 ) -> float:
@@ -134,6 +159,7 @@ def multiphase_stress_force(
     pressure_model=None,
     curvature_path: str = 'integrated',
     area_orientation: str = 'primal_edge',
+    face_closure: str = 'renormalise',
 ) -> np.ndarray:
     """Integrated force on a dual cell with per-phase summed stress.
 
@@ -158,7 +184,22 @@ def multiphase_stress_force(
         (:func:`ddgclib.operators.stress.dual_area_vector`); the method
         axis ``area_orientation``.  The ``csf_dual`` curvature path reads
         the default rule.
+    face_closure : {'renormalise', 'skip'}
+        What becomes of a sub-face whose phase (from the interface-tag
+        rule of ``edge_phase_area_fractions``) is present at NEITHER end
+        by sub-volume; the method axis ``face_closure``.  ``'skip'`` (the
+        behaviour until laneF 2026-10-05) drops it from both sides: the
+        cell is then open by ``frac * A_ij`` and the ABSOLUTE pressure
+        acts on the gap (dam break: a 50/50 interface edge between two
+        interface vertices that lost their last bulk liquid neighbour
+        in one flip gives ``F = P_atm * A_ij / 2 = 494 N`` on a 1.6e-4
+        kg cell).  ``'renormalise'`` gives its share to the listed phases
+        present at either end (:func:`_close_fractions`), so every cell
+        closes; bit-identical where nothing is dropped.
     """
+    if face_closure not in FACE_CLOSURES:
+        raise ValueError(f"face_closure must be one of {FACE_CLOSURES}, "
+                         f"got {face_closure!r}")
     n_phases = mps.n_phases
     has_p_phase = hasattr(v, 'p_phase')
     is_interface_i = bool(getattr(v, 'is_interface', False))
@@ -195,6 +236,13 @@ def multiphase_stress_force(
         fractions = edge_phase_area_fractions(
             v, v_j, dim=dim, interface=HC,
         )
+        if face_closure == 'renormalise':
+            fractions = _close_fractions(
+                fractions,
+                (lambda k: _phase_present_at(v, k)) if has_p_phase
+                else (lambda k: k in p_i_by_phase),
+                lambda k: _phase_present_at(v_j, k),
+            )
 
         for k, frac in fractions.items():
             # Presence at both ends is keyed on geometry (per-phase
@@ -207,9 +255,11 @@ def multiphase_stress_force(
             present_j = _phase_present_at(v_j, k)
             if not present_i and not present_j:
                 # No phase-k material at either end of this sub-face:
-                # skip it from BOTH sides (symmetric, no spurious flux).
-                # On consistently-tagged meshes this can only fire for
-                # a fraction phase produced by stale interface tags.
+                # skip it from BOTH sides (symmetric, no spurious flux,
+                # but the cell is OPEN by frac * A_ij: face_closure=
+                # 'skip', laneF 2026-10-05).  Under 'renormalise' this
+                # fires only when no listed phase is present at either
+                # end, i.e. both cells are empty.
                 continue
 
             A_k = frac * A_ij
@@ -394,12 +444,14 @@ def multiphase_stress_acceleration(
     pressure_model=None,
     curvature_path: str = 'integrated',
     area_orientation: str = 'primal_edge',
+    face_closure: str = 'renormalise',
 ) -> np.ndarray:
     """Acceleration from multiphase stress: a_i = F_i / m_i."""
     F = multiphase_stress_force(v, dim=dim, mps=mps, HC=HC,
                                 pressure_model=pressure_model,
                                 curvature_path=curvature_path,
-                                area_orientation=area_orientation)
+                                area_orientation=area_orientation,
+                                face_closure=face_closure)
     if v.m < 1e-30:
         return np.zeros(dim)
     return F / v.m

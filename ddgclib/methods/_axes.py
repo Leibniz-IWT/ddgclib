@@ -633,6 +633,134 @@ _AXES: list[MethodAxis] = [
                  '3D end-to-end 1.75e-3 vs 1.44e-3 (worse); 2D retopo-neutral '
                  'but no metric gain (debugging_plan 2026-04-29)',
                  dims=(2, 3), phases='multi'),
+            _opt('simplex', 'Each incident top-simplex contributes |T| / '
+                 '(dim + 1) to the phase it is labelled with (simplex_phase, '
+                 'the labels that define the interface): sub-volume presence '
+                 '== interface_phases, the sub-volumes partition v.dual_vol '
+                 'exactly, hull vertices included, and a one-cell-thick '
+                 'tongue whose vertices are all interface vertices keeps its '
+                 'liquid sub-volume (neighbour_count reads 0 there); the '
+                 'shares are rescaled to v.dual_vol (zero on a 3D hull vertex)',
+                 'opt-in',
+                 'ddgclib/multiphase.py:MultiphaseSystem.split_dual_volumes',
+                 'laneF 2026-10-05 (diagnose_sliver_ejection.py --replace '
+                 'split_method=simplex): changes every multiphase run (every '
+                 'interface split moves), not adopted. dam_break_2D refinement '
+                 '3: alpha 0.2 and 0.1 complete the horizon (digests '
+                 '2e483c47a3271a45 / b6f00767f3851509, |u|max 1.12 / 1.59); '
+                 'the toe event is milder at alpha 0.2 (a_max 163 against 107 '
+                 'm/s^2 at the sampled steps, KE_liq peak 3.75e-2 at 0.155 s) '
+                 'but a new mechanism appears: the majority vote erases a lone '
+                 'liquid vertex (tie -> lower phase ID = air), which then '
+                 'carries 0.11 kg of liquid mass as an air vertex (stranded '
+                 'under the snapshot ledger: it free-falls through the floor '
+                 'at 0.33 m/s by step 1341; released under volume). '
+                 'dam_break_3D with the exact faces: as clean as '
+                 'neighbour_count (adc368cdb99b3f4a, |u|max 0.057 against '
+                 '0.062, KE_liq peak 4.87e-6 against 4.08e-6 J)',
+                 dims=(2, 3), phases='multi'),
+        ),
+    ),
+    MethodAxis(
+        name='phase_ledger',
+        title='Per-phase mass ledger where a phase appears or disappears '
+              'across a rebuild',
+        group='thermodynamics', default='volume', applies_to='multi',
+        control='ledger= in redistribute_mass_multiphase, forwarded as '
+                'phase_ledger= by _retopologize_multiphase (and the restore '
+                'reads its adopted pressures) and by '
+                'retopologize_multiphase_periodic; bound into the multiphase '
+                'retopology partial by SolverMethods.retopologize_fn() when '
+                'not the default; needs redistribute_mass=True',
+        notes='A reconnection can give an interface vertex its first bulk '
+              'neighbour of a phase (the phase APPEARS there: sub-volume > 0 '
+              'now, 0 in the snapshot) or take its last one (the phase '
+              'DISAPPEARS: mass, no sub-volume). Which of the two ledgers '
+              'the per-phase redistribution keeps decides what the force '
+              'reads at that vertex. Inert on fixed connectivity (dual_only: '
+              'presence never changes).',
+        options=(
+            _opt('snapshot', 'A phase is re-targeted only where the snapshot '
+                 'had it. APPEARED: no mass, so compute_phase_pressures '
+                 'publishes p_phase[k] = 0 ABSOLUTE while the force reads the '
+                 'phase as present (sub-volume > 0): a pressure hole of P0 '
+                 'on every face of that vertex. DISAPPEARED: the mass stays '
+                 'without a sub-volume (stranded inertia)', 'broken',
+                 'ddgclib/operators/mass_redistribution.py:_targets_by_snapshot',
+                 'laneF 2026-10-05 (cases_dynamic/dam_break/'
+                 'diagnose_sliver_ejection.py): the dam-break ejection that '
+                 'lanes F and L attributed to a sliver cell. dam_break_2D at '
+                 'alpha_art 0.2: the first and only hole of the run appears at '
+                 'the flip of step 1427 (t = 0.1802 s) at the interface '
+                 'vertex (0.0473, 0.0154) that gained its first bulk air '
+                 'neighbour; its air pressure reads 0.0 against 101326 Pa in '
+                 'the neighbouring air cell (dual volume 9.0e-5 m^2, NOT a '
+                 'sliver; |a| 1.7 m/s^2 the step before), so that cell '
+                 'feels |F| = 439 N on 1.1e-4 kg (|a| 3.9e6 m/s^2, |u| 497 '
+                 'm/s = 502 u_ref in one step); the same flip strands 0.0415 '
+                 'and 0.0333 kg of liquid mass without volume at two other '
+                 'interface vertices. Invisible at P0 = 0 (every droplet, '
+                 'electrolysis and shearing preset): the hole is then the '
+                 'gauge reference. The shipped alpha_art 0.3 run has 0 holes '
+                 'and 0 strandings over its 1585 steps (digest '
+                 '952d4544676ca366), which is why it survives',
+                 phases='multi'),
+            _opt('volume', 'The per-phase mass follows the per-phase '
+                 'sub-volume: a phase that appeared at a vertex is targeted '
+                 'at the local snapshot pressure of that phase (sub-volume '
+                 'weighted mean over the 1-ring neighbours that had it, else '
+                 'the phase level) and joins the conserving rescale; a phase '
+                 'that disappeared releases its mass into the phase pool; '
+                 'under the remap the restore keeps the adopted pressure. '
+                 'Frozen vertices take part in the two presence changes only',
+                 'validated',
+                 'ddgclib/operators/mass_redistribution.py:_targets_by_volume; '
+                 'restore_pressure_multiphase(adopted=)',
+                 'laneF 2026-10-05, DEFAULT. Bit-identical wherever no phase '
+                 'appears or disappears: the shipped dam break (952d4544676ca366), '
+                 'the 2D droplet (400 steps) and electrolysis 2D (6330 steps, '
+                 'a8301121c7bf44ab) have no such event (diagnose_phase_ledger.py '
+                 'census), every fast and slow pin is unchanged (1236 / 32 '
+                 'passed), the full 2D and 3D droplet runs reproduce their '
+                 'baselines (see the lane log). dam_break_2D (refinement 3) '
+                 'with face_closure=renormalise: alpha_art 0.2 and 0.1 complete '
+                 'the 1585-step horizon with 0 holes, 0 strandings and no '
+                 'vertex outside (|u|max 1.00 / 1.40 m/s, final digests '
+                 'e98a3ce60a279df9 / 217114c814658816); with the snapshot '
+                 'rule the same runs eject at step 1427 / 765. Cost, '
+                 'measured: at the toe event the released toe vertices are '
+                 'light and the interface pressure jump kicks them (alpha 0.2: '
+                 'KE of liquid plus interface 3.1e-3 -> 3.5e-2 J at t = 0.189 '
+                 's, back to 5.4e-3 by 0.199 s; the front measure retreats '
+                 'from 0.0754 to 0.0645 because the toe is no longer liquid), '
+                 'and at refinement 2 / alpha 0.1 a one-cell toe evaporates '
+                 'into the pool (front measure back to 0.05; the snapshot '
+                 'rule survives that run with the toe stranded as inertia, '
+                 '|u|max 0.39 against 1.29). Neither rule alone carries the '
+                 'refinement 3 runs: volume + face_closure=skip ejects at '
+                 '1427 (|u| 394 m/s), snapshot + renormalise at 1427 (497)',
+                 phases='multi'),
+            _opt('adopt', 'As volume for a phase that appeared; a phase that '
+                 'disappeared keeps its mass without a sub-volume (inertia '
+                 'stays with the vertex, the force reads the phase as absent)',
+                 'opt-in',
+                 'ddgclib/operators/mass_redistribution.py:_targets_by_volume'
+                 '(release=False)',
+                 'laneF 2026-10-05. Bit-identical to snapshot while no phase '
+                 'appears (refinement 2 / alpha 0.1: f309a551f5823e64, the toe '
+                 'kept as stranded inertia, front measure 0.0587). dam_break_2D '
+                 'refinement 3 / alpha 0.2: completes the horizon '
+                 '(68300516b06ea197, |u|max 1.003 m/s, KE_liq peak 2.79e-2 J at '
+                 '0.184 s like volume, KE_liq end 1.98e-3 against 2.39e-3, '
+                 'front 0.0652 against 0.0654) with 2 stranded masses on 158 '
+                 'steps and |a|max 899 m/s^2 at step 1428 (35 N on a 0.039 kg '
+                 'interface vertex). Not the default: mass without a '
+                 'sub-volume is outside the EOS ledger (the level anchor and '
+                 'the pressure field see less liquid than exists), and a '
+                 'stranded vertex is a heavy air particle that nothing holds '
+                 'up (the simplex-split arm showed one falling through the '
+                 'floor at 0.33 m/s)',
+                 phases='multi'),
         ),
     ),
     # ------------------------------------------------------------------
@@ -925,6 +1053,65 @@ _AXES: list[MethodAxis] = [
         ),
     ),
     MethodAxis(
+        name='face_closure',
+        title='Sub-face whose phase is present at neither end',
+        group='forces', default='renormalise', applies_to='multi',
+        control='face_closure= on multiphase_dudt_i / multiphase_stress_force '
+                '(dudt partial, bound by SolverMethods.dudt_fn only when not '
+                'the default); every multiphase setup builds its force that '
+                'way since laneW',
+        notes='edge_phase_area_fractions splits a dual face between the '
+              'phases by the interface TAGS (a 50/50 interface edge, a chord '
+              'by the shared bulk neighbours); the force keys phase presence '
+              'at the two ends on the per-phase SUB-VOLUME. The two disagree '
+              'when a flip leaves an interface vertex without a bulk '
+              'neighbour of one of its tagged phases (split_method='
+              'neighbour_count reads a zero sub-volume there; the simplex '
+              'split does not). This axis says what happens to the sub-face '
+              'then.',
+        options=(
+            _opt('skip', 'The sub-face is dropped from both sides (symmetric, '
+                 'no flux), which leaves the cell OPEN by frac * A_ij: the '
+                 'absolute pressure acts on the gap, F = P0 * frac * A_ij',
+                 'broken',
+                 'ddgclib/operators/multiphase_stress.py:multiphase_stress_force '
+                 '(the `continue` of the per-phase loop)',
+                 'audit 2026-07-02 (docs_temp/audit/multiphase-momentum.md) '
+                 'rated it latent: 0 firings on the clean droplet fixtures. '
+                 'laneF 2026-10-05 (diagnose_sliver_ejection.py --replace '
+                 'phase_ledger=volume at alpha_art 0.2): it fires at the flip '
+                 'of step 1427 on the two interface vertices of the liquid toe '
+                 'that lost their last bulk liquid neighbour: the 50/50 '
+                 'interface-edge face between them has its liquid half '
+                 'dropped at both ends, closure sum frac*A = (-9.7e-5, '
+                 '-4.87e-3) m, F = 101326 Pa * 4.87e-3 = 493.6 N on 1.58e-4 '
+                 'kg (|a| 3.1e6 m/s^2, |u| 394 m/s in one step). With the '
+                 'snapshot ledger the same two cells carried their stranded '
+                 '0.04 kg of liquid, so the air hole ejected first and this '
+                 'face was the second mechanism of the same flip',
+                 phases='multi'),
+            _opt('renormalise', 'The share of a sub-face whose phase is '
+                 'present at neither end goes to the listed phases that are '
+                 'present at either end (fractions renormalised to 1), so '
+                 'every cell closes: sum_k frac_k A_ij = A_ij on every edge. '
+                 'The function returns the fractions unchanged when nothing '
+                 'is dropped, so it is bit-identical wherever skip never '
+                 'fired',
+                 'validated',
+                 'ddgclib/operators/multiphase_stress.py:_close_fractions',
+                 'laneF 2026-10-05, DEFAULT. Every fast and slow pin unchanged '
+                 '(skip never fired on them), the full 2D and 3D droplet runs '
+                 'reproduce their baselines, the shipped dam break is '
+                 'bit-identical. With phase_ledger=volume it carries '
+                 'dam_break_2D (refinement 3) at alpha_art 0.2 and 0.1 through '
+                 'the horizon; with skip the alpha 0.2 run ejects at step 1427 '
+                 '(|u| 394 m/s). At refinement 2 / alpha 0.1 (fast pin) skip '
+                 'and renormalise differ from step 778 on (digests '
+                 'f309a551f5823e64 against 9b5c0fbfcf25b88c)',
+                 phases='multi'),
+        ),
+    ),
+    MethodAxis(
         name='density_diffusion', title='Gradient-corrected density diffusion',
         group='thermodynamics', default=None, kind='float', applies_to='single',
         control='density_diffusion= integrator kwarg (euler, symplectic_euler); '
@@ -1156,7 +1343,17 @@ _AXES: list[MethodAxis] = [
                  'notes). dam_break_3D smoke: the shipped preset aborts with '
                  'NaN after 17 steps on the fan cache (HEAD library too), '
                  'after 156 with the exact cache, after 91 per edge: the case '
-                 'blows up on every source', dims=(3,)),
+                 'blows up on every source. laneF 2026-10-05: DEFAULT of '
+                 'dam_break_3D. The fan-cache failure is its 1 % closure '
+                 'defect times the absolute pressure (0.26 N on a 2e-5 kg '
+                 'air cell at step 0, 1000x the body force; invisible at P0 '
+                 '= 0); the step-156 / 96 failure on the exact faces was the '
+                 'non-hydrostatic 3D preload (criterion against vote labels). '
+                 'With the setup on the vote labels the exact faces carry the '
+                 'full 793-step horizon: |u|max 0.062 m/s, |a|max 96 m/s^2 at '
+                 'step 0 decaying to 0.03, KE_liq peak 4.079e-6 J, mass drift '
+                 '-2.6e-15, digest 639c87c7700c2c71 (test_case_dam_break.py '
+                 'smoke and full-horizon pins)', dims=(3,)),
             _opt('p_ij', '3D: no cache; every edge built on demand from the '
                  'tetrahedra around it (stress._dual_area_vector_3d_simplex: '
                  'the DEC p_ij polygon with ring order and face vertices read '

@@ -24,6 +24,8 @@ Boundary-condition awareness
 """
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 
 
@@ -308,6 +310,7 @@ def restore_pressure_multiphase(
     HC,
     mps,
     snapshot: dict,
+    adopted: dict | None = None,
 ) -> int:
     """Overwrite ``v.p_phase`` with snapshot pressures after a rebuild.
 
@@ -338,6 +341,11 @@ def restore_pressure_multiphase(
         Geometry-aware snapshot from
         :func:`snapshot_geometry_multiphase` taken at the same vertex
         positions immediately before the connectivity rebuild.
+    adopted : dict or None
+        ``{id(v): {k: p}}`` from :func:`redistribute_mass_multiphase`
+        with ``ledger='volume'``: the local phase-k pressure a phase
+        that is NEW at *v* was targeted at.  Restored like a snapshot
+        value (the phase is otherwise skipped as "newly present").
 
     Returns
     -------
@@ -360,7 +368,12 @@ def restore_pressure_multiphase(
             if dvp[k] < 1e-30 or v.m_phase[k] < 1e-30:
                 continue  # phase absent on the new duals
             if dvp_snap is not None and dvp_snap[vid][k] < 1e-30:
-                continue  # phase newly present at v: keep EOS value
+                # phase newly present at v: keep the EOS value, unless
+                # the volume ledger targeted it at a local pressure
+                if adopted is not None and k in adopted.get(vid, ()):
+                    v.p_phase[k] = adopted[vid][k]
+                    n_restored += 1
+                continue
             v.p_phase[k] = p_snap[vid][k]
             n_restored += 1
         # v.p convention identical to compute_phase_pressures
@@ -548,12 +561,144 @@ def anchor_phase_pressure_levels(
     return diag
 
 
+#: Rules for a phase that appears or disappears at a vertex across a
+#: rebuild (method axis ``phase_ledger``), see
+#: :func:`redistribute_mass_multiphase`.
+LEDGER_RULES = ('snapshot', 'volume', 'adopt')
+
+
+def _local_phase_pressure(v, k: int, p_snap, dvp_snap) -> float | None:
+    """Snapshot phase-k pressure around *v*: the sub-volume weighted mean
+    over the 1-ring neighbours at which phase *k* was present before the
+    rebuild (``None`` when no neighbour had it)."""
+    num = den = 0.0
+    for w in v.nn:
+        wid = id(w)
+        dvp_w = dvp_snap.get(wid)
+        if dvp_w is None or dvp_w[k] < 1e-30:
+            continue
+        num += float(p_snap[wid][k]) * float(dvp_w[k])
+        den += float(dvp_w[k])
+    return num / den if den > 0.0 else None
+
+
+def _phase_level(k: int, p_snap, dvp_snap) -> float | None:
+    """Snapshot phase-k pressure level: the sub-volume weighted mean over
+    every vertex at which phase *k* was present (``None`` if nowhere)."""
+    num = den = 0.0
+    for vid, dvp_v in dvp_snap.items():
+        if dvp_v[k] < 1e-30:
+            continue
+        num += float(p_snap[vid][k]) * float(dvp_v[k])
+        den += float(dvp_v[k])
+    return num / den if den > 0.0 else None
+
+
+def _targets_by_snapshot(HC, k, eos_k, bV, pressure_snapshot, p_snap,
+                         dvp_snap):
+    """Targets of the ``'snapshot'`` ledger rule (the historic loop)."""
+    targets_k = {}
+    M_k_target = 0.0
+    for v in HC.V:
+        if not _is_redistributable(v, bV, pressure_snapshot):
+            continue
+        dvp = getattr(v, 'dual_vol_phase', None)
+        if dvp is None or dvp[k] < 1e-30:
+            continue
+        p_k_before = p_snap[id(v)][k]
+        # Phase-presence guard.  Prefer the pre-retopo sub-volume
+        # when available — pressure can legitimately be zero at the
+        # reference state (P0=0), so a pressure-only guard skips
+        # whole phases that need redistribution.
+        if dvp_snap is not None:
+            if dvp_snap[id(v)][k] < 1e-30:
+                continue
+        else:
+            if p_k_before < 1e-30:
+                continue
+        rho_target = float(eos_k.density(p_k_before))
+        rho_target = max(rho_target, 1e-30)
+        m_target = rho_target * dvp[k]
+        targets_k[id(v)] = m_target
+        M_k_target += m_target
+    return targets_k, M_k_target, 0.0, {}
+
+
+def _targets_by_volume(HC, k, eos_k, bV, pressure_snapshot, p_snap,
+                       dvp_snap, release=True):
+    """Targets of the ``'volume'`` ledger rule: the phase-k mass follows
+    the phase-k sub-volume across the rebuild (``'adopt'`` with
+    ``release=False``: a lost phase keeps its mass as inertia).
+
+    Like the snapshot rule for a vertex that had phase *k* before and has
+    it now.  In addition, at every vertex of the snapshot with a dual
+    cell (frozen ones included):
+
+    * phase *k* NEW at *v* (no snapshot sub-volume, a sub-volume now,
+      e.g. an interface vertex that a flip gave its first bulk neighbour
+      of that phase): targeted at the local snapshot pressure of phase
+      *k* (:func:`_local_phase_pressure`, else :func:`_phase_level`),
+      so it joins the conserving rescale instead of staying massless;
+    * phase *k* GONE from *v* (mass, no sub-volume now): its mass is
+      released into the phase-k pool that the rescale conserves.
+
+    Returns ``(targets, M_target, M_released, adopted)`` where
+    ``adopted = {id(v): {k: p_local}}`` lists the pressures the new
+    entries were targeted at (for :func:`restore_pressure_multiphase`).
+    """
+    targets_k = {}
+    M_k_target = 0.0
+    M_k_released = 0.0
+    adopted: dict[int, dict[int, float]] = {}
+    level = None
+    level_done = False
+    for v in HC.V:
+        vid = id(v)
+        if vid not in pressure_snapshot:
+            continue  # newly injected vertex: untouched, as before
+        if getattr(v, 'dual_vol', 0.0) < 1e-30:
+            continue  # degenerate cell: untouched, as before
+        dvp = getattr(v, 'dual_vol_phase', None)
+        m_phase = getattr(v, 'm_phase', None)
+        if dvp is None or m_phase is None:
+            continue
+        present_before = not (dvp_snap[vid][k] < 1e-30)
+        if dvp[k] < 1e-30:
+            if release and m_phase[k] > 1e-30:
+                # phase k gone from this cell: mass without a sub-volume
+                M_k_released += float(m_phase[k])
+                m_phase[k] = 0.0
+            continue
+        frozen = bV is not None and v in bV
+        if present_before:
+            if frozen:
+                continue  # frozen cells keep their mass (as before)
+            p_k = p_snap[vid][k]
+        else:
+            p_k = _local_phase_pressure(v, k, p_snap, dvp_snap)
+            if p_k is None:
+                if not level_done:
+                    level = _phase_level(k, p_snap, dvp_snap)
+                    level_done = True
+                p_k = level
+            if p_k is None:
+                continue  # phase k was nowhere: nothing to adopt
+            adopted.setdefault(vid, {})[k] = float(p_k)
+        rho_target = float(eos_k.density(p_k))
+        rho_target = max(rho_target, 1e-30)
+        m_target = rho_target * dvp[k]
+        targets_k[vid] = m_target
+        M_k_target += m_target
+    return targets_k, M_k_target, M_k_released, adopted
+
+
 def redistribute_mass_multiphase(
     HC,
     dim: int,
     mps,
     bV: set | None = None,
     pressure_snapshot: dict | None = None,
+    ledger: str = 'volume',
 ) -> dict:
     """Per-phase pressure-preserving mass redistribution.
 
@@ -580,48 +725,66 @@ def redistribute_mass_multiphase(
         ``dual_vol_phase[k]`` instead of pressure magnitude, which is
         required for cases at reference pressure ``P0=0`` (otherwise
         the entire reference-pressure phase is skipped).
+    ledger : {'snapshot', 'volume'}
+        What becomes of a phase that appears at or disappears from a
+        vertex across the rebuild (method axis ``phase_ledger``).
+
+        - ``'snapshot'`` (default, the historic behaviour): a phase is
+          re-targeted only where the snapshot had it.  A phase that
+          APPEARS at a vertex (a flip gives an interface vertex its
+          first bulk neighbour of that phase) gets no mass, and
+          ``MultiphaseSystem.compute_phase_pressures`` then publishes
+          ``p_phase[k] = 0`` ABSOLUTE for it while the force operator
+          reads the phase as present (sub-volume > 0): a pressure hole
+          of ``P0`` on every face of that vertex.  Invisible at
+          ``P0 = 0`` (the droplet cases); at ``P0 = 101325`` Pa it
+          ejects the neighbouring cell (dam break, laneF 2026-10-05:
+          439 N on a 1.1e-4 kg air cell).  A phase that DISAPPEARS keeps
+          its mass without a sub-volume (stranded inertia).
+        - ``'volume'``: the per-phase mass follows the per-phase
+          sub-volume (:func:`_targets_by_volume`): a new phase is
+          targeted at the local snapshot pressure and a lost phase
+          releases its mass to the pool, both inside the exact per-phase
+          conservation.  Needs the geometry-aware snapshot.
+        - ``'adopt'``: as ``'volume'`` for a new phase; a lost phase
+          keeps its mass without a sub-volume (inertia stays with the
+          vertex, the force reads the phase as absent).
 
     Returns
     -------
     dict
-        ``per_phase_diagnostics`` list and ``total_mass_before``/``after``.
+        ``per_phase_diagnostics`` list (with the released mass and the
+        number of adopted entries per phase) and ``adopted``
+        (``{id(v): {k: p_local}}``, empty under ``'snapshot'``).
     """
+    if ledger not in LEDGER_RULES:
+        raise ValueError(f"ledger must be one of {LEDGER_RULES}, got "
+                         f"{ledger!r}")
     n_phases = mps.n_phases
 
     if pressure_snapshot is None:
         pressure_snapshot = snapshot_geometry_multiphase(HC, n_phases)
 
     p_snap, dvp_snap = _extract_snapshot_views(pressure_snapshot, n_phases)
+    if ledger != 'snapshot' and dvp_snap is None:
+        raise ValueError(f"ledger={ledger!r} needs the geometry-aware "
+                         "snapshot (snapshot_geometry_multiphase)")
+    if ledger == 'snapshot':
+        build_targets = _targets_by_snapshot
+    else:
+        build_targets = partial(_targets_by_volume,
+                                release=(ledger == 'volume'))
 
     phase_diag = []
+    adopted_all: dict[int, dict[int, float]] = {}
 
     for k in range(n_phases):
         eos_k = mps.phases[k].eos
 
-        targets_k = {}
-        M_k_target = 0.0
-        for v in HC.V:
-            if not _is_redistributable(v, bV, pressure_snapshot):
-                continue
-            dvp = getattr(v, 'dual_vol_phase', None)
-            if dvp is None or dvp[k] < 1e-30:
-                continue
-            p_k_before = p_snap[id(v)][k]
-            # Phase-presence guard.  Prefer the pre-retopo sub-volume
-            # when available — pressure can legitimately be zero at the
-            # reference state (P0=0), so a pressure-only guard skips
-            # whole phases that need redistribution.
-            if dvp_snap is not None:
-                if dvp_snap[id(v)][k] < 1e-30:
-                    continue
-            else:
-                if p_k_before < 1e-30:
-                    continue
-            rho_target = float(eos_k.density(p_k_before))
-            rho_target = max(rho_target, 1e-30)
-            m_target = rho_target * dvp[k]
-            targets_k[id(v)] = m_target
-            M_k_target += m_target
+        targets_k, M_k_target, M_k_released, adopted_k = build_targets(
+            HC, k, eos_k, bV, pressure_snapshot, p_snap, dvp_snap)
+        for vid, kp in adopted_k.items():
+            adopted_all.setdefault(vid, {}).update(kp)
 
         # Conservation target: only the mass of vertices that WILL be
         # modified (in targets_k).  Vertices with p_phase[k]=0 or
@@ -632,6 +795,7 @@ def redistribute_mass_multiphase(
                 m_phase = getattr(v, 'm_phase', None)
                 if m_phase is not None:
                     M_k_total += m_phase[k]
+        M_k_total += M_k_released
 
         # Scale and assign
         if M_k_target < 1e-30 or M_k_total < 1e-30:
@@ -640,6 +804,8 @@ def redistribute_mass_multiphase(
                 'total_mass_before': M_k_total,
                 'total_mass_after': M_k_total,
                 'scale_factor': 1.0,
+                'mass_released': M_k_released,
+                'n_adopted': len(adopted_k),
             })
             continue
 
@@ -670,6 +836,8 @@ def redistribute_mass_multiphase(
             'total_mass_before': M_k_total,
             'total_mass_after': M_k_total,
             'scale_factor': scale_k,
+            'mass_released': M_k_released,
+            'n_adopted': len(adopted_k),
         })
 
     # Recompute total mass from per-phase sums
@@ -680,4 +848,5 @@ def redistribute_mass_multiphase(
 
     return {
         'per_phase_diagnostics': phase_diag,
+        'adopted': adopted_all,
     }
