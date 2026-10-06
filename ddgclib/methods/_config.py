@@ -56,21 +56,22 @@ _MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path',
 
 # Connectivity values whose retopology function runs the multiphase
 # redistribution block (so remap / projection_every can apply).
-_RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material')
+_RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material', 'periodic')
 
 # Connectivity values for which frozen_set='membership' is implemented:
 # bV is rebuilt from the hull of a NEW connectivity inside _retopologize
-# and nothing else creates, moves or removes wall vertices.  'adaptive'
-# also rebuilds the hull but is excluded: hyperct.remesh splits wall edges
-# into vertices that are not members and collapses / smooths members that
-# are off the hull (measured, laneL fix round 1).
-_HULL_REBUILDING = ('delaunay',)
+# (or retopologize_periodic, laneG) and nothing else creates, moves or
+# removes wall vertices.  'adaptive' also rebuilds the hull but is
+# excluded: hyperct.remesh splits wall edges into vertices that are not
+# members and collapses / smooths members that are off the hull
+# (measured, laneL fix round 1).
+_HULL_REBUILDING = ('delaunay', 'periodic')
 
 # Connectivity values whose retopology function applies the 3D axis
-# edge_area_source (laneQ), and the subset that builds the batch_e_star
-# fan cache ('e_star_cache').
+# edge_area_source (laneQ; 'periodic' since laneG), and the subset that
+# builds the batch_e_star fan cache ('e_star_cache').
 _EDGE_AREA_CONNECTIVITIES = ('delaunay', 'dual_only', 'dual_only_bare',
-                             'delaunay_material')
+                             'delaunay_material', 'periodic')
 _FAN_CACHE_CONNECTIVITIES = ('delaunay', 'dual_only')
 
 
@@ -143,8 +144,8 @@ class SolverMethods:
                 raise ValueError(
                     f"edge_area_source is not applied by connectivity="
                     f"{self.connectivity!r} ('frozen' never rebuilds the "
-                    "duals, 'periodic' and 'custom' do not forward it, "
-                    "'adaptive' is 2D only); it "
+                    "duals, 'custom' does not forward it, 'adaptive' is "
+                    "2D only); it "
                     f"is implemented for {_EDGE_AREA_CONNECTIVITIES}")
             if (self.edge_area_source == 'e_star_cache'
                     and self.connectivity not in _FAN_CACHE_CONNECTIVITIES):
@@ -256,7 +257,7 @@ class SolverMethods:
             raise ValueError(
                 f"frozen_set='membership' is not applied under "
                 f"connectivity={self.connectivity!r}: it is implemented for "
-                f"{', '.join(_HULL_REBUILDING)} only. 'dual_only', "
+                f"{' and '.join(_HULL_REBUILDING)} only. 'dual_only', "
                 f"'dual_only_bare' and 'frozen' never rebuild the hull, so "
                 f"their bV is persistent already; 'adaptive' creates wall "
                 f"vertices that are not members and remeshes members that "
@@ -273,6 +274,12 @@ class SolverMethods:
             if not self.redistribute_mass:
                 raise ValueError("remap='conservative' requires "
                                  "redistribute_mass=True")
+            if self.connectivity == 'periodic' and not multi:
+                raise ValueError(
+                    "remap='conservative' on connectivity='periodic' is "
+                    "implemented for phases='multi' only "
+                    "(retopologize_multiphase_periodic, laneG); the "
+                    "single-phase periodic rebuild has no remap")
             if self.connectivity not in _RECONNECTING:
                 raise ValueError(
                     f"remap='conservative' is a silent no-op under "
@@ -425,7 +432,9 @@ class SolverMethods:
         - ``'delaunay_material'``-> ``retopologize_material_delaunay`` (a
           partial binding ``retopo_remap`` when the remap is on)
         - ``'periodic'`` + multi-> ``partial(retopologize_multiphase_periodic, ...)``
-          (*domain_bounds* required)
+          (*domain_bounds* required; ``retopo_remap`` / ``projection_every``
+          / ``frozen_set`` / ``phase_ledger`` bound like the Delaunay
+          partial when not the default, laneG)
         - single-phase + remap  -> ``partial(_retopologize, retopo_remap=...)``
           (the integrator forwards its retopology kwargs to it by name)
         - other single-phase    -> ``None`` (library default ``_retopologize``;
@@ -488,6 +497,12 @@ class SolverMethods:
             )
             if ledger:
                 kw_p['phase_ledger'] = self.phase_ledger
+            if membership:
+                kw_p['frozen_set'] = self.frozen_set
+            if self.remap is not None:
+                kw_p['retopo_remap'] = self.remap
+            if self.projection_every != 1:
+                kw_p['projection_every'] = self.projection_every
             return partial(retopologize_multiphase_periodic, **kw_p)
         from ddgclib.dynamic_integrators._integrators_dynamic import (
             _retopologize_multiphase,

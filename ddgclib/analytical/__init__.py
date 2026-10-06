@@ -33,6 +33,7 @@ from ._integrated_comparison import (
     integrated_l2_norm,
     compare_stress_force,
     volume_averaged_scalar,
+    integrated_phase_pressure_jump,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "integrated_l2_norm",
     "compare_stress_force",
     "volume_averaged_scalar",
+    "integrated_phase_pressure_jump",
 ]
 
 try:

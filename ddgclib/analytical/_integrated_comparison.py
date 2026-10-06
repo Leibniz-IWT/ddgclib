@@ -386,3 +386,36 @@ def compare_stress_force(
         "median_F": float(np.median(F_norms)) if len(F_norms) > 0 else 0.0,
         "F_norms": F_norms,
     }
+
+
+def integrated_phase_pressure_jump(HC, phase_in: int, phase_out: int,
+                                   bulk_only: bool = True) -> float:
+    """Volume-weighted mean pressure of *phase_in* minus that of
+    *phase_out*: the integrated Laplace jump of a sharp-interface
+    multiphase state, to compare with ``gamma * (dim - 1) / R`` of a
+    circular / spherical interface (laneG, 2026-10-06).
+
+    Each phase mean is ``sum_i p_phase[k] dual_vol_phase[k] / sum_i
+    dual_vol_phase[k]``; with *bulk_only* (default) the sums run over
+    the bulk vertices of the phase (``v.phase == k`` and not interface),
+    otherwise over every sub-volume of the phase, interface cells
+    included.  Needs ``v.p_phase`` and ``v.dual_vol_phase``
+    (``MultiphaseSystem.refresh``).
+    """
+    means = []
+    for k in (phase_in, phase_out):
+        num = den = 0.0
+        for v in HC.V:
+            vol_k = float(v.dual_vol_phase[k])
+            if vol_k <= 1e-30:
+                continue
+            if bulk_only and (v.phase != k
+                              or getattr(v, 'is_interface', False)):
+                continue
+            num += float(v.p_phase[k]) * vol_k
+            den += vol_k
+        if den <= 0.0:
+            raise ValueError(f"phase {k} has no "
+                             f"{'bulk ' if bulk_only else ''}sub-volume")
+        means.append(num / den)
+    return means[0] - means[1]

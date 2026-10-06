@@ -253,12 +253,26 @@ PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
     'electrolysis_bubble_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
-        connectivity='delaunay', remap=None, redistribute_mass=True,
+        connectivity='dual_only', redistribute_mass=True,
         label=_EB + 'electrolysis_bubble_2D.py',
-        notes='Per-step Delaunay without remap (the configuration measured '
-              'worse on the droplet). Gravity + NaN guard in the setup dudt '
-              'wrapper, WallClampBC, gas mass injection in the callback. '
-              'Unvalidated; only pin is 5-step per-phase mass drift <= 1.94e-15. '
+        notes='laneG 2026-10-06: connectivity="dual_only" replaces the '
+              'per-step Delaunay without remap. Static bubble (g = 0, no '
+              'injection; the preload is the analytical state, jump gamma / '
+              'R0 = 72 Pa; diagnose_static_bubble.py --dim 2): refinement '
+              '2/3 (214 vertices), 1500 steps (4.7e-5 s): Delaunay 8065.6 Pa '
+              'at the end (|u|max 2.47 m/s, KE_max 4.7e-3 J), dual_only '
+              '72.83 Pa (KE_max 3.5e-9, |u|max 0.013), '
+              '.replace(connectivity="delaunay", remap="conservative") 72.82 '
+              'Pa (3.4e-9); refinement 1/2: Delaunay 75.84 Pa (KE_max 4.7e-8), '
+              'dual_only 75.84 (bit-identical: no flip in the window), remap 76.02. '
+              'Shipped horizon (6330 steps, '
+              'gravity, injection): Delaunay: KE_max 4.3e-2 J, |u|max 3.24 m/s, the jump swinging between +17221 and -1302 Pa, gas volume 1.148 V_exact at the end; dual_only: KE_max 2.5e-4 J, |u|max 1.03 m/s, the jump 1964 / -783 / 1050 Pa at t = 4e-5 / 1.2e-4 / 2e-4 s (the bubble breathing under the injected mass, +12.2 % of volume at the end), gas mass at M0 + dm_dt t to 2.9e-14, liquid 2.9e-14; the 32 interface vertices kept in both. The remap is not used because it '
+              'erases the liquid\'s compression response under the injection '
+              '(the 3D preset notes). Gravity + NaN guard in the setup dudt '
+              'wrapper, WallClampBC, gas mass injection in the callback '
+              '(add_phase_mass). Pins: test_case_electrolysis_bubble.py. '
+              'History (Delaunay preset): unvalidated; only pin 5-step '
+              'per-phase mass drift <= 1.94e-15. '
               'laneB 2026-10-05: the setup mesh lacked 8 of 41 outer vertices '
               '(L 0.004, refinement 2) until the builder fix (setup choice '
               'box_shift, recorded in methods.json); shipped horizon (6330 '
@@ -271,16 +285,44 @@ PRESETS: dict[str, SolverMethods] = {
     ),
     'electrolysis_bubble_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
-        connectivity='delaunay', remap=None, redistribute_mass=True,
+        connectivity='dual_only', redistribute_mass=True,
         label=_EB + 'electrolysis_bubble_3D.py',
-        notes='UNSTABLE: gas phase lost entirely by t~1.1e-4 s (audit). Same '
-              'wiring as 2D. (The stale 3D interface apex cache, audit T1, is '
-              'fixed since laneI; this case has not been re-run.) laneB '
-              '2026-10-05: the setup mesh lacked 2 of 35 outer vertices '
-              '(refinement 1, the box corner among them); 300-step A/B digest '
-              'hull = membership 6bdbc9c542ffd6fc (KE_max 1.945652e-12, 95 '
-              'vertices, 26 walls) on the full mesh, d4e464d4974dbf5d (lane '
-              'L\'s record, reproduced to the bit by box_shift="evict").',
+        notes='laneG 2026-10-06: connectivity="dual_only" (the 3D droplet '
+              'default) replaces the per-step Delaunay without remap. The '
+              'audit\'s "gas phase lost by t~1.1e-4 s" does not reproduce on '
+              'the library of lanes B and F: the shipped horizon (2292 steps, '
+              'refinement 1/1, gravity, injection) keeps its 35 gas cells and '
+              '26 interface vertices with the gas mass at M0 + dm_dt t to '
+              'round-off. What the Delaunay preset did: at every flip the '
+              'measured gas volume jumped by 1.5 % (4.7355e-9 <-> 4.8087e-9 '
+              'm^3 at fixed positions) and the redistribution turned it into '
+              'a uniform gas pressure jolt of +-1500 Pa on a 144 Pa Laplace '
+              'jump (-4026 to +1104 Pa along the horizon). Static bubble '
+              '(g = 0, no injection, diagnose_static_bubble.py; the preload '
+              'is the analytical state, jump 2 gamma / R0 = 144 Pa): '
+              'refinement 1/1 (95 vertices), 2000 steps (1.3e-4 s): Delaunay '
+              '-4872 Pa at the end (swinging -7675 to +1893), KE_max 7.8e-7 J, '
+              '|u|max 1.13 m/s; dual_only 224.1 Pa, 4.2e-9 J, 0.115 m/s; '
+              '.replace(connectivity="delaunay", remap="conservative") 241.9 '
+              'Pa, 4.6e-9 J, 0.113 m/s. Refinement 2/2 (475 vertices), 2000 '
+              'steps (4.5e-5 s): Delaunay 1511.6 Pa (6.7e-9 J, 0.234 m/s), '
+              'remap 167.5 Pa (2.9e-10 J), dual_only 165.4 Pa (2.6e-10 J, |u|max '
+              '0.042 m/s, gas mass drift 1.1e-14). The drift of '
+              'the kept arms is the relaxation of the polyhedral bubble (26 / '
+              '98 interface vertices, 13 % / 6 % larger than the sphere) '
+              'toward its discrete equilibrium jump, not a flip artifact. The '
+              'remap arm is a measured DO-NOT with the injection: the '
+              'projection of every call erases the liquid\'s compression '
+              'response (laneH), so the bubble did not grow while its gas '
+              'pressure followed K dm / m to 6493 Pa at the end of the horizon '
+              '(dual_only: 535.1 Pa with the bubble +5.8 % in volume, the '
+              'gas mass at M0 + dm_dt t to -2.6e-16, the liquid to -1.9e-15). '
+              'Pins: test_case_electrolysis_bubble.py. '
+              'History: laneB 2026-10-05, the setup mesh lacked 2 of 35 outer '
+              'vertices (refinement 1, the box corner among them); 300-step '
+              'A/B digest hull = membership 6bdbc9c542ffd6fc on the full mesh '
+              '(Delaunay preset), d4e464d4974dbf5d (lane L\'s record, '
+              'reproduced to the bit by box_shift="evict").',
     ),
     'electrolysis_bubble_fritz_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
@@ -295,31 +337,50 @@ PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
     'shearing_plate_droplet_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
-        connectivity='periodic', periodic_axes=(0,), redistribute_mass=True,
+        connectivity='periodic', periodic_axes=(0,), remap='conservative',
+        redistribute_mass=True,
         label=_SP + 'shearing_plate_droplet_2D.py, _run_short_2D.py',
         notes='retopologize_multiphase_periodic (formerly the case-local '
               '_make_periodic_multiphase_retopo closure): ghost Delaunay + '
-              'refresh + redistribution, no remap/cadence. domain_bounds from '
-              'the setup params. UNSTABLE: interface lost by t~0.044 s, '
-              '|u|max 65x U_wall (audit). laneB 2026-10-05: the setup mesh '
-              'lacked 22 of 145 outer vertices (4 of the 9 top-plate vertices '
-              'among them) until the builder fix (box_shift, setup choice); '
-              'on the full mesh the short window (refinement 3/3, t = 0.05 s) '
-              'holds max u / U_wall at 8 to 11 until t = 0.038 s and blows up '
-              'by t = 0.05 (295; the pre-laneB mesh: 348 at t = 0.013). Not '
-              'the cure: the anisotropic rescale of the setup maps the two '
-              'outer vertices at (0, +-0.0075) onto the droplet poles and its '
-              'on_collision="evict" loop deletes those interface vertices '
-              '(one pole before laneB, both now); first interface loss at '
-              'step 78 (evict) / 183 (move_all). Geometric fix in the case is '
-              'open.',
+              'refresh + redistribution; since laneG (2026-10-06) with the '
+              'conservative remap (the same ledger closure as the Delaunay '
+              'path, multiphase_rebuild_with_ledger). domain_bounds from '
+              'the setup params. History: UNSTABLE, interface lost by '
+              't~0.044 s, |u|max 65x U_wall (audit); laneB 2026-10-05: the '
+              'setup mesh lacked 22 of 145 outer vertices until the builder '
+              'fix (box_shift); on the full mesh the short window '
+              '(refinement 3/3, t = 0.05 s, 1649 steps) blew up by t = 0.05 '
+              '(|u| 295 U_wall), the rescale having deleted both droplet '
+              'poles. laneG: the rescale is rescale_droplet_box (no vertex '
+              'lost), the periodic rebuild measures the seam simplices with '
+              'minimum-image coordinates and keeps one image per simplex '
+              '(total dual volume 1.94 x the box before), the setup resets '
+              'the outer masses on the periodic duals (the outer phase sat '
+              'at -100 Pa: measured jump 106 Pa against gamma / R = 6). With '
+              'remap=None the repaired case still goes unstable at t = '
+              '0.042 s in the row next to the plates (|u| 2.4 U_wall at t = '
+              '0.05 s, jump 12.4 Pa, droplet volume -0.9 %); with the remap '
+              'the short window completes with the 32 interface vertices, '
+              'jump 6.018 Pa, volume ratio 0.983992 (0.984008 at setup), '
+              'first-row speed 0.59 U_wall, digest 3c66efcb929b9e1c '
+              '(test_case_shearing_plate.py). A quiescent droplet holds the '
+              'jump with the sum of forces on the free vertices at round-off '
+              '(no seam force).',
     ),
     'shearing_plate_droplet_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
-        connectivity='periodic', periodic_axes=(0, 2), redistribute_mass=True,
+        connectivity='periodic', periodic_axes=(0, 2), remap='conservative',
+        redistribute_mass=True,
         label=_SP + 'shearing_plate_droplet_3D.py, _run_short_3D.py',
-        notes='Main 3D runner crashes in setup (outer-vertex rescale collides '
-              'with a droplet vertex key); short runner stalled (audit).',
+        notes='Same wiring as 2D (laneG 2026-10-06). History: the main 3D '
+              'runner crashed in setup (the uniform rescale put 11 outer '
+              'vertices inside the shell and collided with droplet keys), '
+              'the short runner stalled (audit). laneG: the setup builds '
+              '(refinement 1/2: 306 vertices, 98 interface, 8 plate '
+              'vertices) and the first steps run; known limit: the 3D dual '
+              'faces of seam edges are built from unwrapped coordinates '
+              '(stress.py has the minimum-image rebuild in 2D only), so the '
+              '3D case is a setup + smoke pin, not a physical run.',
     ),
     # ------------------------------------------------------------------
     # Hagen-Poiseuille (single phase)

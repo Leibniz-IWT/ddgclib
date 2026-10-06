@@ -338,7 +338,16 @@ _AXES: list[MethodAxis] = [
                  'of every frozen vertex, so wall cells read P0: hydrostatic 3D '
                  'column max|u| 3.9e-2 m/s and integrated L2 1.5e4 Pa (1.5 '
                  'rho g H) at 100 t_ac even from the equilibrium masses; use '
-                 'dual_only_bare',
+                 'dual_only_bare. laneG 2026-10-06: electrolysis_bubble_3D '
+                 'preset (static bubble, g = 0, refinement 1/1, 2000 steps: '
+                 'Laplace jump 224.1 Pa against 144 and KE_max 4.2e-9 J, '
+                 'where the Delaunay rebuild without remap swings -7675 to '
+                 '+1893 Pa with KE_max 7.8e-7; see the preset notes) and '
+                 'electrolysis_bubble_2D (refinement 2/3, 1500 steps: 72.83 Pa '
+                 'against gamma / R0 = 72, KE_max 3.5e-9 J, where the Delaunay '
+                 'rebuild reaches 8065.6 Pa and |u| 2.47 m/s; refinement 1/2: '
+                 '75.84, bit-identical to the Delaunay rebuild, which does not '
+                 'flip on that mesh in the window)',
                  dims=(2, 3)),
             _opt('dual_only_bare', 'Frozen connectivity, boundary retagged from '
                  'HC.boundary(), compute_vd + cache_dual_volumes (half-cell '
@@ -388,13 +397,40 @@ _AXES: list[MethodAxis] = [
                  'redistribution + EOS (no remap, no cadence)', 'experimental',
                  'ddgclib/geometry/periodic.py:retopologize_periodic; '
                  'ddgclib/methods/_retopo.py:retopologize_multiphase_periodic',
-                 'periodic path ignores skip_triangulation/remesh/backend; '
+                 'laneG 2026-10-06: the periodic rebuild keeps one image per '
+                 'simplex (centroid in the fundamental domain, ties of '
+                 'cocircular seam squares broken by a deterministic offset '
+                 'shared by a vertex and its ghosts) and measures the seam '
+                 'simplices with minimum-image coordinates '
+                 '(simplex_dual_volumes(periods=)): unit square refinement 3 '
+                 'after one rebuild 256 simplices (261 before), total dual '
+                 'volume 1.0 to round-off (2.488 at laneP, 1.0195 with the '
+                 'centroid filter alone), every facet 1 or 2 owners, 0 '
+                 'interior vertices tagged boundary (6 before); refinement 4 '
+                 'and the periodic box (refinement 2) likewise exact; the 2D '
+                 'shearing-plate mesh 0.0006 = the box (1.94 x before, 8 '
+                 'facets with 3 owners). frozen_set, edge_area_source, remap '
+                 'and projection_every are applied on this path since laneG '
+                 '(retopologize_multiphase_periodic runs '
+                 'multiphase_rebuild_with_ledger, the closure of '
+                 '_retopologize_multiphase); skip_triangulation / remesh / '
+                 'backend are still ignored. LIMIT: the 3D dual faces of seam '
+                 'edges are built from unwrapped coordinates (the '
+                 'minimum-image rebuild of dual_area_vector is 2D only), so '
+                 'the 3D shearing case is a setup + smoke pin. With the '
+                 'shearing-plate presets on remap=conservative the 2D short '
+                 'window (refinement 3/3, 1649 steps to t = 0.05 s) completes '
+                 'with its 32 interface vertices, jump 6.018 Pa (gamma / R = '
+                 '6), droplet volume ratio 0.983992 against 0.984008 at setup; '
+                 'remap=None goes unstable at t = 0.042 s in the row next to '
+                 'the plates (|u| 2.4 U_wall at t = 0.05 s) '
+                 '(test_case_shearing_plate.py). '
                  'laneT: the 3D rebuild is the same in every interpreter since '
                  '2026-10-02 (5 steps of the shearing-plate 3D short setup: 2 '
                  'final states in 6 interpreters before, KE 6.258e-6 or '
                  '6.276e-6); '
-                 'shearing_plate_droplet 2D is unstable (interface lost by '
-                 't=0.044 s), 3D crashes in setup; domain_bounds is a build-time '
+                 'before laneG shearing_plate_droplet 2D was unstable (interface '
+                 'lost by t=0.044 s) and 3D crashed in setup; domain_bounds is a build-time '
                  'argument (geometry), periodic_axes the method field. laneP, '
                  'single phase + EOS: not usable. After ONE retopologize_periodic '
                  'of periodic_rectangle (unit square, refinement 3) the total '
@@ -417,8 +453,10 @@ _AXES: list[MethodAxis] = [
     MethodAxis(
         name='remap', title='Conservative retopology remap', group='connectivity',
         default=None,
-        control='retopo_remap= in _retopologize_multiphase (multiphase partial) '
-                'or in _retopologize (single-phase partial built by '
+        control='retopo_remap= in _retopologize_multiphase and '
+                'retopologize_multiphase_periodic (multiphase partials; both '
+                'run multiphase_rebuild_with_ledger since laneG) or in '
+                '_retopologize (single-phase partial built by '
                 'SolverMethods.retopologize_fn)',
         notes='Same axis, two implementations. Multiphase: projection of the '
               'PRE-call field (cadence on projection_every). Single-phase: '
@@ -457,14 +495,31 @@ _AXES: list[MethodAxis] = [
                  'rescale reaches 111.7 m/s), and once the hull fill is removed '
                  '(connectivity=delaunay_material) the offset stays below 1 Pa '
                  '(convex arm: up to 2.7e3 Pa per rebuild) and the run with and '
-                 'without the rescale agree to 3 digits. No gauge was added',
+                 'without the rescale agree to 3 digits. No gauge was added. '
+                 'laneG 2026-10-06, PERIODIC path: the shearing-plate presets '
+                 'carry it (2D short window completes with the 32 interface '
+                 'vertices, jump 6.018 Pa against 6, volume ratio 0.983992 '
+                 'against 0.984008 at setup; remap=None blows up at t = 0.042 '
+                 's, |u| 2.4 U_wall, jump 12.4 Pa); a mass SOURCE must scale '
+                 'the anchor reference (add_phase_mass does: without it the '
+                 'anchored level is a function of the volume only and the 3D '
+                 'electrolysis bubble did not grow while its EOS pressure '
+                 'climbed to 4807 Pa); the first remap call fixes the '
+                 'reference, so a setup must not run the remap before its '
+                 'pressure preload (the shearing setup applies its one-time '
+                 'periodic pass with remap=None). 3D electrolysis static '
+                 'bubble (g = 0, refinement 1/1, 2000 steps): jump 241.9 Pa '
+                 'against 144 (dual_only 224.1, no remap -4872 with the jump '
+                 'swinging +-5000 Pa at every flip), KE_max 4.6e-9 J against '
+                 '7.8e-7; see the electrolysis presets',
                  dims=(2, 3)),
         ),
     ),
     MethodAxis(
         name='projection_every', title='Pressure-projection cadence',
         group='connectivity', default=1, kind='int', applies_to='multi',
-        control='projection_every= in _retopologize_multiphase (partial); '
+        control='projection_every= in _retopologize_multiphase and '
+                'retopologize_multiphase_periodic (partials, laneG); '
                 'counter on mps._projection_call_idx',
         options=(
             _opt(1, 'Every call: per-phase masses re-targeted to the PRE-call '
@@ -579,11 +634,15 @@ _AXES: list[MethodAxis] = [
                  '(under hull the next retopology captured it); 3D: a vertex '
                  'whose dual fan fails is tagged and zero-volumed but not '
                  'frozen (0 occurrences in a jittered box and a 3D droplet); '
-                 'merge_cdist can merge a member into a mobile vertex; not '
-                 'implemented for periodic, delaunay_material and custom '
+                 'merge_cdist can merge a member into a mobile vertex; '
+                 'implemented for periodic since laneG 2026-10-06 '
+                 '(retopologize_periodic(frozen_set=): the members that '
+                 'survive the ub-face merge stay frozen, a hull vertex is not '
+                 'added; test_frozen_set.py::test_membership_on_the_periodic_path), '
+                 'not implemented for delaunay_material and custom '
                  'retopology (SolverMethods raises), not needed for dual_only '
                  '/ dual_only_bare / frozen (their bV never changes). '
-                 'test_frozen_set.py (31)',
+                 'test_frozen_set.py (32)',
                  dims=(2, 3)),
         ),
     ),
@@ -1246,7 +1305,9 @@ _AXES: list[MethodAxis] = [
         group='dual geometry', default=None,
         control='edge_area_source= integrator kwarg, forwarded by name to '
                 '_retopologize / _retopologize_multiphase / bare_dual_refresh / '
-                'retopologize_material_delaunay, which fill HC._edge_area_cache '
+                'retopologize_material_delaunay / retopologize_periodic (laneG; '
+                'no fan cache there, so e_star_cache raises, and the seam '
+                'simplices are cached unwrapped), which fill HC._edge_area_cache '
                 'from the chosen source and record the value on '
                 'HC._edge_area_source; every reader of a dual face (stress_force, '
                 'multiphase_stress_force, velocity_difference_tensor, '
@@ -1443,7 +1504,16 @@ _AXES: list[MethodAxis] = [
                  'segments (the common neighbours are min-imaged about x_i, so '
                  'the two sides can pick different periodic images) and 2 '
                  'return a zero vector from one side only '
-                 '(test_area_orientation.py::TestPeriodicBranch)', dims=(2,)),
+                 '(test_area_orientation.py::TestPeriodicBranch). laneG '
+                 '2026-10-06 re-attributed: those 64 pairs are the triangles '
+                 'of that test mesh that span more than half the period (a '
+                 'jittered corner vertex sits below the wall row and qhull '
+                 'closes the hull with slivers from it to wall vertices up to '
+                 '0.5 away), which no minimum image can represent; picking '
+                 'the apexes from the simplex cache instead of v_i.nn & v_j.nn '
+                 'changes nothing there (64 = 64) and the 2D shearing-plate '
+                 'mesh has 0 asymmetric pairs of 1792 directed edges, so the '
+                 'rule was left as it is', dims=(2,)),
         ),
     ),
     MethodAxis(

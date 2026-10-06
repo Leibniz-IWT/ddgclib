@@ -268,19 +268,18 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             f"frozen_set must be 'hull' or 'membership', got {frozen_set!r}"
         )
     membership = frozen_set == 'membership'
-    if membership and periodic_axes:
-        raise ValueError(
-            "frozen_set='membership' is not implemented on the periodic "
-            "retopology path"
-        )
     if edge_area_source not in _EDGE_AREA_SOURCES:
         raise ValueError(
             f"edge_area_source must be one of {_EDGE_AREA_SOURCES}, got "
             f"{edge_area_source!r}")
-    if edge_area_source is not None and (dim != 3 or periodic_axes):
+    if edge_area_source is not None and dim != 3:
         raise ValueError(
-            "edge_area_source is a 3D axis of the non-periodic retopology "
-            f"(dim={dim}, periodic_axes={periodic_axes!r})")
+            f"edge_area_source is a 3D axis (dim={dim})")
+    if edge_area_source == 'e_star_cache' and periodic_axes:
+        raise ValueError(
+            "edge_area_source='e_star_cache' is not built on the periodic "
+            "retopology path (no batch_e_star fan cache); use 'p_ij', "
+            "'p_ij_simplex' or 'p_ij_ring'")
     if membership and remesh_mode == 'adaptive' and not skip_triangulation:
         raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
     remap_active = retopo_remap == 'conservative' and not skip_triangulation
@@ -303,6 +302,8 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             HC, bV, dim, periodic_axes, domain_bounds,
             boundary_filter=boundary_filter,
             merge_cdist=merge_cdist,
+            frozen_set=frozen_set,
+            edge_area_source=edge_area_source,
         )
         return
 
@@ -892,125 +893,37 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         project_now = (_idx % projection_every == 0)
         mps._projection_call_idx = _idx + 1
 
-    # Snapshot per-phase pressure AND sub-volume before topology change.
-    # The pre-retopo dual_vol_phase is needed by
-    # redistribute_mass_multiphase to gate phase-presence at *v* —
-    # otherwise a phase at reference pressure P0=0 looks identical to
-    # an absent phase and is silently skipped.
-    _p_snap = None
-    if redistribute_mass and mps is not None and (project_now
-                                                  or remap_active):
-        from ddgclib.operators.mass_redistribution import (
-            snapshot_geometry_multiphase,
-        )
-        _p_snap = snapshot_geometry_multiphase(HC, mps.n_phases)
+    # The ledger closure around the rebuild (snapshot, remap stage 1,
+    # rebuild, refresh, per-phase redistribution, restore, level anchor)
+    # is shared with the periodic path (laneG, 2026-10-06:
+    # ddgclib.methods._retopo.multiphase_rebuild_with_ledger); the two
+    # retopology calls of this function are the closures below.
+    from ddgclib.methods._retopo import multiphase_rebuild_with_ledger
 
-    _vol_mid = None
-    if remap_active:
-        from ddgclib.operators.mass_redistribution import (
-            evolve_snapshot_local_strain,
-            phase_volume_totals,
-        )
-        # Stage 1 — measurement pass on the OLD connectivity at the
-        # CURRENT (frozen) positions: refresh duals + per-phase split
-        # without touching masses or pressures, and record the total
-        # per-phase volumes.  Together with the same totals measured
-        # after the rebuild, this isolates the pure connectivity
-        # measurement artifact ratio (no physics can hide in it —
-        # positions do not move inside this call), which the level
-        # anchor below folds into the per-phase volume targets.
+    def _refresh_old():
+        # Stage 1 of the remap: measurement pass on the OLD connectivity
+        # at the CURRENT (frozen) positions.
         _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
                       backend=backend, skip_triangulation=True,
                       frozen_set=frozen_set,
                       edge_area_source=edge_area_source)
-        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
-        _vol_mid = phase_volume_totals(HC, mps.n_phases)
-        if not project_now:
-            # NOTE(laneH): off-cadence remap call — advance the
-            # pre-call snapshot by this step's LOCAL Lagrangian strain
-            # (mass-conserving compression of each parcel from its
-            # pre-call sub-volume to the refreshed one).
-            # Redistribution/restore below then reproduce THIS field
-            # across the rebuild: the connectivity artifact is still
-            # cancelled exactly, but the step's local EOS compression
-            # response survives instead of being erased.  Do NOT use
-            # the raw eos(m/dual_vol) recompute here — it loses the
-            # restore/anchor level corrections that live in p_phase
-            # but not in the mass ledger (see
-            # evolve_snapshot_local_strain).
-            _p_snap = evolve_snapshot_local_strain(HC, mps, _p_snap)
 
-    # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
-    _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
-                  merge_cdist=merge_cdist, backend=backend,
-                  skip_triangulation=skip_triangulation,
-                  remesh_mode=remesh_mode,
-                  remesh_kwargs=remesh_kwargs,
-                  frozen_set=frozen_set,
-                  edge_area_source=edge_area_source)
+    def _rebuild():
+        # Retopologization (Delaunay or adaptive + duals, no single-phase
+        # redistribution)
+        _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
+                      merge_cdist=merge_cdist, backend=backend,
+                      skip_triangulation=skip_triangulation,
+                      remesh_mode=remesh_mode,
+                      remesh_kwargs=remesh_kwargs,
+                      frozen_set=frozen_set,
+                      edge_area_source=edge_area_source)
 
-    # Refresh multiphase state
-    if mps is not None:
-        # reset_mass=False preserves Lagrangian mass (v.m, v.m_phase)
-        # Only geometry (dual_vol_phase) and pressure are recomputed.
-        # ``split_method='exact'`` uses the geometric 2D dual split
-        # aligned with the per-edge phase split used by the per-phase
-        # stress force; default 'neighbour_count' preserves the legacy
-        # behaviour for callers that have not opted in.
-        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
-
-        # Per-phase mass redistribution (after dual_vol_phase is available)
-        if redistribute_mass and _p_snap is not None:
-            from ddgclib.operators.mass_redistribution import (
-                redistribute_mass_multiphase,
-            )
-            _redist_diag = redistribute_mass_multiphase(
-                HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
-                ledger=phase_ledger,
-            )
-            if remap_active:
-                # Stage 2 closure, part 1 — volume-gauge update: the
-                # redistribution scale factor is exactly the ratio of
-                # conserved phase mass to the phase volume measured on
-                # the NEW connectivity at the (frozen) stage-1
-                # positions and pressures, i.e. the pure connectivity
-                # measurement artifact of this rebuild (times the
-                # previous gauge).  Storing it as the per-phase EOS
-                # volume gauge makes the mass ledger and the pressure
-                # field self-consistent, so the NEXT redistribution
-                # does not bounce the artifact back in as a uniform
-                # pressure offset (K*(scale-1) jolt).
-                for _rec in _redist_diag['per_phase_diagnostics']:
-                    mps.vol_corr[_rec['phase']] = _rec['scale_factor']
-            # Recompute pressures from the redistributed masses so that
-            # v.p_phase (read by multiphase_stress_force) reflects the
-            # adjusted densities, not the stale pre-redistribution values.
-            mps.compute_phase_pressures(HC)
-            if remap_active:
-                # Stage 2 closure, part 2 — structure restore: the
-                # pre-call pressure STRUCTURE must survive the rebuild
-                # bit-exactly wherever phase presence persists (the
-                # global rescale reproduces it only up to a uniform
-                # per-phase offset).
-                from ddgclib.operators.mass_redistribution import (
-                    anchor_phase_pressure_levels,
-                    phase_volume_totals,
-                    restore_pressure_multiphase,
-                )
-                restore_pressure_multiphase(
-                    HC, mps, _p_snap, adopted=_redist_diag['adopted'])
-                # Stage 2 closure, part 3 — level anchor: pin each
-                # phase's pressure LEVEL to the volume strain relative
-                # to the artifact-corrected per-phase volume targets
-                # (p_ref pattern: rebuild targets after every retopo so
-                # connectivity changes are not read as compression).
-                # Without this the level is an integral of noisy
-                # per-step scale factors and reconnection noise
-                # rectifies into a runaway phase tension.
-                _vol_new = phase_volume_totals(HC, mps.n_phases)
-                anchor_phase_pressure_levels(
-                    HC, mps, _vol_mid, _vol_new,
-                )
+    multiphase_rebuild_with_ledger(
+        HC, bV, dim, mps, _rebuild, _refresh_old,
+        split_method=split_method, redistribute_mass=redistribute_mass,
+        remap_active=remap_active, project_now=project_now,
+        phase_ledger=phase_ledger)
 
 
 def _recompute_duals(HC):

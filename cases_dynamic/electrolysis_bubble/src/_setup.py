@@ -25,13 +25,15 @@ initialiser).
 Hydrostatic pressure is pre-imposed in the liquid (avoiding the
 startup pressure wave), gas pressure is stratified to roughly match
 (so no fast-scale mismatch at the interface), and the retopology is
-the preset's (``PRESETS['electrolysis_bubble_2D']`` / ``_3D``: per-step
-Delaunay + multiphase re-labeling, built by
-``methods.retopologize_fn``), because dual-only retopology on this
-problem is markedly less stable than the full Delaunay pass (contrary
-to the static_droplet_2D case, which has no gravity).  The force is
-``methods.dudt_fn(..., body_force=g)`` inside the case-physics guard
-:func:`electrolysis_dudt` (laneW, 2026-10-05).
+the preset's (``PRESETS['electrolysis_bubble_2D']``: per-step Delaunay
++ multiphase re-labeling; ``['electrolysis_bubble_3D']``: dual-only
+refresh on the setup connectivity since laneG, 2026-10-06, because the
+3D Delaunay flips of the near-cospherical bubble jolt the gas pressure
+by +-1500 Pa at every rebuild; both built by ``methods.retopologize_fn``).
+The force is ``methods.dudt_fn(..., body_force=g)`` inside the
+case-physics guard :func:`electrolysis_dudt` (laneW, 2026-10-05).  The
+gas injection of the runners is ``ddgclib.operators.mass_source.add_phase_mass``
+(``src/_reaction.py``).
 """
 from __future__ import annotations
 
