@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""2D cube-to-droplet: 3-way comparison of retopologization strategies.
+"""2D cube-to-droplet: four-way comparison of retopologization strategies.
 
-Runs three simulations side by side and produces comparison plots:
+Runs four simulations side by side and produces comparison plots (one
+axis of the ``cube_to_droplet_2D`` preset per step of the ladder):
 
-    NO_REDIST : Full Delaunay retriangulation every step (baseline)
-    REDIST    : Full Delaunay + pressure-preserving mass redistribution
-    NO_RETOPO : No retriangulation (dual-only recompute on fixed connectivity)
+    NO_REDIST   : Full Delaunay retriangulation every step (bare baseline)
+    REDIST_BARE : Full Delaunay + pressure-preserving mass redistribution
+    REDIST      : + the conservative remap (= the shipped preset)
+    NO_RETOPO   : No retriangulation (dual-only recompute on fixed connectivity)
 
 Produces:
-  fig/comparison_circularity.png    — circularity(t) for all three cases
+  fig/comparison_circularity.png    — circularity(t) for all four modes
   fig/comparison_radii.png          — R_max / R_min over time
   fig/comparison_pressure.png       — droplet pressure, Laplace reference
   fig/comparison_pressure_std.png   — pressure std dev over time
@@ -29,16 +31,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from functools import partial
-
-from hyperct.ddg import compute_vd
-
-from cases_dynamic.Cube2droplet.src._setup import setup_cube_to_droplet
-from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
-from ddgclib.operators.stress import cache_dual_volumes
+from cases_dynamic.cube2droplet.src._setup import setup_cube_to_droplet
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.data import StateHistory
 from ddgclib.visualization import dynamic_plot_fluid
 
@@ -66,26 +60,21 @@ _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results')
 
 
-def dual_only_retopo_multiphase(HC, bV, dim, _mps=None):
-    """Recompute duals on existing connectivity (no Delaunay).
-
-    Keeps edges/triangles intact, just recomputes barycentric duals,
-    dual volumes, and per-phase volume splits.  Interface identity
-    is kept frozen from the initial mesh.
-    """
-    dV = HC.boundary()
-    for v in HC.V:
-        v.boundary = v in dV
-
-    compute_vd(HC, method="barycentric")
-    cache_dual_volumes(HC, dim)
-
-    if _mps is not None:
-        _mps.split_dual_volumes(HC, dim)
-        _mps.compute_phase_pressures(HC)
-
-    bV.clear()
-    bV.update(dV)
+# The three arms as configurations (laneX, 2026-10-06; until then the
+# runner bound _retopologize_multiphase partials and a case-local dual-only
+# closure by hand):
+#   redist    = the shipped preset (per-step Delaunay + redistribution)
+#   no_redist = the same without the per-phase redistribution
+#   no_retopo = fixed connectivity, duals and phase pressures refreshed
+#               (the library dual_only path re-identifies the interface
+#               from the phase labels; the old closure kept it frozen)
+_MODES = {
+    'redist': PRESETS['cube_to_droplet_2D'],
+    'redist_bare': PRESETS['cube_to_droplet_2D'].replace(remap=None),
+    'no_redist': PRESETS['cube_to_droplet_2D'].replace(remap=None,
+                                                       redistribute_mass=False),
+    'no_retopo': PRESETS['cube_to_droplet_2D_dual_only'],
+}
 
 
 def compute_diagnostics(HC, bV, dim=2):
@@ -139,30 +128,18 @@ def _pressure_std(HC, bV):
     return float(np.std(ps))
 
 
-def _run_simulation(label, retopo_mode):
+def _run_simulation(label, retopo_mode, n_steps=N_STEPS, n_refine=N_REFINE):
     """Run a single simulation with the given retopo strategy."""
     dim = 2
+    methods = _MODES[retopo_mode]
 
     HC, bV, mps, meos, bc_set, dudt_fn, _, params = \
         setup_cube_to_droplet(
             dim=dim, R=R, L_domain=L_DOMAIN,
             rho_d=RHO_D, rho_o=RHO_O, mu_d=MU_D, mu_o=MU_O,
-            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=N_REFINE,
+            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=n_refine,
+            methods=methods,
         )
-
-    # Build retopo function based on mode
-    if retopo_mode == 'no_redist':
-        retopo_fn = partial(
-            _retopologize_multiphase, mps=mps, redistribute_mass=False,
-        )
-    elif retopo_mode == 'redist':
-        retopo_fn = partial(
-            _retopologize_multiphase, mps=mps, redistribute_mass=True,
-        )
-    elif retopo_mode == 'no_retopo':
-        retopo_fn = partial(dual_only_retopo_multiphase, _mps=mps)
-    else:
-        raise ValueError(f"Unknown retopo_mode: {retopo_mode}")
 
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -220,15 +197,18 @@ def _run_simulation(label, retopo_mode):
 
     t0 = time.time()
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=DT, n_steps=N_STEPS, dim=dim,
-            bc_set=bc_set, retopologize_fn=retopo_fn,
-            callback=callback,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=DT, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         print(f"[{label}] Simulation stopped: {e}")
         t_final = t_arr[-1] if t_arr else 0.0
     wall_time = time.time() - t0
+    record_methods(os.path.join(_RESULTS, f'methods_{retopo_mode}.json'),
+                   methods, HC,
+                   extra={'dt': DT, 'n_steps': n_steps, 'n_refine': n_refine,
+                          't_final': t_final, 'mode': retopo_mode})
 
     diag_final = compute_diagnostics(HC, bV, dim)
     t_arr.append(t_final)
@@ -265,15 +245,23 @@ def _run_simulation(label, retopo_mode):
 def _style_for(mode):
     return {
         'no_redist': ('#1f77b4', '-', 'Delaunay (no redist)'),
-        'redist':    ('#d62728', '-', 'Delaunay + redist'),
+        'redist_bare': ('#ff7f0e', '--', 'Delaunay + redist (no remap)'),
+        'redist':    ('#d62728', '-', 'Delaunay + redist + remap'),
         'no_retopo': ('#2ca02c', '-', 'No retopo (dual-only)'),
     }[mode]
 
 
-def main():
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description='cube-to-droplet retopo comparison')
+    ap.add_argument('--n-steps', type=int, default=N_STEPS)
+    ap.add_argument('--n-refine', type=int, default=N_REFINE)
+    ap.add_argument('--no-anim', action='store_true')
+    args = ap.parse_args(argv)
+    kw = dict(n_steps=args.n_steps, n_refine=args.n_refine)
     dim = 2
     print("=" * 60)
-    print("2D Cube-to-Droplet — 3-Way Retopo Comparison")
+    print("2D Cube-to-Droplet: 4-way retopo comparison")
     print("=" * 60)
     print(f"R={R} m, L={L_DOMAIN} m, R_eq={R_EQ:.5f} m")
     print(f"gamma={GAMMA}, mu_d={MU_D}, K_d={K_D}")
@@ -281,13 +269,16 @@ def main():
     results = {}
 
     print("\n--- Baseline: Full Delaunay, no mass redistribution ---")
-    results['no_redist'] = _run_simulation("NO_REDIST", retopo_mode='no_redist')
+    results['no_redist'] = _run_simulation("NO_REDIST", retopo_mode='no_redist', **kw)
 
-    print("\n--- Full Delaunay WITH mass redistribution ---")
-    results['redist'] = _run_simulation("REDIST", retopo_mode='redist')
+    print("\n--- Full Delaunay WITH mass redistribution, no remap ---")
+    results['redist_bare'] = _run_simulation("REDIST_BARE", retopo_mode='redist_bare', **kw)
+
+    print("\n--- Full Delaunay WITH mass redistribution and remap (preset) ---")
+    results['redist'] = _run_simulation("REDIST", retopo_mode='redist', **kw)
 
     print("\n--- No retopologization (dual-only recompute) ---")
-    results['no_retopo'] = _run_simulation("NO_RETOPO", retopo_mode='no_retopo')
+    results['no_retopo'] = _run_simulation("NO_RETOPO", retopo_mode='no_retopo', **kw)
 
     # -- Comparison plots --
     os.makedirs(_FIG, exist_ok=True)
@@ -401,7 +392,7 @@ def main():
         print("matplotlib not available — skipping plots")
 
     # -- Animations for REDIST and NO_RETOPO --
-    for mode in ('redist', 'no_retopo'):
+    for mode in () if args.no_anim else ('redist', 'no_retopo'):
         history = results[mode].get('history')
         if history is None or history.n_snapshots <= 1:
             continue

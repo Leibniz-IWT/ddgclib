@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""RETIRED (laneX, 2026-10-06): superseded by ``diagnose_a5_bisection.py --split-method``.
+
+Stale 2026-04 driver that binds ``multiphase_stress_force`` and a dual-only
+closure by hand with a non-default ``split_method``; that is the combination
+``dual_only_bare`` + ``split_method='exact'`` which the registry refuses because
+the bare refresh ignores the split at runtime (laneW log, section 9).  Not
+converted to a preset on purpose; the owner may delete it.
+"""
 """Compare neighbour_count vs exact split on force balance."""
 import os, sys
 import numpy as np

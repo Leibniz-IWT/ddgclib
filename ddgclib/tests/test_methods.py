@@ -157,6 +157,17 @@ class TestValidation:
         dict(dim=2, connectivity='delaunay_material', merge_cdist=1e-3),
         dict(dim=2, connectivity='delaunay_material', redistribute_mass=True),
         dict(dim=2, connectivity='delaunay_material', backend='torch'),
+        # film (laneX): 3D surface meshes on frozen / custom only, no bulk axes
+        dict(dim=2, phases='film', connectivity='frozen'),
+        dict(dim=3, phases='film'),
+        dict(dim=3, phases='film', connectivity='dual_only_bare'),
+        dict(dim=3, phases='film', connectivity='frozen', redistribute_mass=True),
+        dict(dim=3, phases='film', connectivity='frozen',
+             viscous_flux='simplex_gradient'),
+        dict(dim=3, phases='film', connectivity='frozen', density_diffusion=0.1),
+        dict(dim=3, phases='film', connectivity='frozen',
+             contact_line='energy_gradient'),
+        dict(dim=3, phases='film', connectivity='frozen', split_method='exact'),
     ])
     def test_invalid_combinations_raise(self, kw):
         with pytest.raises(ValueError):
@@ -230,6 +241,26 @@ class TestValidation:
         assert m.replace(projection_every=2).projection_every == 2
         with pytest.raises(ValueError):
             m.replace(connectivity='dual_only')   # remap under dual_only
+
+    def test_film_preset_validates_and_binds_the_film_force(self):
+        # laneX fix 2: the positive side of the film rows above (which also
+        # pass against a registry without phases='film')
+        from functools import partial
+        from ddgclib.operators.surface_tension import surface_tension_acceleration
+        m = PRESETS['liquid_bridge_film_3D']
+        assert (m.dim, m.phases, m.connectivity) == (3, 'film', 'frozen')
+        assert m.status_of('phases') == 'experimental'
+        assert SolverMethods(dim=3, phases='film', connectivity='custom').phases == 'film'
+        HC = object()
+        fn = m.dudt_fn(HC, gamma=0.0728, damping=20.0)
+        assert isinstance(fn, partial) and fn.func is surface_tension_acceleration
+        assert fn.keywords == dict(gamma=0.0728, damping=20.0, dim=3, HC=HC)
+        with pytest.raises(ValueError):
+            m.dudt_fn(HC)                               # gamma= required
+        with pytest.raises(ValueError):
+            m.dudt_fn(HC, gamma=0.0728, mu=1e-3)        # no viscous flux
+        with pytest.raises(ValueError):
+            PRESETS['oscillating_droplet_2D'].dudt_fn(HC, mps=object(), gamma=0.07)
 
     def test_describe_lists_every_explicit_axis(self):
         text = PRESETS['oscillating_droplet_2D'].describe()

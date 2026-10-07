@@ -1,3 +1,13 @@
+"""RETIRED (laneX, 2026-10-06): superseded by ``bc_demo.py``.
+
+Parametric sweep (``n_refine`` x ``n_steps``) of the same periodic-inlet /
+open-outlet kinematics with a case-local ``_apply_bcs`` loop, ffmpeg MP4
+compilation per case and the same ``fig/`` tree as the other demos.  It runs
+(laneX: the first sweep points complete and are reported OK; the full sweep
+exceeds ten minutes because of the per-case MP4 encoding), but it duplicates
+the BC handling of ``bc_demo.py`` instead of using the library classes and is
+not maintained.  The owner may delete it.
+"""
 """
 Parametric Study: Periodic Inlet + Open Outlet BC Balance
 with per-case animations (GIF + MP4).

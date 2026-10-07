@@ -1,4 +1,17 @@
 #!/usr/bin/env python
+"""RETIRED (laneX, 2026-10-06): not a maintained runner.
+
+Duplicate of the Hagen-Poiseuille case family (``cases_dynamic/Hagen_Poiseuile*``:
+unit box, ``PeriodicInletBC`` + ``OutletDeleteBC``, linear pressure drop) with a
+mock, dimensionally wrong acceleration (``G / m + mu (mean(u_nn) - u)``) and no
+``boundary_filter``, so the hull freezes the inlet column and the ghost vertices
+merge into it: the run stalls after step 0 (audit 2026-09-25 M7; laneX re-ran
+the 1D, 2D and 3D scripts: they exit 0 and write their figures, with the flow
+frozen).  The shipped, preset-bound version of this flow is
+``Hagen_Poiseuile/Hagen_Poiseuile_2D.py`` (``hagen_poiseuille_2D``) and
+``Hagen_Poiseuile_3D/Hagen_Poiseuile_3D.py`` (``hagen_poiseuille_3D``).  Kept for
+reference only; the owner may delete it.
+"""
 """
 Cube flow case study: 1D uniform flow through a line domain.
 

@@ -11,11 +11,18 @@ Two side-by-side panels show:
   Left:  the full domain [0, L_domain] x [0, H] with the main mesh
   Right: the ghost (upstream) mesh that feeds the inlet
 
+The advection is the library ``euler`` integrator with a zero
+acceleration on the ``bc_demo_2D`` preset (``connectivity='frozen'``: no
+dual mesh, bV = the wall vertices), so the run is recorded in
+``results/methods.json`` (laneX, 2026-10-06; the demo moved the vertices
+in its own loop before).
+
 Usage:
     cd cases_dynamic/bc_demo
-    python bc_demo.py
+    python bc_demo.py [--n-steps N]
 """
 
+import argparse
 import os
 import numpy as np
 
@@ -38,6 +45,7 @@ from ddgclib.initial_conditions import (
     UniformVelocity,
     UniformMass,
 )
+from ddgclib.methods import PRESETS, record_methods
 
 # ============================================================
 # Parameters
@@ -49,6 +57,9 @@ U = 0.5           # constant advection velocity [m/s]
 dt = 0.05         # time step
 n_steps = 120     # total steps (enough for ~2 full periods to enter)
 n_refine = 1      # mesh refinement level
+_ap = argparse.ArgumentParser(description='periodic inlet / open outlet demo')
+_ap.add_argument('--n-steps', type=int, default=n_steps)
+n_steps = _ap.parse_args().n_steps
 
 d = 2  # spatial dimension
 
@@ -64,8 +75,8 @@ HC.triangulate()
 for _ in range(n_refine):
     HC.refine_all()
 
+# Frozen set = the two walls (the inlet and outlet columns advect)
 bV = identify_boundary_vertices(HC, lambda v: (
-    abs(v.x_a[0]) < 1e-14 or abs(v.x_a[0] - L_domain) < 1e-14 or
     abs(v.x_a[1]) < 1e-14 or abs(v.x_a[1] - H) < 1e-14
 ))
 for v in HC.V:
@@ -76,7 +87,7 @@ main_ic = CompositeIC(
     UniformVelocity(u_vec=np.array([U, 0.0])),
     UniformMass(total_volume=L_domain * H, rho=1.0),
 )
-main_ic.apply(HC, bV)
+main_ic.apply(HC, set())
 # Set pressure to zero for field tracking
 for v in HC.V:
     v.p = 0.0
@@ -230,58 +241,51 @@ def plot_frame(step, t, HC, ghost_mesh, fig_dir):
 
 
 # ============================================================
-# Step 4: Run the advection loop (no solver — just BC demo)
+# Step 4: Advect through the library integrator (no force, just BCs)
 # ============================================================
-print(f"\nRunning: dt={dt}, n_steps={n_steps}, U={U}")
+methods = PRESETS['bc_demo_2D']
+print(f"\nRunning: dt={dt}, n_steps={n_steps}, U={U} ({methods.label})")
 print(f"Expected period crossing time: {L_period / U:.2f} s")
 
 frame_dir = os.path.join(_FIG, '_frames')
 os.makedirs(frame_dir, exist_ok=True)
 frame_paths = []
 
-t = 0.0
 # Initial frame
-fp = plot_frame(0, t, HC, inlet_bc.ghost, frame_dir)
+fp = plot_frame(0, 0.0, HC, inlet_bc.ghost, frame_dir)
 frame_paths.append(fp)
 
-for step in range(1, n_steps + 1):
-    # Advect all non-wall interior vertices at constant velocity
-    for v in list(HC.V):
-        if not wall_criterion(v):
-            pos = v.x_a.copy()
-            pos[0] += U * dt
-            # Preserve bV membership
-            if v in bV:
-                bV.remove(v)
-                HC.V.move(v, tuple(pos))
-                bV.add(v)
-            else:
-                HC.V.move(v, tuple(pos))
 
-    # Apply BCs: wall -> outlet delete -> periodic inlet inject
-    diagnostics = bc_set.apply_all(HC, bV, dt)
+def dudt_zero(v):
+    """Prescribed advection: every free vertex keeps u = (U, 0)."""
+    return np.zeros(d)
 
-    t += dt
 
-    n_verts = sum(1 for _ in HC.V)
+def callback(step, t, HC_cb, bV_cb, diagnostics):
+    n_verts = sum(1 for _ in HC_cb.V)
     n_deleted = diagnostics.get('bc_1_OutletDeleteBC', 0)
     n_injected = diagnostics.get('bc_2_PeriodicInletBC', 0)
     n_wall = diagnostics.get('bc_0_PositionalNoSlipWallBC', 0)
-
     if step % 5 == 0 or n_injected > 0 or n_deleted > 0:
         print(f"  step {step:4d}  t={t:.3f}  verts={n_verts:4d}  "
               f"injected={n_injected}  deleted={n_deleted}  wall={n_wall}")
-
     # Save frame every 2 steps for animation
     if step % 2 == 0:
-        fp = plot_frame(step, t, HC, inlet_bc.ghost, frame_dir)
-        frame_paths.append(fp)
+        frame_paths.append(plot_frame(step, t, HC_cb, inlet_bc.ghost,
+                                      frame_dir))
+
+
+t = methods.integrate(HC, bV, dudt_zero, dt=dt, n_steps=n_steps,
+                      bc_set=bc_set, callback=callback)
 
 # Final frame
 fp = plot_frame(n_steps, t, HC, inlet_bc.ghost, frame_dir)
 frame_paths.append(fp)
 
 print(f"\nDone: t_final = {t:.3f} s, {sum(1 for _ in HC.V)} vertices remaining")
+record_methods(os.path.join(_HERE, 'results', 'methods.json'), methods, HC,
+               extra={'dt': dt, 'n_steps': n_steps, 'U': U,
+                      'n_vertices_final': sum(1 for _ in HC.V)})
 print(f"Saved {len(frame_paths)} frames to {frame_dir}/")
 
 # ============================================================

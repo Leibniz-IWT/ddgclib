@@ -172,6 +172,26 @@ class SolverMethods:
                                  "only (the multiphase force carries its "
                                  "own curvature_path)")
             self._check_choice('contact_line', self.contact_line)
+        if self.phases == 'film':
+            # laneX: a surface mesh has no dual mesh, so only the two
+            # connectivity values that never call compute_vd apply, and
+            # none of the bulk-only axes.
+            if self.connectivity not in ('frozen', 'custom'):
+                raise ValueError(
+                    "phases='film' (a surface mesh) needs connectivity="
+                    "'frozen' or 'custom' (every other retopology runs "
+                    "Delaunay / compute_vd on a volumetric complex)")
+            if self.redistribute_mass:
+                raise ValueError("phases='film' has no dual volumes to "
+                                 "redistribute mass over")
+            for name in ('pressure_flux', 'viscous_flux'):
+                if getattr(self, name) != AXES[name].default:
+                    raise ValueError(f"{name} applies to phases='single' only "
+                                     "(the film force has no bulk flux)")
+            if self.density_diffusion is not None:
+                raise ValueError("density_diffusion applies to phases='single' only")
+            if self.contact_line is not None:
+                raise ValueError("contact_line applies to phases='single' only")
         if self.phases == 'multi':
             if self.pressure_flux != AXES['pressure_flux'].default:
                 raise ValueError("pressure_flux applies to phases='single' only "
@@ -580,7 +600,9 @@ class SolverMethods:
 
     def dudt_fn(self, HC, *, mu: float | None = None, mps=None,
                 pressure_model=None,
-                body_force: Any = None, free_surface=None) -> Callable:
+                body_force: Any = None, free_surface=None,
+                gamma: float | None = None,
+                damping: float = 0.0) -> Callable:
         """Acceleration function bound the canonical way.
 
         single-phase: ``partial(dudt_i, dim, mu, HC, pressure_model
@@ -588,6 +610,9 @@ class SolverMethods:
         multiphase:   ``partial(multiphase_dudt_i, dim, mps, HC,
         pressure_model[, curvature_path][, area_orientation]
         [, face_closure])``
+        film:         ``partial(surface_tension_acceleration, gamma,
+        damping, dim, HC)`` (laneX; *gamma* required, the velocity
+        damping is the film's only dissipation)
 
         *body_force* (per unit mass, e.g. ``[0, -9.81]``) wraps the
         result as ``a + g`` exactly like the dam-break setup does.
@@ -602,7 +627,23 @@ class SolverMethods:
                 if free_surface is None else
                 "free_surface given but contact_line is None: set "
                 "contact_line='energy_gradient' so the force is recorded")
-        if self.phases == 'single':
+        if self.phases != 'film' and gamma is not None:
+            raise ValueError("gamma= is the film force's coefficient "
+                             "(phases='film'); the bulk models carry gamma "
+                             "in mps / the FreeSurface")
+        if self.phases == 'film':
+            if gamma is None:
+                raise ValueError("film dudt_fn needs gamma=")
+            if mu is not None or mps is not None or pressure_model is not None:
+                raise ValueError("phases='film' has no viscous flux, "
+                                 "MultiphaseSystem or EOS: pass gamma= and "
+                                 "damping= only")
+            from ddgclib.operators.surface_tension import (
+                surface_tension_acceleration,
+            )
+            fn: Callable = partial(surface_tension_acceleration, gamma=gamma,
+                                   damping=damping, dim=self.dim, HC=HC)
+        elif self.phases == 'single':
             if mu is None:
                 raise ValueError("single-phase dudt_fn needs mu=")
             if pressure_model is not None:
@@ -620,7 +661,7 @@ class SolverMethods:
                 kw_s['viscous_flux'] = self.viscous_flux
             if self.area_orientation != AXES['area_orientation'].default:
                 kw_s['area_orientation'] = self.area_orientation
-            fn: Callable = partial(dudt_i, **kw_s)
+            fn = partial(dudt_i, **kw_s)
         else:
             if mps is None:
                 raise ValueError("multiphase dudt_fn needs mps=")

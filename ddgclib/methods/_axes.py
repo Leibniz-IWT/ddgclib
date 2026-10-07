@@ -189,6 +189,28 @@ _AXES: list[MethodAxis] = [
                  '(test_methods.py::TestSetupsBuildFromMethods; every pin, both '
                  'droplet baselines and the lane L / B smoke digests '
                  'bit-identical)'),
+            _opt('film', 'Thin-film SURFACE mesh (a 2-manifold in 3D, no bulk): '
+                 'force = -gamma HNdA_i (Heron cotangent mean curvature) '
+                 'with optional velocity damping; no pressure, no viscous '
+                 'flux, no dual mesh (compute_vd does not apply), so the '
+                 'connectivity must be frozen or a surface-aware custom '
+                 'callable', 'experimental',
+                 'ddgclib/operators/surface_tension.py:surface_tension_acceleration',
+                 'laneX 2026-10-06: the liquid_bridge_equilibrium Case 1 '
+                 'catenoid hold and the liquid_bridge_cfd_dem film run through '
+                 'dudt_fn(HC, gamma=, damping=) on the liquid_bridge_film_3D / '
+                 '_cfd_dem_3D presets (until then both called the volumetric '
+                 'stress_force on the surface mesh and crashed on the missing '
+                 'v.vd); a catenoid is a minimal surface, so the integrated '
+                 'axial force of the interior vertices is the error '
+                 '(measurements: laneX log). laneX fix 1: on every interior '
+                 'vertex of the Case 1 catenoid grid the force equals the '
+                 'discrete area gradient -gamma dA/dx_i to 3.5e-10 / 1.0e-9 '
+                 'of the largest vertex force (refinements 2 / 3, central '
+                 'differences of the one-ring areas), pinned by '
+                 'test_case_runners_smoke.py; the non-vanishing local '
+                 'curvature there is the area gradient of the degree-{4,8} '
+                 'grid itself, not an operator error', dims=(3,)),
         ),
     ),
     # ------------------------------------------------------------------
@@ -466,7 +488,14 @@ _AXES: list[MethodAxis] = [
             _opt(None, 'No remap: reconnection changes dual volumes, EOS reads '
                  'them as compression', 'validated',
                  'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize_multiphase',
-                 'required value under dual_only (remap is a silent no-op there)'),
+                 'required value under dual_only (remap is a silent no-op there). '
+                 'laneX 2026-10-07: on the cube2droplet square droplet (Delaunay '
+                 '+ per-phase redistribution, refinement 4) this value erodes '
+                 'the droplet to no bulk vertex by t = 0.4 s of the 1 s run '
+                 '(the phase-1 bulk count 41 -> 25 -> 21 -> 13 over the first '
+                 '20 steps, pressure 25 to 249 Pa against 0.89), so the '
+                 'cube_to_droplet presets carry conservative; reachable as '
+                 'the runner arm bare = preset.replace(remap=None)'),
             _opt('conservative', 'Pressure field invariant across the rebuild. '
                  'MULTIPHASE: stage-1 dual refresh on OLD connectivity, rebuild, '
                  'per-phase redistribution, vol_corr gauge, '
@@ -511,7 +540,15 @@ _AXES: list[MethodAxis] = [
                  'bubble (g = 0, refinement 1/1, 2000 steps): jump 241.9 Pa '
                  'against 144 (dual_only 224.1, no remap -4872 with the jump '
                  'swinging +-5000 Pa at every flip), KE_max 4.6e-9 J against '
-                 '7.8e-7; see the electrolysis presets',
+                 '7.8e-7; see the electrolysis presets. laneX 2026-10-07, '
+                 'cube2droplet (square droplet, Delaunay + per-phase '
+                 'redistribution, refinement 4, 5000 steps of 2e-4 s): the '
+                 'cube_to_droplet_2D preset carries it, integrated bulk jump '
+                 '+0.9481 Pa against gamma / R_eq = 0.8862 (+6.99 %), '
+                 'circularity 0.9079; remap=None (the historic setup, runner '
+                 'arm bare) erodes the droplet to no bulk vertex by t = 0.4 s '
+                 '(circularity 0); dual_only -2.2761 Pa (-357 %). 3D (cube, '
+                 'refinement 2, 2000 steps of 5e-5 s): see the laneX log',
                  dims=(2, 3)),
         ),
     ),

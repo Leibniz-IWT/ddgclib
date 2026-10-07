@@ -20,9 +20,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from cases_dynamic.Cube2droplet.src._setup import setup_cube_to_droplet
-from ddgclib.dynamic_integrators import symplectic_euler
+from cases_dynamic.cube2droplet.src._setup import setup_cube_to_droplet
+from ddgclib.analytical import integrated_phase_pressure_jump
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 
 # =====================================================================
 # Parameters
@@ -70,20 +71,48 @@ def compute_diagnostics(HC, dim: int = 3):
     }
 
 
-def main():
+# A/B arms of the shipped preset (laneX): 'bare' is the historic setup
+# configuration (per-step Delaunay + redistribution, no remap), which
+# loses the droplet's bulk by step 1000; 'dual_only' the fixed-connectivity
+# refresh, on which the cube does not relax (laneX log 4.1).
+ARMS = {
+    'base': PRESETS['cube_to_droplet_3D'],
+    'bare': PRESETS['cube_to_droplet_3D'].replace(remap=None),
+    'dual_only': PRESETS['cube_to_droplet_3D_dual_only'],
+}
+
+
+def parse_args(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description='3D cube-to-droplet relaxation')
+    ap.add_argument('--n-steps', type=int, default=N_STEPS)
+    ap.add_argument('--n-refine', type=int, default=N_REFINE)
+    ap.add_argument('--no-anim', action='store_true',
+                    help='skip the animation and the viewer (smoke runs)')
+    ap.add_argument('--arm', choices=sorted(ARMS), default='base',
+                    help='configuration arm (A/B through the preset)')
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    n_steps, n_refine = args.n_steps, args.n_refine
     dim = 3
     print("=" * 60)
     print("3D Cube-to-Droplet Relaxation")
     print("=" * 60)
     print(f"R={R} m, R_eq={R_EQ:.5f} m, gamma={GAMMA}")
 
-    # -- Setup --
+    # -- Setup (the preset is the single source of truth for the run) --
     print("\nBuilding mesh...")
-    HC, bV, mps, meos, bc_set, dudt_fn, retopo_fn, params = \
+    methods = ARMS[args.arm]
+    print(f"arm={args.arm}: {methods.label}")
+    HC, bV, mps, meos, bc_set, dudt_fn, _, params = \
         setup_cube_to_droplet(
             dim=dim, R=R, L_domain=L_DOMAIN,
             rho_d=RHO_D, rho_o=RHO_O, mu_d=MU_D, mu_o=MU_O,
-            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=N_REFINE,
+            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=n_refine,
+            methods=methods,
         )
 
     n_verts = sum(1 for _ in HC.V)
@@ -117,12 +146,11 @@ def main():
                   f"dP={dp:+.2f} |u|={max_u:.3e}")
 
     # -- Run simulation --
-    print(f"\nRunning {N_STEPS} steps...")
+    print(f"\nRunning {n_steps} steps...")
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=DT, n_steps=N_STEPS, dim=dim,
-            bc_set=bc_set, retopologize_fn=retopo_fn,
-            callback=callback,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=DT, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         print(f"Simulation stopped: {e}")
@@ -138,7 +166,27 @@ def main():
     print("\n" + "=" * 60)
     print(f"Initial sphericity: {sph_arr[0]:.4f}")
     print(f"Final sphericity:   {sph_arr[-1]:.4f}")
+    dp_laplace = 2.0 * GAMMA / R_EQ
+    try:
+        dp_int = integrated_phase_pressure_jump(HC, 1, 0)
+        print(f"Integrated bulk jump: {dp_int:+.4f} Pa "
+              f"(error {dp_int / dp_laplace - 1:+.3%} of 2 gamma / R_eq = "
+              f"{dp_laplace:.4f} Pa)")
+    except ValueError as e:      # a refinement without droplet bulk
+        dp_int = float('nan')
+        print(f"Integrated bulk jump: n/a ({e})")
     print(f"Recorded {history.n_snapshots} frames")
+    record_methods(os.path.join(os.path.dirname(__file__), 'results',
+                                'methods.json'), methods, HC,
+                   extra={'arm': args.arm,
+                          'dt': DT, 'n_steps': n_steps, 'n_refine': n_refine,
+                          't_final': t_final,
+                          'sphericity_final': float(sph_arr[-1]),
+                          'dp_integrated_final': float(dp_int),
+                          'dp_laplace': dp_laplace})
+    if args.no_anim:
+        print("\nDone (animation skipped).")
+        return history
 
     # -- Plotting --
     try:

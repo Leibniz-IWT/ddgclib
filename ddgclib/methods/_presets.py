@@ -25,6 +25,9 @@ _SP = 'cases_dynamic/shearing_plate_droplet/'
 _HP = 'cases_dynamic/Hagen_Poiseuile'
 _HY = 'cases_dynamic/Hydrostatic_column/'
 _CR = 'cases_dynamic/capillary_rise/'
+_C2D = 'cases_dynamic/cube2droplet/'
+_LB = 'cases_dynamic/liquid_bridge_'
+_BD = 'cases_dynamic/bc_demo/'
 
 PRESETS: dict[str, SolverMethods] = {
     # ------------------------------------------------------------------
@@ -557,6 +560,110 @@ PRESETS: dict[str, SolverMethods] = {
               '+ Jurin 7.33 mm); dual_only_bare with the exact p_ij faces '
               'as hydrostatic_3D (dual_only zeroes the wall half cells). '
               'Measurements: laneI log.',
+    ),
+    # ------------------------------------------------------------------
+    # cube-to-droplet relaxation (laneX 2026-10-06 / 07: per-step Delaunay
+    # + per-phase redistribution + the conservative remap; the historic
+    # no-remap configuration is the runner arm 'bare' = .replace(remap=None))
+    # ------------------------------------------------------------------
+    'cube_to_droplet_2D': SolverMethods(
+        dim=2, phases='multi', integrator='symplectic_euler',
+        connectivity='delaunay', redistribute_mass=True,
+        remap='conservative',
+        label=_C2D + 'cube_to_droplet_2D.py',
+        notes='laneX 2026-10-06. Square droplet (half side R = 0.01 m) '
+              'relaxing in a 3R box under gamma = 0.01 N/m; Tait n = 1 '
+              'with K_d 100 / K_o 125 Pa, NoSlipWallBC + '
+              'AtmosphericPressureBC on the wall-adjacent outer vertices. '
+              'The runners imported a module path that did not exist '
+              '(cases_dynamic.Cube2droplet) since 2026-09-25; the setup '
+              'bound multiphase_dudt_i and a **kwargs retopo closure by '
+              'hand, without remap: that configuration (the runner arm '
+              "'bare' = .replace(remap=None)) loses the droplet's bulk by "
+              't = 0.4 s of the 1 s run (circularity 0, no phase-1 '
+              'sub-volume left), the conservative remap keeps it and ends '
+              'at +6.99 % of the Laplace jump; the dual_only refresh at '
+              '-357 %. Measurements: laneX log.',
+    ),
+    'cube_to_droplet_2D_dual_only': SolverMethods(
+        dim=2, phases='multi', integrator='symplectic_euler',
+        connectivity='dual_only', redistribute_mass=False,
+        label=_C2D + 'cube_to_droplet_2D_bc_comparison.py',
+        notes='laneX 2026-10-06. Fixed connectivity, duals and per-phase '
+              'pressures refreshed every step (the case-local '
+              'dual_only_retopo_multiphase closure of the BC comparison '
+              'and mass-redistribution runners until laneX).',
+    ),
+    'cube_to_droplet_3D': SolverMethods(
+        dim=3, phases='multi', integrator='symplectic_euler',
+        connectivity='delaunay', redistribute_mass=True,
+        remap='conservative',
+        label=_C2D + 'cube_to_droplet_3D.py',
+        notes='laneX 2026-10-06. Cube droplet, refinement 2; as the 2D '
+              'preset (edge_area_source None = the fan cache of the '
+              'Delaunay path). 2000 steps of 5e-5 s: with the conservative '
+              'remap the integrated jump is +1.7710 Pa against 2 gamma / '
+              'R_eq = 1.6120 (+9.86 %), sphericity 0.6124 -> 0.8677; without '
+              "it (runner arm 'bare') the droplet loses its bulk by step "
+              '1000; dual_only +41.2 % with the cube not relaxing '
+              '(sphericity 0.6174). Measurements: laneX log.',
+    ),
+    'cube_to_droplet_3D_dual_only': SolverMethods(
+        dim=3, phases='multi', integrator='symplectic_euler',
+        connectivity='dual_only', redistribute_mass=False,
+        label=_C2D + 'cube_to_droplet_3D.py --arm dual_only',
+        notes='laneX 2026-10-07. The 3D fixed-connectivity arm of the A/B '
+              '(as cube_to_droplet_2D_dual_only, dim 3): 2000 steps of '
+              '5e-5 s at refinement 2 end at +2.2763 Pa against 2 gamma / '
+              'R_eq = 1.6120 (+41.2 %) with the cube not relaxing '
+              '(sphericity 0.6124 -> 0.6174); measured worse than the '
+              'Delaunay + remap preset. Measurements: laneX log.',
+    ),
+    # ------------------------------------------------------------------
+    # thin-film surface meshes (laneX 2026-10-06)
+    # ------------------------------------------------------------------
+    'liquid_bridge_film_3D': SolverMethods(
+        dim=3, phases='film', integrator='symplectic_euler',
+        connectivity='frozen',
+        label=_LB + 'equilibrium/Case_1_equilibrium_particle_particle_bridge_benchmark.py',
+        notes='laneX 2026-10-06. Exact catenoid surface mesh (a = 1, '
+              'v in [-1.5, 1.5]) held on the Heron surface-tension force '
+              'with velocity damping 20 1/s, dt 2e-6, 100 steps; rims '
+              'frozen. Until laneX the case called the volumetric '
+              'stress_force on the surface mesh (AttributeError vd). '
+              'Measurements: laneX log.',
+    ),
+    'liquid_bridge_cfd_dem_3D': SolverMethods(
+        dim=3, phases='film', integrator='symplectic_euler',
+        connectivity='custom',
+        label=_LB + 'cfd_dem/liquid_bridge_cfd_dem_case.py',
+        notes='laneX 2026-10-06. Two spherical-cap films (refinement 2, '
+              'thickness 10 um) on the Heron force with damping 1e-3, 10 '
+              'fluid sub-steps of 1e-7 s per DEM step; custom = the '
+              'case-local retopologize_surface (Unverdi-Tryggvason edge '
+              'remesh, rim / particle-attached vertex update, Heron '
+              'masses). Smoke only, no pin.',
+    ),
+    'liquid_bridge_volume_3D': SolverMethods(
+        dim=3, phases='single', integrator='symplectic_euler',
+        connectivity='frozen',
+        label=_LB + 'equilibrium/Case_5_volumetric_stress_equilibrium_particle_particle_bridge_benchmark.py',
+        notes='laneX 2026-10-06. Structured tetrahedral catenoid volume '
+              '(prism / hex fill) at p = 0, mu = 0, u = 0 on the '
+              'volumetric stress force, duals frozen: the force is '
+              'identically zero and the hold is inert (the case '
+              'short-circuits it when the static force norm is 0).',
+    ),
+    # ------------------------------------------------------------------
+    # boundary-condition kinematics demo (laneX 2026-10-06)
+    # ------------------------------------------------------------------
+    'bc_demo_2D': SolverMethods(
+        dim=2, phases='single', integrator='euler', connectivity='frozen',
+        label=_BD + 'bc_demo.py',
+        notes='laneX 2026-10-06. Prescribed advection (zero acceleration, '
+              'u = U on every non-wall vertex) through PositionalNoSlipWallBC, '
+              'OutletDeleteBC and PeriodicInletBC; no force, no dual mesh '
+              '(the demo advected the vertices in its own loop until laneX).',
     ),
 }
 

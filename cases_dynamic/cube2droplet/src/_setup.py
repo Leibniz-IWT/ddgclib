@@ -6,8 +6,6 @@ to run the simulation.
 """
 from __future__ import annotations
 
-from functools import partial
-
 import numpy as np
 
 from hyperct import Complex
@@ -20,10 +18,7 @@ from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import (
     BoundaryCondition, BoundaryConditionSet, NoSlipWallBC,
 )
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
+from ddgclib.methods import SolverMethods
 
 
 class AtmosphericPressureBC(BoundaryCondition):
@@ -74,7 +69,8 @@ def setup_cube_to_droplet(
     K_o: float = 125.0,
     P0: float = 0.0,
     n_refine: int = 4,
-    redistribute_mass: bool = True,
+    redistribute_mass: bool | None = None,
+    methods: SolverMethods | None = None,
 ):
     """Set up the cube-to-droplet relaxation problem.
 
@@ -84,12 +80,37 @@ def setup_cube_to_droplet(
         If True (default), per-phase mass is redistributed after each
         Delaunay reconnection so that the pre-retopo per-phase pressure
         field is preserved while total per-phase mass is conserved.
-        See ``setup_oscillating_droplet`` for the full rationale.
+        See ``setup_oscillating_droplet`` for the full rationale.  The
+        axis lives on *methods* when one is given: passing both with
+        different values raises.
+    methods : SolverMethods, optional
+        The solver configuration (laneX, 2026-10-06): ``dudt_fn`` is
+        ``methods.dudt_fn(HC, mps=mps, pressure_model=meos)`` and
+        ``retopo_fn`` is ``methods.retopologize_fn(mps=mps)``, so every
+        force and retopology axis of a preset is applied.  ``None``
+        builds ``SolverMethods(dim, phases='multi', connectivity='delaunay',
+        redistribute_mass=redistribute_mass)``, the configuration the
+        setup bound by hand before.
 
     Returns
     -------
     HC, bV, mps, meos, bc_set, dudt_fn, retopo_fn, params
+    (``params['atm_verts']`` is the set the AtmosphericPressureBC targets)
     """
+    if methods is None:
+        methods = SolverMethods(
+            dim=dim, phases='multi', connectivity='delaunay',
+            redistribute_mass=True if redistribute_mass is None
+            else redistribute_mass)
+    elif (redistribute_mass is not None
+          and redistribute_mass != methods.redistribute_mass):
+        raise ValueError(
+            f"redistribute_mass={redistribute_mass} conflicts with "
+            f"methods.redistribute_mass={methods.redistribute_mass}; the "
+            "axis lives on methods (use methods.replace(...))")
+    if methods.dim != dim or methods.phases != 'multi':
+        raise ValueError(f"methods must be a {dim}D multiphase config, got "
+                         f"dim={methods.dim} phases={methods.phases!r}")
     # -- Build mesh --
     bounds = [(-L_domain, L_domain)] * dim
     HC = Complex(dim, domain=bounds)
@@ -155,19 +176,10 @@ def setup_cube_to_droplet(
         bc_set.add(AtmosphericPressureBC(rho0=rho_o, gas_phase=0),
                     atm_verts)
 
-    # -- Acceleration function --
+    # -- Acceleration and retopology functions from the configuration --
     meos = MultiphaseEOS([eos_outer, eos_drop])
-    dudt_fn = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
-
-    # -- Retopo (mass-conserving, no mass reset) --
-    # Accept **kwargs so that the integrator can forward remesh_mode /
-    # remesh_kwargs (see _do_retopologize's inspect.signature dispatch).
-    def retopo_fn(HC, bV, dim, **kwargs):
-        kwargs.setdefault('redistribute_mass', redistribute_mass)
-        _retopologize_multiphase(HC, bV, dim, mps=mps, **kwargs)
+    dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
+    retopo_fn = methods.retopologize_fn(mps=mps)
 
     # -- Equivalent radius --
     if dim == 2:
@@ -179,7 +191,7 @@ def setup_cube_to_droplet(
         'dim': dim, 'R': R, 'L_domain': L_domain,
         'rho_d': rho_d, 'rho_o': rho_o, 'mu_d': mu_d, 'mu_o': mu_o,
         'gamma': gamma, 'K_d': K_d, 'K_o': K_o, 'P0': P0,
-        'n_refine': n_refine, 'R_eq': R_eq,
+        'n_refine': n_refine, 'R_eq': R_eq, 'atm_verts': atm_verts,
     }
 
     return HC, bV, mps, meos, bc_set, dudt_fn, retopo_fn, params

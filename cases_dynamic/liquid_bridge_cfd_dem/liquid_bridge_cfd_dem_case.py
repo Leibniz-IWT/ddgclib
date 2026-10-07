@@ -14,9 +14,14 @@ The operator-splitting loop is:
     4. Sync film to particles (no-slip on particle surface)
     5. Bridge detection (connect close rim vertices)
 
+The film runs on the ``liquid_bridge_cfd_dem_3D`` preset (``phases='film'``:
+Heron surface-tension force with velocity damping; ``connectivity='custom'``:
+the case-local ``retopologize_surface``), recorded in ``results/methods.json``
+(laneX, 2026-10-06).
+
 Usage::
 
-    python liquid_bridge_cfd_dem_case.py
+    python liquid_bridge_cfd_dem_case.py [--n-steps N]
 """
 
 import json
@@ -31,10 +36,9 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 from ddgclib.dem import dem_step, save_particles
-from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.operators.surface_tension import surface_tension_acceleration
+from ddgclib.methods import PRESETS, record_methods
 from cases_dynamic.liquid_bridge_cfd_dem.src._params import (
-    dt, n_steps, record_every, gamma, print_params,
+    dt, n_steps as N_STEPS_DEFAULT, record_every, gamma, print_params,
     rho_f, film_thickness, film_min_edge, film_max_edge,
     film_damping, bridge_threshold, n_fluid_sub, dt_fluid,
 )
@@ -50,13 +54,15 @@ from cases_dynamic.liquid_bridge_cfd_dem.src._fluid_film import (
 )
 
 
-def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True):
+def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True,
+        n_steps: int = N_STEPS_DEFAULT):
     """Run the CFD-DEM two-particle liquid bridge case.
 
     Returns
     -------
     history : list[dict]
     """
+    methods = PRESETS['liquid_bridge_cfd_dem_3D']
     # ── 1. Setup ──────────────────────────────────────────────────────
     if verbose:
         print_params()
@@ -69,11 +75,8 @@ def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True):
     p1, p2 = ps.particles[0], ps.particles[1]
     dim = ps.dim
 
-    # Bind surface tension acceleration (dudt_fn for integrators)
-    dudt_fn = partial(
-        surface_tension_acceleration,
-        gamma=gamma, damping=film_damping, dim=3,
-    )
+    # Film force of the configuration (surface tension + damping)
+    dudt_fn = methods.dudt_fn(HC_film, gamma=gamma, damping=film_damping)
 
     # Bind surface retopologize function
     retopo_fn = partial(
@@ -102,12 +105,11 @@ def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True):
     for step in range(n_steps):
         t = step * dt
 
-        # 2a. Fluid film integration (surface tension)
-        # Use symplectic_euler with surface-aware retopologize
-        symplectic_euler(
+        # 2a. Fluid film integration (surface tension) on the configured
+        # integrator with the surface-aware custom retopology
+        methods.integrate(
             HC_film, bV_film, dudt_fn,
-            dt=dt_fluid, n_steps=n_fluid_sub, dim=3,
-            retopologize_fn=retopo_fn,
+            dt=dt_fluid, n_steps=n_fluid_sub, custom=retopo_fn,
         )
 
         # 2b. Stokes integral: capillary force on particles from film
@@ -125,16 +127,13 @@ def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True):
                 )
 
         # 2d. Apply capillary force from film as external force
-        def _film_forces_fn(particles, dim_):
-            forces = {}
-            for p in particles:
+        # (dem_step calls external_forces_fn(ps); it adds to p.force)
+        def _film_forces_fn(ps_):
+            for p in ps_.particles:
                 if p.id == p1.id:
-                    forces[p.id] = F_cap_1
+                    p.force[:dim] += F_cap_1[:dim]
                 elif p.id == p2.id:
-                    forces[p.id] = F_cap_2
-                else:
-                    forces[p.id] = np.zeros(dim_)
-            return forces
+                    p.force[:dim] += F_cap_2[:dim]
 
         # DEM step with film capillary force
         dem_step(
@@ -220,6 +219,11 @@ def run(save_fig: bool = True, save_results: bool = True, verbose: bool = True):
     if save_results:
         results_dir = Path(__file__).parent / "results"
         results_dir.mkdir(exist_ok=True)
+        record_methods(results_dir / "methods.json", methods, HC_film,
+                       extra={"dt": dt, "n_steps": n_steps,
+                              "n_fluid_sub": n_fluid_sub, "dt_fluid": dt_fluid,
+                              "gamma": gamma, "film_damping": film_damping,
+                              "n_film_vertices_final": sum(1 for _ in HC_film.V)})
         save_particles(ps, t_final, results_dir / "final_state.json")
         (results_dir / "history.json").write_text(
             json.dumps(history, indent=2)
@@ -377,4 +381,7 @@ def _load_dem_history():
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    _ap = argparse.ArgumentParser(description="CFD-DEM liquid bridge")
+    _ap.add_argument("--n-steps", type=int, default=N_STEPS_DEFAULT)
+    run(n_steps=_ap.parse_args().n_steps)
