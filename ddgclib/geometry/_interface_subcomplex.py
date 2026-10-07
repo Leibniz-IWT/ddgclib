@@ -113,6 +113,25 @@ def extract_interface(
     HC.interface_edges = iface_edges
     HC.interface_triangles = iface_tris
 
+    # Invalidate the curvature cache derived from interface_triangles
+    # (audit 2026-09-25 F1, _curvatures_heron.py).  The id-keyed apex map
+    # ('integrated' and the magnitude of 'csf_dual') is dropped only when
+    # the triangle set changed by vertex identity: under frozen
+    # connectivity (3D dual_only) it stays valid and is kept, which keeps
+    # its apex order (and hence the summation order) bit-identical.
+    # While the apex map exists it holds references to every vertex in the
+    # signature, so the ids cannot be recycled behind a matching signature.
+    # (The coordinate-keyed map of the former 'stokes' path, audit F2,
+    # went with that path in laneM, 2026-10-05.)
+    tri_ids = frozenset(
+        frozenset(id(v) for v in entries[0][1])
+        for fkey, entries in incident_phases.items()
+        if fkey in iface_tris
+    )
+    if tri_ids != getattr(HC, '_interface_tri_ids', None):
+        if hasattr(HC, '_interface_edge_to_apex'):
+            del HC._interface_edge_to_apex
+        HC._interface_tri_ids = tri_ids
 
 # ---------------------------------------------------------------------------
 # Neighbourhood helpers

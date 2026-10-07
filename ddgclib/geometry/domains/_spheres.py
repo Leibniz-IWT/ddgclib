@@ -48,12 +48,16 @@ def ball(
     # Shift to requested center.
     if center != (0.0, 0.0, 0.0):
         cx, cy, cz = center
+        # NOTE(laneL): one move_all, not a loop of moves (a shifted vertex
+        # can land on the key of one not yet shifted).
+        moves = []
         for v in list(HC.V):
             pos = v.x_a.copy()
             pos[0] += cx
             pos[1] += cy
             pos[2] += cz
-            HC.V.move(v, tuple(pos))
+            moves.append((v, tuple(pos)))
+        HC.V.move_all(moves)
 
     bV = bV_wall
     groups = {'walls': bV_wall}

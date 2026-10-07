@@ -25,7 +25,7 @@ Usage
 import numpy as np
 
 from ddgclib.operators.stress import (
-    dual_area_vector,
+    edge_area_vector,
     stress_force,
     stress_acceleration,
 )
@@ -88,7 +88,9 @@ def velocity_laplacian(v, dim: int = 3, HC=None) -> np.ndarray:
 
     F = np.zeros(dim)
     for v_j in v.nn:
-        A_ij = dual_area_vector(v, v_j, HC, dim)
+        # the same face the stress force reads (cache, else the per-edge
+        # construction of the axis edge_area_source; laneQ)
+        A_ij = edge_area_vector(v, v_j, HC, dim)
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
         d_norm = np.linalg.norm(d_ij)

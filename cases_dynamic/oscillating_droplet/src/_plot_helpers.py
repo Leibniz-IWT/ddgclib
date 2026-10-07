@@ -176,7 +176,8 @@ def plot_energy_history(t_arr, KE_arr, ax=None, title: str = ""):
     return fig, ax
 
 
-def compute_diagnostics(HC, dim: int = 2, theta_ref: float = 0.0):
+def compute_diagnostics(HC, dim: int = 2, theta_ref: float = 0.0,
+                        polar_axis: str = 'x'):
     """Compute diagnostic quantities from current mesh state.
 
     Parameters
@@ -188,6 +189,13 @@ def compute_diagnostics(HC, dim: int = 2, theta_ref: float = 0.0):
         interface vertex whose angle is closest to ``theta_ref`` is
         returned as ``r_apex``. Re-searched every call because
         retopology destroys per-vertex tag attributes.
+    polar_axis : {'x', 'z'}
+        3D only: axis the polar angle is measured from.  Default 'x'
+        (legacy convention, bit-identical to prior behaviour).  Use
+        'z' to match the perturbation axis of
+        ``_setup._apply_perturbation`` in 3D, so that ``theta_apex``
+        can be fed to ``radius_perturbation`` consistently (the 3D
+        score harness does this).  Ignored in 2D.
 
     Returns
     -------
@@ -226,6 +234,9 @@ def compute_diagnostics(HC, dim: int = 2, theta_ref: float = 0.0):
             n_interface += 1
             if dim == 2:
                 theta = float(np.arctan2(x[1], x[0]))
+            elif polar_axis == 'z':
+                # 3D: polar angle from +z (the perturbation axis)
+                theta = float(np.arctan2(np.sqrt(x[0]**2 + x[1]**2), x[2]))
             else:
                 # 3D: polar angle from +x (apex of the +x axis)
                 theta = float(np.arctan2(np.sqrt(x[1]**2 + x[2]**2), x[0]))

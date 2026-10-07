@@ -29,7 +29,11 @@ from ddgclib.operators.stress import (
     stress_force,
     stress_acceleration,
     dudt_i,
+    pressure_flux,
+    pressure_flux_riemann,
+    pressure_flux_methods,
 )
+from ddgclib.operators.stabilisation import density_diffusion_step
 from ddgclib.operators.gradient import (
     pressure_gradient,
     velocity_laplacian,

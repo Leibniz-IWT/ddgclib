@@ -373,10 +373,14 @@ def translate_surface(HC: Complex, offset: np.ndarray | list) -> None:
         Translation vector ``[dx, dy, dz]``.
     """
     offset = np.asarray(offset, dtype=float)
+    # NOTE(laneL): one move_all, not a loop of moves (a transformed vertex
+    # can land on the key of one not yet transformed).
+    moves = []
     for v in list(HC.V):
         new_pos = v.x_a.copy()
         new_pos[:len(offset)] += offset
-        HC.V.move(v, tuple(new_pos))
+        moves.append((v, tuple(new_pos)))
+    HC.V.move_all(moves)
 
 
 def rotate_surface(
@@ -396,6 +400,7 @@ def rotate_surface(
     R = np.asarray(rotation_matrix, dtype=float)
     if center is not None:
         center = np.asarray(center, dtype=float)
+    moves = []
     for v in list(HC.V):
         pos = v.x_a[:3].copy()
         if center is not None:
@@ -404,7 +409,8 @@ def rotate_surface(
             pos = R @ pos
         new = v.x_a.copy()
         new[:3] = pos
-        HC.V.move(v, tuple(new))
+        moves.append((v, tuple(new)))
+    HC.V.move_all(moves)   # NOTE(laneL): see translate_surface
 
 
 def rotation_matrix_align(axis_from: np.ndarray, axis_to: np.ndarray) -> np.ndarray:
@@ -465,10 +471,12 @@ def scale_surface(
     """
     if center is not None:
         center = np.asarray(center, dtype=float)
+    moves = []
     for v in list(HC.V):
         pos = v.x_a.copy()
         if center is not None:
             pos = center + factor * (pos - center)
         else:
             pos = factor * pos
-        HC.V.move(v, tuple(pos))
+        moves.append((v, tuple(pos)))
+    HC.V.move_all(moves)   # NOTE(laneL): see translate_surface

@@ -157,10 +157,23 @@ class TestBoundaryFromSimplices:
             boundary_from_simplices(HC, dim=2)
 
     def test_raises_unsupported_dim(self):
+        # NOTE(2026-07-02): newer hyperct generalizes
+        # boundary_from_simplices to any dim >= 1 (was: raise
+        # ValueError("dim ∈ {2, 3}")).  The new contract raises only for
+        # dim < 1; entries whose length != dim+1 are silently skipped as
+        # ghost-dedup leftovers (see hyperct/ddg/_boundary.py).
         HC = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
         HC._simplices = [(None,)]  # dummy
-        with pytest.raises(ValueError, match=r"dim ∈"):
-            boundary_from_simplices(HC, dim=4)
+        with pytest.raises(ValueError, match=r"dim >= 1"):
+            boundary_from_simplices(HC, dim=0)
+
+    def test_mismatched_simplex_entries_skipped(self):
+        # Companion to test_raises_unsupported_dim: for a supported but
+        # mismatched dim the dummy entry (len 1 != dim+1 = 5) is skipped,
+        # yielding an empty boundary set rather than an exception.
+        HC = Complex(2, domain=[(0.0, 1.0), (0.0, 1.0)])
+        HC._simplices = [(None,)]  # dummy
+        assert boundary_from_simplices(HC, dim=4) == set()
 
 
 class TestInvalidation:
@@ -189,10 +202,18 @@ class TestDomainBuildersRetopologize:
 
     def test_rectangle_retopologize_populates_simplices(self):
         from ddgclib.geometry.domains import rectangle
-        # Default behaviour: no simplex cache.
+        # Default behaviour (laneS, was "no simplex cache"): the cache
+        # holds the triangles of the structured connectivity the builder
+        # made; nothing is re-triangulated.
         r0 = rectangle(L=2.0, h=1.0, refinement=2)
-        assert r0.HC._simplices is None
-        # Opt-in: cache populated.
+        assert r0.HC._simplices is not None
+        cached_edges = {frozenset((id(a), id(b)))
+                        for s in r0.HC._simplices for a in s for b in s
+                        if a is not b}
+        mesh_edges = {frozenset((id(v), id(nb)))
+                      for v in r0.HC.V for nb in v.nn}
+        assert cached_edges == mesh_edges
+        # Opt-in: Delaunay connectivity, cache populated.
         r1 = rectangle(L=2.0, h=1.0, refinement=2, retopologize=True)
         assert r1.HC._simplices is not None
         assert len(r1.HC._simplices) > 0

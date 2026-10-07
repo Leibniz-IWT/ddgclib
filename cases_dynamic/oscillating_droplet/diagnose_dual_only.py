@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Diagnostic: static droplet with dual-only retopo (no Delaunay).
 
-Same as static_droplet_2D.py but uses dual_only_retopo like
-cube2droplet's diagnostic_no_retopo.py.  Isolates whether the
-instability is from retopologization or from the force balance.
+Same as static_droplet_2D.py (``PRESETS['static_droplet_2D']``,
+connectivity='dual_only_bare': the library ``bare_dual_refresh``, which
+is the closure this script used to carry) against the setup's bare
+per-step Delaunay (``PRESETS['oscillating_droplet_2D_bare_delaunay']``).
+Isolates whether the instability is from retopologization or from the
+force balance.
 """
 import os
 import sys
@@ -11,8 +14,6 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from hyperct.ddg import compute_vd
 
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
@@ -24,21 +25,7 @@ from cases_dynamic.oscillating_droplet.src._setup import (
 from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
-from ddgclib.operators.stress import cache_dual_volumes
-from ddgclib.dynamic_integrators import symplectic_euler
-
-
-def dual_only_retopo(HC, bV, dim, _mps=None):
-    """Recompute duals on existing connectivity (no Delaunay)."""
-    dV = HC.boundary()
-    for v in HC.V:
-        v.boundary = v in dV
-    compute_vd(HC, method="barycentric")
-    cache_dual_volumes(HC, dim)
-    if _mps is not None:
-        _mps.split_dual_volumes(HC, dim)
-    bV.clear()
-    bV.update(dV)
+from ddgclib.methods import PRESETS
 
 
 def main():
@@ -48,13 +35,16 @@ def main():
     print("DIAGNOSTIC: Static Droplet — DUAL-ONLY retopo")
     print("=" * 60)
 
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    methods = PRESETS['static_droplet_2D']
+    print(methods.describe())
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            methods=methods,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -70,9 +60,6 @@ def main():
              0.5 * np.sqrt(rho_d * dx_min ** 3 / gamma) if gamma > 0 else 1.0)
     n_steps = 100
     print(f"dt={dt:.2e}, n_steps={n_steps}")
-
-    from functools import partial
-    retopo_dual_only = partial(dual_only_retopo, _mps=mps)
 
     diag_list = []
 
@@ -93,10 +80,9 @@ def main():
                   f"n_iface={n_if}")
 
     print("\n--- Running with DUAL-ONLY retopo ---")
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback,
-        retopologize_fn=retopo_dual_only,
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
     record(t_final)
 
@@ -111,13 +97,16 @@ def main():
     print("COMPARISON: Static Droplet — FULL DELAUNAY retopo")
     print("=" * 60)
 
-    HC2, bV2, mps2, bc_set2, dudt_fn2, retopo_fn2, params2 = \
+    methods2 = PRESETS['oscillating_droplet_2D_bare_delaunay']
+    print(methods2.describe())
+    HC2, bV2, mps2, bc_set2, dudt_fn2, _setup_retopo_fn2, params2 = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            methods=methods2,
         )
 
     diag_list2 = []
@@ -140,12 +129,9 @@ def main():
 
     print("\n--- Running with FULL DELAUNAY retopo ---")
     try:
-        t_final2 = symplectic_euler(
-            HC2, bV2, dudt_fn2, dt=dt, n_steps=n_steps, dim=dim,
-            bc_set=bc_set2, callback=callback2,
-            retopologize_fn=retopo_fn2,
-            remesh_mode=params2['remesh_mode'],
-            remesh_kwargs=params2['remesh_kwargs'],
+        t_final2 = methods2.integrate(
+            HC2, bV2, dudt_fn2, dt=dt, n_steps=n_steps,
+            bc_set=bc_set2, callback=callback2, mps=mps2,
         )
         record2(t_final2)
     except Exception as e:

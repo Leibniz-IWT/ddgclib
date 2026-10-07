@@ -496,5 +496,48 @@ class TestComputeVdIntegration(unittest.TestCase):
             self.assertTrue(hasattr(v, 'vd'))
 
 
+# ── Centre shift ─────────────────────────────────────────────────────────
+
+class TestCentreShiftKeepsEveryVertex(unittest.TestCase):
+    """A shift by a lattice distance puts a vertex on the key of one that
+    is not shifted yet.  A loop of ``HC.V.move`` lost one vertex per such
+    collision until lane L (and raises ``VertexCollisionError`` since);
+    the builders shift with one ``HC.V.move_all``."""
+
+    @staticmethod
+    def _census(result, centre):
+        HC = result.HC
+        c = np.zeros(result.dim)
+        c[:len(centre)] = centre
+        keys = sorted(tuple(np.round(v.x_a[:result.dim] - c, 12))
+                      for v in HC.V)
+        return keys, sum(len(v.nn) for v in HC.V) // 2
+
+    def _check(self, builder, centre, **kw):
+        centred = self._census(builder(**kw), ())
+        shifted = self._census(builder(center=centre, **kw), centre)
+        self.assertEqual(shifted[1], centred[1])     # edges
+        self.assertEqual(len(shifted[0]), len(centred[0]))
+        np.testing.assert_allclose(np.array(shifted[0]),
+                                   np.array(centred[0]), atol=1e-12)
+
+    def test_disk(self):
+        self._check(disk, (1.0, 0.0), R=1.0, refinement=2)
+
+    def test_annulus(self):
+        self._check(annulus, (1.0, 0.0), R_outer=1.0, R_inner=0.5)
+
+    def test_ball(self):
+        self._check(ball, (1.0, 0.0, 0.0), R=1.0, refinement=1)
+
+    def test_translate(self):
+        from ddgclib.geometry._complex_operations import translate
+        r = rectangle(L=1.0, h=1.0, refinement=2)
+        n = sum(1 for _ in r.HC.V)
+        HC = translate(r.HC, axis=0, d=0.5, copy_complex=False)
+        self.assertEqual(sum(1 for _ in HC.V), n)
+        self.assertAlmostEqual(min(v.x_a[0] for v in HC.V), 0.5)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -292,6 +292,51 @@ class ShearingPlateBC(BoundaryCondition):
         return count
 
 
+class FreeSlipWallBC(BoundaryCondition):
+    """Free-slip (symmetry) wall: no flow through it, free motion along it.
+
+    Each step the target vertices get their wall-normal velocity zeroed
+    and their wall-normal coordinate put back on ``wall_coord``; the
+    tangential components are left to the integrator.  The target
+    vertices must NOT be members of ``bV``: they are integrated like
+    interior vertices.  The wall reaction this BC stands for is the
+    wall-normal part of the force on their open dual cell, so only that
+    component is discarded.
+
+    Always register it with its wall vertices
+    (``bc_set.add(FreeSlipWallBC(0, 0.0), wall_vertices)``): every target
+    vertex is put on the wall, so the ``BoundaryConditionSet`` default
+    (all of ``bV``) would pull the frozen vertices onto it.  The target
+    set is only iterated, never used for membership tests (a vertex hash
+    changes when the vertex moves).
+
+    Parameters
+    ----------
+    wall_axis : int
+        Coordinate axis normal to the wall.
+    wall_coord : float
+        Position of the wall along that axis.
+    """
+
+    def __init__(self, wall_axis: int, wall_coord: float):
+        super().__init__(axis=int(wall_axis))
+        self.wall_coord = float(wall_coord)
+
+    def apply(self, mesh, dt, target_vertices=None):
+        if target_vertices is None:
+            raise ValueError("FreeSlipWallBC needs its wall vertices "
+                             "(target_vertices)")
+        count = 0
+        for v in list(target_vertices):
+            v.u[self.axis] = 0.0
+            if v.x_a[self.axis] != self.wall_coord:
+                new_x = list(v.x)
+                new_x[self.axis] = self.wall_coord
+                mesh.V.move(v, tuple(new_x))
+            count += 1
+        return count
+
+
 class DirichletVelocityBC(BoundaryCondition):
     """Fixed velocity on boundary vertices.
 
@@ -632,22 +677,32 @@ class PeriodicInletBC(BoundaryCondition):
 
         return clone
 
-    def _reset_ghost(self):
-        """Shift ghost so its leading face is exactly one period upstream."""
-        shift = self.inlet_pos - self.period
+    def _shift_ghost(self, dx):
+        """Translate the whole ghost by *dx* along the flow axis.
+
+        NOTE(laneL): one ``move_all``, not a loop of ``move`` calls.  The
+        reset shifts the ghost by one period, which puts its downstream
+        face on the keys its upstream face still holds; the loop lost one
+        ghost vertex per such collision (13 -> 12 on the 2D channel unit
+        mesh, so one wall never received an injected vertex; audit
+        2026-09-25 F10 C2).
+        """
+        moves = []
         for v in list(self.ghost.V):
             pos = v.x_a.copy()
-            pos[self.axis] += shift
-            self.ghost.V.move(v, tuple(pos))
+            pos[self.axis] += dx
+            moves.append((v, tuple(pos)))
+        self.ghost.V.move_all(moves)
+
+    def _reset_ghost(self):
+        """Shift ghost so its leading face is exactly one period upstream."""
+        self._shift_ghost(self.inlet_pos - self.period)
 
     def apply(self, mesh, dt, target_vertices=None):
         dx = self.velocity * dt
 
         # Move ghost forward
-        for v in list(self.ghost.V):
-            pos = v.x_a.copy()
-            pos[self.axis] += dx
-            self.ghost.V.move(v, tuple(pos))
+        self._shift_ghost(dx)
 
         # Inject vertices that just crossed the inlet (strict >
         # so that ghost vertices exactly at the inlet boundary
@@ -655,8 +710,20 @@ class PeriodicInletBC(BoundaryCondition):
         entered = []
         for gv in list(self.ghost.V):
             if gv.x_a[self.axis] > self.inlet_pos:
-                new_v = mesh.V[tuple(gv.x_a)]
+                key = tuple(gv.x_a)
+                occupied = key in mesh.V.cache
+                new_v = mesh.V[key]
                 entered.append((gv, new_v))
+                if occupied:
+                    # NOTE(laneL): a mesh vertex already sits exactly
+                    # here.  Every ghost column enters at the same
+                    # position, inlet_pos + velocity * dt, so this is the
+                    # vertex an earlier column left there and that did
+                    # not move since: a frozen wall vertex.  It keeps its
+                    # state; copying the ghost fields reset a no-slip
+                    # vertex to the inlet velocity once per column
+                    # (audit 2026-09-25 F10 C3).  Edges are still copied.
+                    continue
                 # Copy field values from ghost vertex to new mesh vertex
                 for f in self.fields:
                     val = getattr(gv, f, None)
@@ -695,6 +762,159 @@ class PeriodicInletBC(BoundaryCondition):
             invalidate_simplex_cache(mesh)
 
         return len(entered)
+
+
+class PeriodicInletBufferedBC(PeriodicInletBC):
+    """Periodic inlet with an upstream buffer of prescribed motion.
+
+    The inlet counterpart of :class:`OutletBufferedDeleteBC`.  The buffer
+    is the zone ``[inlet_pos - buffer_width, inlet_pos]`` of the main
+    mesh.  Every vertex in it that is not frozen (not in *bV*) moves with
+    the prescribed inlet velocity: each step the BC puts it back on its
+    kinematic position and resets its velocity, whatever the integrator
+    did to it.  A vertex is released, and integrated from then on, when
+    it crosses *inlet_pos*.  New vertices enter at the upstream end of
+    the buffer from the periodic ghost copy of *unit_mesh*.
+
+    Why (laneH, 2026-10-01).  With :class:`PeriodicInletBC` the first
+    fluid column is the hull of the mesh.  Its dual cells are open, the
+    Delaunay rebuild fills the gap between the column and the frozen
+    inlet corners with simplices that connect fluid to the corners, and
+    an open cell sees zero ambient pressure.  Here the hull is made of
+    buffer vertices, whose motion is prescribed, and a released vertex
+    has a closed cell at least one buffer width away from the hull.
+
+    Requirements and behaviour:
+
+    - The main mesh must reach upstream to ``inlet_pos - buffer_width``
+      at the start, with a column on that plane.  The leading
+      (downstream) face of every ghost copy is dropped: it is the
+      periodic image of the trailing face of the copy before it, which
+      :class:`PeriodicInletBC` injects twice, one step apart.
+    - Pass the frozen set as *bV* when walls run through the buffer.
+      Members are never moved.  A wall-row vertex that the ghost injects
+      and a wall BC then freezes (``PositionalNoSlipWallBC`` AFTER this
+      BC) stays where it entered, at most one advection step from the
+      upstream corner, and its row is not injected again: a frozen
+      vertex never leaves the injection plane, so the row needs no
+      further vertices.  That leaves one extra wall vertex per wall row
+      (none when it lands within *cdist* of the corner), whatever the
+      time step.  Before the fix round of laneH the later columns were
+      injected as well; they landed on the key of the first one only
+      when ``velocity * dt`` divides the column spacing, and otherwise
+      every column left one more frozen vertex within one advection
+      step of the corner (18 -> 30 frozen vertices after 3 periods on
+      the 2D channel at refinement 1 with ``dt = 0.0237``).
+    - A vertex that comes back across *inlet_pos* from the fluid side is
+      captured and prescribed again.
+
+    Parameters
+    ----------
+    unit_mesh, velocity, axis, cdist, fields, period
+        As in :class:`PeriodicInletBC`.
+    buffer_width : float
+        Length of the buffer along *axis*.
+    inlet_pos : float
+        Release plane (the physical inlet).  Injection happens at
+        ``inlet_pos - buffer_width``.
+    bV : set or None
+        Frozen vertex set; its members are left alone.
+    """
+
+    def __init__(self, unit_mesh, velocity, buffer_width, axis=2,
+                 inlet_pos=0.0, cdist=None, fields=None, period=1.0,
+                 bV=None):
+        self.release_pos = inlet_pos
+        self.buffer_width = buffer_width
+        self.bV = bV
+        # id(vertex) -> (vertex, kinematic position); keyed by id()
+        # because mesh.V.move() changes the vertex hash.
+        self._buffer: dict = {}
+        # distance the current ghost copy has advanced
+        self._travel = 0.0
+        # transverse positions of the injected rows that were frozen
+        self._frozen_rows: set = set()
+        super().__init__(unit_mesh, velocity, axis=axis,
+                         inlet_pos=inlet_pos - buffer_width, cdist=cdist,
+                         fields=fields, period=period)
+
+    @property
+    def buffer_vertices(self):
+        """Set of vertex objects currently in the buffer."""
+        return {rec[0] for rec in self._buffer.values()}
+
+    def _row(self, v):
+        """Transverse position of *v*.  Exact as a key: the ghost and the
+        buffer vertices are only ever shifted along the flow axis."""
+        return tuple(np.delete(v.x_a, self.axis))
+
+    def _clone_unit(self, unit_mesh):
+        clone = super()._clone_unit(unit_mesh)
+        lead = max(v.x_a[self.axis] for v in clone.V)
+        for v in [v for v in clone.V if v.x_a[self.axis] >= lead - 1e-12
+                  or self._row(v) in self._frozen_rows]:
+            clone.V.remove(v)
+        return clone
+
+    def _reset_ghost(self):
+        """Place a fresh ghost copy one period behind the copy it
+        replaces.  The last column of that copy entered up to one
+        advection step past the injection plane; the new copy starts with
+        the same lead, so the columns stay one spacing apart across the
+        seam."""
+        lead = max(self._travel - self.period, 0.0)
+        self._shift_ghost(self.inlet_pos - self.period + lead)
+        self._travel = lead
+
+    def _frozen(self, v):
+        return self.bV is not None and v in self.bV
+
+    def apply(self, mesh, dt, target_vertices=None):
+        ax = self.axis
+        dx = self.velocity * dt
+
+        # 1. Put every buffer vertex on its kinematic position with the
+        #    inlet velocity; release the ones that crossed inlet_pos.
+        moves = []
+        kept = {}
+        rows = set()
+        for vid, (v, pos) in self._buffer.items():
+            if mesh.V.cache.get(v.x) is not v:
+                continue
+            if self._frozen(v):
+                # an injected vertex that a later BC froze: a wall row
+                rows.add(self._row(v))
+                continue
+            new_pos = pos.copy()
+            new_pos[ax] += dx
+            moves.append((v, tuple(new_pos)))
+            v.u[:] = 0.0
+            v.u[ax] = self.velocity
+            if new_pos[ax] <= self.release_pos:
+                kept[vid] = (v, new_pos)
+        mesh.V.move_all(moves)
+        self._buffer = kept
+        if not rows <= self._frozen_rows:
+            # A frozen row is not injected again (see the class docstring).
+            self._frozen_rows |= rows
+            for gv in [gv for gv in self.ghost.V
+                       if self._row(gv) in self._frozen_rows]:
+                self.ghost.V.remove(gv)
+
+        # 2. Inject at the upstream end of the buffer.
+        self._travel += dx
+        n_entered = super().apply(mesh, dt, target_vertices)
+
+        # 3. Take every other free vertex upstream of inlet_pos into the
+        #    buffer (the initial mesh, the vertices just injected).
+        for v in mesh.V:
+            if (id(v) in self._buffer or v.x_a[ax] > self.release_pos
+                    or self._frozen(v)):
+                continue
+            v.u[:] = 0.0
+            v.u[ax] = self.velocity
+            self._buffer[id(v)] = (v, v.x_a.copy())
+        return n_entered
 
 
 class PositionalNoSlipWallBC(BoundaryCondition):
@@ -764,11 +984,15 @@ class MeshAdvancer:
         dx = self.velocity * dt
         self.time += dt
 
-        # 1. Advect main mesh
+        # 1. Advect main mesh (NOTE(laneL): one move_all, not a loop of
+        #    moves: a step of exactly one column spacing puts every vertex
+        #    on the key of the next column)
+        moves = []
         for v in list(self.mesh.V):
             pos = v.x_a.copy()
             pos[self.axis] += dx
-            self.mesh.V.move(v, tuple(pos))
+            moves.append((v, tuple(pos)))
+        self.mesh.V.move_all(moves)
 
         # 2. Apply boundary conditions
         outflow_count = self.outlet.apply(self.mesh, dt)

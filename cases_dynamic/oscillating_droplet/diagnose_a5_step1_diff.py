@@ -217,6 +217,16 @@ def main():
           f"split_method={args.split_method!r})")
     print('=' * 72)
 
+    # The single retopology call below is the config's: per-step
+    # Delaunay, no remap, WITH redistribution.  redistribute_mass=True is
+    # the setup default this probe always ran with (it passed
+    # split_method= only); the SolverMethods field default is False, so
+    # it is bound explicitly (laneW fix round 1: the A/B is
+    # diagnose_setup_bindings.py a5step1).
+    from ddgclib.methods import SolverMethods
+    methods = SolverMethods(dim=args.dim, phases='multi',
+                            split_method=args.split_method,
+                            redistribute_mass=True)
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
         setup_oscillating_droplet(
             dim=args.dim, R0=R0, epsilon=0.0, l=l,
@@ -224,7 +234,7 @@ def main():
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=args.refine_outer,
             refinement_droplet=args.refine_droplet,
-            split_method=args.split_method,
+            methods=methods,
         )
 
     n_iface_init = sum(1 for v in HC.V if getattr(v, 'is_interface', False))

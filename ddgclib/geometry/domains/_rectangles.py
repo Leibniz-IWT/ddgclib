@@ -36,10 +36,11 @@ def rectangle(
         labelled ``'inlet'`` and ``'outlet'``.
     retopologize : bool, optional
         If True, run ``_retopologize`` once after the structured build
-        so the returned mesh has ``HC._simplices`` populated and the
-        simplex-aware dual + boundary paths are active.  See
-        :meth:`DomainResult.retopologize` for caveats.  Default False
-        keeps the existing structured tessellation bit-for-bit.
+        so the returned mesh has Delaunay connectivity (and its simplex
+        cache).  See :meth:`DomainResult.retopologize` for caveats.
+        Default False keeps the structured tessellation bit-for-bit;
+        its triangles are cached in ``HC._simplices`` as well, so the
+        simplex-aware dual + boundary paths are active either way.
 
     Returns
     -------

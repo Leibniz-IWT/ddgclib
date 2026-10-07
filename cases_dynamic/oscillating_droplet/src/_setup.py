@@ -2,11 +2,11 @@
 
 Constructs the multiphase mesh, applies initial conditions with
 an ellipsoidal perturbation, and returns all objects needed to
-run the simulation.
+run the simulation.  The force and the retopology function are built
+by :class:`ddgclib.methods.SolverMethods` (``methods.dudt_fn`` /
+``methods.retopologize_fn``), never by hand (laneW, 2026-10-05).
 """
 from __future__ import annotations
-
-from functools import partial
 
 import numpy as np
 
@@ -15,10 +15,7 @@ from ddgclib.multiphase import MultiphaseSystem, PhaseProperties, mass_conservin
 from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
 from ddgclib.geometry.domains import droplet_in_box_2d, droplet_in_box_3d
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
+from ddgclib.methods import SolverMethods
 
 
 def setup_oscillating_droplet(
@@ -40,6 +37,8 @@ def setup_oscillating_droplet(
     distr_law: str = "sinusoidal",
     split_method: str = "neighbour_count",
     redistribute_mass: bool = True,
+    box_shift: str = 'move_all',
+    methods=None,
 ):
     """Set up oscillating droplet problem (2D or 3D).
 
@@ -88,6 +87,28 @@ def setup_oscillating_droplet(
         Lagrangian per-vertex ``v.m_phase`` is held against a shifting
         ``v.dual_vol_phase``, driving spurious ``rho`` and ``p_phase``
         swings (3D static-droplet A.5.b: 1.44e-3 → 7.4e-5 with this on).
+    box_shift : {'move_all', 'evict'}
+        How ``droplet_in_box_2d`` / ``_3d`` shift the outer box onto the
+        droplet (laneB, 2026-10-05; ``ddgclib.geometry.domains.BOX_SHIFTS``).
+        ``'move_all'`` (default) keeps every outer vertex; ``'evict'``
+        is the lossy loop every number pinned before laneB was produced
+        on (2D refinement 3: 6 of 145 outer vertices missing, 3D
+        refinement 2: 3 of 189, the box corner among them).  A setup
+        choice, recorded in ``params['box_shift']`` and in the ``extra``
+        block of the runners' ``methods.json``, not a solver method axis.
+    methods : ddgclib.methods.SolverMethods or None
+        The solver configuration (a preset, normally).  ``split_method``
+        and ``redistribute_mass`` are taken from it (the explicit kwargs
+        above are ignored), ``dudt_fn`` is ``methods.dudt_fn(HC, mps=mps,
+        pressure_model=meos)`` so the force axes of the preset
+        (``curvature_path``, ``area_orientation``) are applied, and
+        ``retopo_fn`` is ``methods.retopologize_fn(mps=mps)`` (laneM /
+        laneW, 2026-10-05).  ``None`` builds the configuration from the
+        explicit kwargs: ``SolverMethods(dim, phases='multi',
+        split_method=..., redistribute_mass=...)`` (per-step Delaunay,
+        no remap, the default force axes), whose partials are the ones
+        this function used to build by hand (same callables, same
+        keywords; ``ddgclib/tests/test_methods.py``).
 
     Returns
     -------
@@ -101,9 +122,21 @@ def setup_oscillating_droplet(
         Boundary condition container.
     dudt_fn : callable
         Acceleration function for integrators.
+    retopo_fn : callable
+        ``methods.retopologize_fn(mps=mps)``; the runners let
+        ``methods.integrate`` build it again.
     params : dict
         All parameters for reference.
     """
+    if methods is None:
+        methods = SolverMethods(dim=dim, phases='multi',
+                                split_method=split_method,
+                                redistribute_mass=redistribute_mass)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
+    redistribute_mass = methods.redistribute_mass
+
     # -- Compute bulk moduli if not given --
     if K_d is None:
         c_s = max(10.0 * epsilon * R0 * 1000.0, 1.0)
@@ -133,6 +166,7 @@ def setup_oscillating_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
     elif dim == 3:
         result = droplet_in_box_3d(
@@ -140,6 +174,7 @@ def setup_oscillating_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
     else:
         raise ValueError(f"dim must be 2 or 3, got {dim}")
@@ -175,6 +210,15 @@ def setup_oscillating_droplet(
     # 4. Apply Young-Laplace equilibrium: set inner-phase mass so that
     #    the EOS pressure at the equilibrium density equals the Laplace
     #    jump.  P_d(rho_d_eq) = P_o(rho_o) + gamma * kappa.
+    #    NOTE(laneG 2026-07-30): the ANALYTIC jump is kept on purpose.
+    #    A discrete-consistent scalar preload (3D refine 2/2: LSQ jump
+    #    9.1313 Pa / net-radial-neutral 9.7574 Pa vs analytic 10.0) was
+    #    measured to have NO effect on the 3D droplet-shape drift: the
+    #    l=0 preload mismatch self-corrects through the EOS +
+    #    redistribution volume constraint, and the drift is a
+    #    volume-neutral O(h^2) SHAPE mode at the cube-sphere special
+    #    vertices (see docs_temp/debug_session/laneG-3d-inflation-gap.md
+    #    par 1.2).  Do not re-try a scalar preload for that symptom.
     curvature = (dim - 1) / R0  # kappa = 1/R (2D), 2/R (3D)
     gamma_val = mps.get_gamma_pair(0, 1)
     delta_p = gamma_val * curvature
@@ -197,27 +241,14 @@ def setup_oscillating_droplet(
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), result.boundary_groups['walls'])
 
-    # -- Build acceleration function --
+    # -- Acceleration and retopology functions: from the configuration --
+    # (connectivity='adaptive' is exercised by
+    # oscillating_droplet_2D_adaptive.py; the two upstream hyperct.remesh
+    # issues that used to blow up this case were fixed 2026-07-02,
+    # lane4-remesh-upstream; the pinned floor tests keep 'delaunay').
     meos = MultiphaseEOS([eos_outer, eos_drop])
-    dudt_fn = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
-
-    # -- Retopologize function --
-    # Stays on global Delaunay for now.  hyperct.remesh.adaptive_remesh
-    # is interface-preserving but has upstream issues that blow up this
-    # case:
-    #   1. edge_split_2d inserts a midpoint vertex with mass ~= mean of
-    #      its endpoints, silently inflating total mass on every split.
-    #      (hyperct/remesh/_operations_2d.py:198)
-    #   2. The driver uses a single global h_local, so a mixed
-    #      fine-droplet / coarse-outer mesh triggers unbounded splits
-    #      in the outer region when L_max is sized to the droplet.
-    adaptive_kwargs = None
-    retopo_fn = partial(_retopologize_multiphase, mps=mps,
-                        split_method=split_method,
-                        redistribute_mass=redistribute_mass)
+    dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
+    retopo_fn = methods.retopologize_fn(mps=mps)
 
     # -- Collect params --
     params = {
@@ -227,8 +258,9 @@ def setup_oscillating_droplet(
         'L_domain': L_domain, 'P0': P0,
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
+        'box_shift': box_shift,
         'remesh_mode': 'delaunay',
-        'remesh_kwargs': adaptive_kwargs,
+        'remesh_kwargs': None,
     }
 
     return HC, bV, mps, bc_set, dudt_fn, retopo_fn, params

@@ -12,7 +12,12 @@ Produces:
 Usage
 -----
     python cases_dynamic/oscillating_droplet/oscillating_droplet_2D.py
+    python cases_dynamic/oscillating_droplet/oscillating_droplet_2D.py \
+        --box-shift evict    # A/B: the lossy pre-laneB outer mesh (6 of
+                             # 145 outer vertices missing); writes
+                             # suffixed artifacts (score_evict.json, ...)
 """
+import argparse
 import os
 import sys
 
@@ -23,10 +28,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
     L_domain, n_refine_outer, n_refine_droplet, beta_2d, t_end_2d,
+    retopo_policy_2d,
 )
 from cases_dynamic.oscillating_droplet.src._analytical import (
     rayleigh_frequency, lamb_damping_rate, damped_frequency,
-    max_radius_envelope,
+    max_radius_envelope, lamb_damping_rate_two_fluid,
+    two_fluid_omega_beta_2d,
 )
 from cases_dynamic.oscillating_droplet.src._setup import (
     setup_oscillating_droplet,
@@ -37,10 +44,10 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
 from cases_dynamic.oscillating_droplet.src._metrics import (
-    oscillation_score, save_score,
+    oscillation_score, save_score, add_two_fluid_reference,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,12 +55,32 @@ _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results')
 _SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 
+# Retopology policy string (src/_params.py) -> solver-method preset
+# (ddgclib.methods.PRESETS; every axis of each preset is documented in
+# METHODS.md at the repo root).
+_POLICY_PRESETS = {
+    'delaunay_remap': 'oscillating_droplet_2D',
+    'dual_only': 'oscillating_droplet_2D_dual_only',
+    'delaunay': 'oscillating_droplet_2D_bare_delaunay',
+    'delaunay_remap_p2': 'oscillating_droplet_2D_projection2',
+}
 
-def main():
+
+def main(box_shift: str = 'move_all'):
     dim = 2
     print("=" * 60)
     print("2D Oscillating Droplet — Overdamped Case")
     print("=" * 60)
+    # laneB (2026-10-05): the outer box shift of droplet_in_box_2d is a
+    # setup choice ('move_all' keeps every outer vertex; 'evict' is the
+    # lossy loop every number before laneB was produced on).  Non-default
+    # arms write suffixed artifacts so an A/B never clobbers the baseline.
+    suffix = '' if box_shift == 'move_all' else f'_{box_shift}'
+    snapshots_dir = _SNAPSHOTS + suffix
+
+    # -- Solver methods (single source of truth for every method switch) --
+    methods = PRESETS[_POLICY_PRESETS[retopo_policy_2d]]
+    print(methods.describe())
 
     omega = rayleigh_frequency(l, gamma, rho_d, R0, dim=dim, rho_outer=rho_o)
     beta = lamb_damping_rate(l, mu_d, rho_d, R0, dim=dim)
@@ -64,17 +91,31 @@ def main():
 
     # -- Setup --
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    # The preset owns every method choice of the setup (split_method,
+    # redistribute_mass at mps.refresh; the force axes in dudt_fn) and of
+    # the run (methods.integrate below): setup and runtime cannot drift.
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            box_shift=box_shift,
+            methods=methods,
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
-    print(f"Mesh: {n_verts} vertices, {n_iface} interface")
+    print(f"Mesh: {n_verts} vertices, {n_iface} interface "
+          f"(box_shift={box_shift})")
+
+    # -- Retopology policy: lane-5 sweep + lane-E adoption + lane-H
+    # cadence opt-in, all documented in src/_params.py and METHODS.md.
+    # The preset builds the same partial(_retopologize_multiphase, ...)
+    # the policy dispatch used to build by hand (bit-identical, see
+    # ddgclib/tests/test_methods.py).
+    print(f"Retopo policy: {retopo_policy_2d} -> preset "
+          f"{_POLICY_PRESETS[retopo_policy_2d]}")
 
     # -- CFL timestep --
     c_s = np.sqrt(K_d / rho_d)
@@ -91,14 +132,14 @@ def main():
     print(f"dt={dt:.2e}, n_steps={n_steps}, t_end={t_end:.4f}")
 
     # -- Recording --
-    os.makedirs(_SNAPSHOTS, exist_ok=True)
+    os.makedirs(snapshots_dir, exist_ok=True)
     os.makedirs(_FIG, exist_ok=True)
 
     # StateHistory records u, p AND phase/interface for multiphase animation
     history = StateHistory(
         fields=['u', 'p', 'phase', 'is_interface'],
         record_every=record_every,
-        save_dir=_SNAPSHOTS,
+        save_dir=snapshots_dir,
     )
 
     diag_list: list[dict] = []
@@ -122,15 +163,11 @@ def main():
 
     # -- Run --
     print("\nRunning simulation...")
-    # remesh_mode / remesh_kwargs must be passed through the integrator:
-    # _do_retopologize inspects retopo_fn's signature and, if it accepts
-    # `remesh_mode`, forwards the integrator's value — so pre-binding
-    # via functools.partial alone does not work.
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
+    # methods.integrate builds retopologize_fn + every integrator-level
+    # retopology kwarg (remesh_mode, remesh_kwargs, ...) from the preset.
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
 
     record(t_final)
@@ -152,14 +189,61 @@ def main():
     score = oscillation_score(
         diag_list, R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta,
     )
-    score_path = os.path.join(_RESULTS, 'score.json')
-    save_score(score_path, score)
+    # Secondary two-fluid reference (lane C): exact 2D two-fluid
+    # normal-mode dispersion (outer bath rho_o/mu_o included; no-slip
+    # wall at 5*R0 still NOT modelled).  The pinned metric above stays
+    # the single-fluid Lamb one for regression continuity.
+    omega_tf, beta_tf = two_fluid_omega_beta_2d(
+        l, gamma, mu_d, rho_d, R0, mu_outer=mu_o, rho_outer=rho_o,
+    )
+    beta_tf_energy = lamb_damping_rate_two_fluid(
+        l, mu_d, rho_d, R0, mu_outer=mu_o, rho_outer=rho_o,
+    )
+    score = add_two_fluid_reference(
+        score, diag_list, R0=R0, epsilon=epsilon, l=l,
+        omega_two_fluid=omega_tf, beta_two_fluid=beta_tf,
+        beta_energy=beta_tf_energy,
+    )
+    # Setup choices the score depends on (laneB; baseline diffs ignore
+    # non-numeric keys).
+    score['refinement_outer'] = n_refine_outer
+    score['refinement_droplet'] = n_refine_droplet
+    score['retopo_policy'] = retopo_policy_2d
+    score['box_shift'] = params['box_shift']
+    score_path = os.path.join(_RESULTS, f'score{suffix}.json')
+    save_score(score_path, score, methods=methods)   # self-describing score
+    # Methods actually used (requested config + implicit choices resolved
+    # on the final mesh + git state), next to the score.
+    record_methods(
+        os.path.join(_RESULTS, f'methods{suffix}.json'), methods, HC,
+        extra={'retopo_policy': retopo_policy_2d, 'dt': dt,
+               'n_steps': n_steps, 't_end': t_end,
+               'refinement_outer': n_refine_outer,
+               'refinement_droplet': n_refine_droplet,
+               'box_shift': params['box_shift'],
+               'K_d': K_d, 'K_o': K_o},
+    )
+    # Raw diagnostic series alongside (scalar fields only — 'com' is an
+    # ndarray), so future reference changes can re-score without
+    # re-running the case.
+    diag_scalars = [
+        {k: float(v) for k, v in dd.items() if np.ndim(v) == 0}
+        for dd in diag_list
+    ]
+    save_score(os.path.join(_RESULTS, f'diag_series{suffix}.json'),
+               {'kind': 'diag_series', 'diags': diag_scalars})
     print(f"\nOscillation score saved to {score_path}")
     print(f"  summary                  = {score['summary']:.4e}")
     print(f"  l2_error_normalized      = {score['l2_error_normalized']:.4e}")
     print(f"  linf_error_normalized    = {score['linf_error_normalized']:.4e}")
     print(f"  tail_growth              = {score['tail_growth']:.4e}")
     print(f"  mass_drift               = {score['mass_drift']:.4e}")
+    print(f"  -- two-fluid reference (omega={omega_tf:.4f}, "
+          f"beta={beta_tf:.4f}; energy-method beta={beta_tf_energy:.4f}) --")
+    print(f"  l2_error_norm_two_fluid  = "
+          f"{score['l2_error_normalized_two_fluid']:.4e}")
+    print(f"  linf_error_norm_two_fluid= "
+          f"{score['linf_error_normalized_two_fluid']:.4e}")
 
     # -- Static plots --
     try:
@@ -168,19 +252,19 @@ def main():
         import matplotlib.pyplot as plt
 
         plot_droplet_fluid(HC, bV=bV, t=t_final, dim=dim,
-                           save_path=os.path.join(_FIG, 'oscillating_droplet_2D_fluid.png'))
+                           save_path=os.path.join(_FIG, f'oscillating_droplet_2D_fluid{suffix}.png'))
         plot_droplet_phases(HC, bV=bV, dim=dim,
                             title=f"Phase field (t={t_final:.4f} s)",
-                            save_path=os.path.join(_FIG, 'oscillating_droplet_2D_phases.png'))
+                            save_path=os.path.join(_FIG, f'oscillating_droplet_2D_phases{suffix}.png'))
 
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_radius_envelope(t_arr, R_max_arr, R_max_analytical, R0=R0, ax=ax)
-        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_2D_radius.png'), dpi=150)
+        fig.savefig(os.path.join(_FIG, f'oscillating_droplet_2D_radius{suffix}.png'), dpi=150)
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_energy_history(t_arr, KE_arr, ax=ax)
-        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_2D_energy.png'), dpi=150)
+        fig.savefig(os.path.join(_FIG, f'oscillating_droplet_2D_energy{suffix}.png'), dpi=150)
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -188,7 +272,7 @@ def main():
             t_arr, r_apex_arr, theta_apex_arr,
             R0=R0, epsilon=epsilon, l=l, omega=omega, beta=beta, ax=ax,
         )
-        fig.savefig(os.path.join(_FIG, 'oscillating_droplet_2D_apex.png'), dpi=150)
+        fig.savefig(os.path.join(_FIG, f'oscillating_droplet_2D_apex{suffix}.png'), dpi=150)
         plt.close(fig)
         print("Static plots saved to fig/")
     except ImportError:
@@ -199,7 +283,7 @@ def main():
         try:
             anim = dynamic_plot_fluid(
                 history, HC, bV=bV,
-                save_path=os.path.join(_FIG, 'oscillating_droplet_2D.mp4'),
+                save_path=os.path.join(_FIG, f'oscillating_droplet_2D{suffix}.mp4'),
                 fps=20, dpi=100,
                 xlim=(-2.5 * R0, 2.5 * R0),
                 ylim=(-2.5 * R0, 2.5 * R0),
@@ -207,15 +291,22 @@ def main():
                 interface_field='is_interface',
                 reference_R=R0,
             )
-            print(f"Animation saved to fig/oscillating_droplet_2D.mp4")
+            print(f"Animation saved to fig/oscillating_droplet_2D{suffix}.mp4")
         except Exception as e:
             print(f"Animation failed: {e}")
 
     print(f"\nTo view in polyscope:")
     print(f"  python -m ddgclib.scripts.view_polyscope "
-          f"--snapshots {os.path.relpath(_SNAPSHOTS)}")
+          f"--snapshots {os.path.relpath(snapshots_dir)}")
     print("Done.")
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--box-shift', choices=('move_all', 'evict'), default='move_all',
+        dest='box_shift',
+        help="Outer box shift of droplet_in_box_2d (laneB): 'move_all' "
+             "keeps every outer vertex (default); 'evict' is the lossy "
+             "pre-laneB mesh, written to suffixed artifacts")
+    main(box_shift=parser.parse_args().box_shift)

@@ -27,8 +27,6 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from functools import partial
-
 from cases_dynamic.oscillating_droplet.src._params import (
     R0, epsilon, l, rho_d, rho_o, mu_d, mu_o, gamma, K_d, K_o,
     L_domain, n_refine_outer, n_refine_droplet, beta_2d, t_end_2d,
@@ -43,41 +41,31 @@ from cases_dynamic.oscillating_droplet.src._setup import (
 from cases_dynamic.oscillating_droplet.src._plot_helpers import (
     compute_diagnostics,
 )
-from hyperct.ddg import compute_vd
-from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
-from ddgclib.operators.stress import cache_dual_volumes
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS
 from ddgclib.visualization import dynamic_plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results')
 
-
-def dual_only_retopo_multiphase(HC, bV, dim, _mps=None):
-    """Recompute duals on existing connectivity (no Delaunay).
-
-    Keeps edges/triangles intact, just recomputes barycentric duals,
-    dual volumes, and per-phase volume splits.  Interface identity
-    is kept frozen from the initial mesh.
-    """
-    dV = HC.boundary()
-    for v in HC.V:
-        v.boundary = v in dV
-
-    compute_vd(HC, method="barycentric")
-    cache_dual_volumes(HC, dim)
-
-    if _mps is not None:
-        # Refresh per-phase volumes (but DO NOT re-identify interface)
-        _mps.split_dual_volumes(HC, dim)
-        _mps.compute_phase_pressures(HC)
-
-    bV.clear()
-    bV.update(dV)
+# The three strategies as registered configurations (METHODS.md).
+# NO_RETOPO used to be a case-local closure (dual refresh + per-phase
+# split + EOS pressures on frozen connectivity, no interface
+# re-identification); connectivity='dual_only' without redistribution
+# is the library form of it (refresh + EOS pressures on the frozen
+# connectivity).  The runner is a stale comparison (April snapshots):
+# bit-equality of that arm with the old closure was not measured.
+_BARE = PRESETS['oscillating_droplet_2D_bare_delaunay']
+_MODES = {
+    'no_redist': _BARE.replace(redistribute_mass=False,
+                               label=_BARE.label + ' [mass_redist NO_REDIST]'),
+    'redist': _BARE,
+    'no_retopo': PRESETS['oscillating_droplet_2D_dual_only'].replace(
+        redistribute_mass=False,
+        label=PRESETS['oscillating_droplet_2D_dual_only'].label
+        + ' [mass_redist NO_RETOPO]'),
+}
 
 
 def _run_simulation(label, retopo_mode):
@@ -88,32 +76,23 @@ def _run_simulation(label, retopo_mode):
     label : str
         Short label for console output.
     retopo_mode : {'no_redist', 'redist', 'no_retopo'}
-        Retopologization strategy.
+        Retopologization strategy (``_MODES``).
     """
     dim = 2
+    try:
+        methods = _MODES[retopo_mode]
+    except KeyError:
+        raise ValueError(f"Unknown retopo_mode: {retopo_mode}") from None
 
-    HC, bV, mps, bc_set, dudt_fn, _, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            methods=methods,
         )
-
-    # Build retopo function based on mode
-    if retopo_mode == 'no_redist':
-        retopo_fn = partial(
-            _retopologize_multiphase, mps=mps, redistribute_mass=False,
-        )
-    elif retopo_mode == 'redist':
-        retopo_fn = partial(
-            _retopologize_multiphase, mps=mps, redistribute_mass=True,
-        )
-    elif retopo_mode == 'no_retopo':
-        retopo_fn = partial(dual_only_retopo_multiphase, _mps=mps)
-    else:
-        raise ValueError(f"Unknown retopo_mode: {retopo_mode}")
 
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -171,9 +150,9 @@ def _run_simulation(label, retopo_mode):
 
     t0 = time.time()
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-            bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         print(f"[{label}] Simulation stopped: {e}")

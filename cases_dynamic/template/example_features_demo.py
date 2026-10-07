@@ -9,14 +9,18 @@ This script shows all the new features in action with three mini-examples:
   3. Save/load round-trip + history queries
 
 Run from the project root:
-    python cases_dynamic/Template/example_features_demo.py
+    python cases_dynamic/template/example_features_demo.py
 """
 
 import os
+import sys
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # non-interactive backend (works headless)
 import matplotlib.pyplot as plt
+
+# Make the repo root importable when run by path (project convention).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from hyperct import Complex
 
@@ -240,26 +244,33 @@ if times:
         print(f"  t={t:.4f}  u_x={u[0]:.6f}")
 
 
-# Example 4: DynamicSimulation runner (alternative to direct calls)
-separator("Example 4: DynamicSimulation Runner")
+# Example 4: SolverMethods (the method registry) instead of hand-written
+# integrator calls.  Every method switch is a validated field; the run is
+# recorded to methods.json next to the results.  See METHODS.md.
+separator("Example 4: SolverMethods registry")
 
-from ddgclib.dynamic_integrators import DynamicSimulation, SimulationParams
+from ddgclib.methods import SolverMethods, record_methods
 
 # Reset mesh to initial state
 ic2.apply(HC2, bV2)
 
-params = SimulationParams(dt=0.001, n_steps=200, dim=2, mu=mu, extra={'G': G})
+methods = SolverMethods(dim=2, phases='single',
+                        integrator='euler_velocity_only',   # fixed mesh
+                        connectivity='delaunay',
+                        label='feature demo: Poiseuille channel')
+print(methods.describe())
+
 history2 = StateHistory(fields=['u'], record_every=100)
-
-sim = (DynamicSimulation(HC2, bV2, params)
-       .set_initial_conditions(ic2)         # re-applies IC before running
-       .set_boundary_conditions(bc_set)
-       .set_integrator(euler_velocity_only)
-       .set_acceleration_fn(channel_accel))
-
-t = sim.run(callback=history2.callback)
-print(f"DynamicSimulation finished: t = {t:.4f}")
+# Extra keyword arguments (mu, G) are forwarded to the acceleration
+# function exactly as the direct integrator call does.
+t = methods.integrate(HC2, bV2, channel_accel, dt=0.001, n_steps=200,
+                      bc_set=bc_set, callback=history2.callback,
+                      mu=mu, G=G)
+record_methods(os.path.join(_FIG, 'example4_methods.json'), methods, HC2,
+               extra={'dt': 0.001, 'n_steps': 200, 'mu': mu, 'G': G})
+print(f"SolverMethods run finished: t = {t:.4f}")
 print(f"Snapshots recorded: {history2.n_snapshots}")
+print(f"Methods recorded to {_FIG}/example4_methods.json")
 
 
 # Example 5: Adaptive time stepping
@@ -304,14 +315,15 @@ Modules demonstrated:
                                    PoiseuillePlanar, LinearPressureGradient, UniformMass
   ddgclib._boundary_conditions   — identify_boundary_vertices, identify_cube_boundaries,
                                    BoundaryConditionSet, NoSlipWallBC, DirichletPressureBC
-  ddgclib.dynamic_integrators    — euler_velocity_only, euler_adaptive,
-                                   DynamicSimulation, SimulationParams
+  ddgclib.dynamic_integrators    — euler_velocity_only, euler_adaptive
+  ddgclib.methods                — SolverMethods, record_methods (METHODS.md)
   ddgclib.data                   — save_state, load_state, StateHistory
   ddgclib.visualization          — plot_scalar_field_1d, plot_scalar_field_2d,
                                    plot_vector_field_2d, plot_mesh_2d
 
-Output files (in cases_dynamic/Template/fig/):
+Output files (in cases_dynamic/template/fig/):
   fig/example1_hydrostatic.png  — 1D hydrostatic pressure plot
   fig/example2_poiseuille.png   — 2D Poiseuille mesh + pressure + velocity
   fig/example_state.json        — Saved simulation state (JSON)
+  fig/example4_methods.json     — Recorded solver methods of Example 4
 """)

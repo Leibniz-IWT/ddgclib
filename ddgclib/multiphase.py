@@ -54,6 +54,7 @@ from typing import Callable
 import numpy as np
 
 from ddgclib.eos._base import EquationOfState
+from ddgclib.eos._multiphase_eos import interface_mean_pressure
 
 
 # Sentinel phase ID for interface vertices.  Chosen as -1 so that any
@@ -163,6 +164,16 @@ class MultiphaseSystem:
         # ``assign_simplex_phases``; reused by ``refresh`` when no
         # explicit ``criterion_fn`` is passed.
         self._simplex_criterion_fn: Callable[[np.ndarray], int] | None = None
+        # Per-phase volume-gauge factor for the EOS density read
+        # (``rho_k = m_k / (vol_corr[k] * dual_vol_phase[k])``).
+        # Stays exactly 1.0 (bit-identical behaviour) unless the
+        # conservative retopology remap is active
+        # (``retopo_remap='conservative'`` in
+        # ``_retopologize_multiphase``), which sets it to the
+        # measurement-gauge ratio of the latest connectivity rebuild so
+        # that reconnection-induced dual-volume jumps at frozen vertex
+        # positions are not read as physical compression.
+        self.vol_corr = np.ones(self.n_phases)
 
     # -- Phase assignment ----------------------------------------------------
 
@@ -273,7 +284,15 @@ class MultiphaseSystem:
                 # Majority vote among bulk vertices.
                 from collections import Counter
                 counts = Counter(bulk_phases)
-                winner = counts.most_common(1)[0][0]
+                # NOTE(laneL): a tie goes to the lower phase ID, as the
+                # docstring says.  ``most_common`` returned the phase of
+                # the first bulk vertex of the simplex, and in 2D the
+                # vertex order of ``iter_triangles_2d`` was ``id()`` order
+                # (memory addresses; ``HC.V`` order since lane T): the
+                # shearing-plate setup (10 tied triangles) gave other
+                # phase labels in some interpreters.
+                top = max(counts.values())
+                winner = min(p for p, c in counts.items() if c == top)
             else:
                 # All vertices are interface — use interface_phases
                 # from any vertex as fallback.
@@ -436,10 +455,46 @@ class MultiphaseSystem:
           interface tangent plane through ``v`` (see
           :func:`ddgclib.geometry._dual_split_3d.split_dual_polyhedron_3d`) —
           exact on locally planar interfaces, ``O(h^2)`` on curved ones.
+        - ``'simplex'`` (laneF 2026-10-05): the barycentric dual cell is
+          the union of its pieces in the incident top-simplices, one
+          ``|T| / (dim + 1)`` per simplex, and each piece belongs to the
+          phase the simplex is labelled with (:attr:`simplex_phase`, the
+          same labels that define the interface).  Sub-volume presence
+          then equals ``interface_phases``, so a one-cell-thick liquid
+          tongue whose vertices are all interface vertices keeps its
+          liquid sub-volume (under ``'neighbour_count'`` it reads zero:
+          no bulk neighbour).  The shares are rescaled to ``v.dual_vol``
+          (a no-op up to round-off on an interior cell and on a 2D half
+          cell; it zeroes a hull vertex whose cell the 3D retopology
+          zeroes), so the sub-volumes partition ``v.dual_vol`` under
+          either boundary convention.  Needs the top-simplex cache
+          ``HC._simplices`` (falls back to :func:`iter_top_simplices`).
 
         Sets ``v.dual_vol_phase[k]`` for every vertex.
         """
         n = self.n_phases
+        if method == 'simplex':
+            from math import factorial
+            for v in HC.V:
+                v.dual_vol_phase = np.zeros(n)
+            simplices = getattr(HC, '_simplices', None)
+            if not simplices:
+                simplices = iter_top_simplices(HC, dim)
+            for simplex in simplices:
+                k = self.simplex_phase.get(_simplex_key(simplex))
+                if k is None or not (0 <= k < n):
+                    continue
+                pts = np.array([u.x_a[:dim] for u in simplex], dtype=float)
+                share = (abs(float(np.linalg.det(pts[1:] - pts[0])))
+                         / factorial(dim) / (dim + 1))
+                for u in simplex:
+                    u.dual_vol_phase[k] += share
+            for v in HC.V:
+                total = float(v.dual_vol_phase.sum())
+                vol = float(getattr(v, 'dual_vol', 0.0))
+                if total > 0.0:
+                    v.dual_vol_phase *= vol / total
+            return
         if method == 'exact':
             if dim == 2:
                 from ddgclib.geometry._dual_split_2d import (
@@ -529,19 +584,25 @@ class MultiphaseSystem:
         """Compute per-phase pressures from per-phase density.
 
         For each phase *k* present at vertex *v*:
-            ``rho_k = m_k / dual_vol_phase_k``
+            ``rho_k = m_k / (vol_corr_k * dual_vol_phase_k)``
             ``p_k   = eos_k.pressure(rho_k)``
 
-        Sets ``v.p_phase[k]``, ``v.rho_phase[k]``, and ``v.p``
-        (which stores the **inner-phase** pressure for interface
-        vertices, or the single-phase pressure for bulk vertices).
+        ``vol_corr_k`` is the per-phase volume-gauge factor (exactly
+        1.0 unless the conservative retopology remap is active — see
+        :attr:`vol_corr`).
+
+        Sets ``v.p_phase[k]``, ``v.rho_phase[k]``, and ``v.p`` (the
+        single-phase pressure for bulk vertices; for interface vertices
+        the **mean of the phase pressures actually present** at *v* —
+        the shared convention implemented by
+        :func:`ddgclib.eos._multiphase_eos.interface_mean_pressure`).
         """
         for v in HC.V:
             for k in range(self.n_phases):
                 vol_k = v.dual_vol_phase[k]
                 m_k = v.m_phase[k]
                 if vol_k > 1e-30 and m_k > 1e-30:
-                    rho_k = m_k / vol_k
+                    rho_k = m_k / (self.vol_corr[k] * vol_k)
                     v.rho_phase[k] = rho_k
                     v.p_phase[k] = float(self.phases[k].eos.pressure(rho_k))
                 else:
@@ -553,12 +614,13 @@ class MultiphaseSystem:
             # interface vertices (v.phase == INTERFACE_PHASE) it is the
             # average of the phase pressures actually present at v.
             if getattr(v, 'is_interface', False) or v.phase < 0:
-                active = [
-                    v.p_phase[k]
-                    for k in v.interface_phases
-                    if 0 <= k < self.n_phases and v.p_phase[k] != 0.0
-                ]
-                v.p = float(np.mean(active)) if active else 0.0
+                # Shared convention (interface_mean_pressure): presence
+                # keyed on geometry/mass (mirroring the write-side gate
+                # above) — NOT on the pressure value: a phase with a
+                # legitimate 0.0 gauge pressure (P0=0, rho == rho0)
+                # must be included in the average (see
+                # docs_temp/audit/zero-gauge-pressure.md).
+                v.p = interface_mean_pressure(v, self.n_phases)
             else:
                 v.p = v.p_phase[v.phase]
 

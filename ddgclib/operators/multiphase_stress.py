@@ -80,15 +80,62 @@ def _phases_present(v, n_phases: int) -> list[int]:
     return sorted(int(k) for k in phases if 0 <= int(k) < n_phases)
 
 
-def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
-    """Return v.p_phase[k] if populated, else ``fallback``."""
+def _phase_present_at(v, k: int) -> bool:
+    """True if phase *k* is geometrically present at ``v``.
+
+    Presence is keyed on the per-phase dual sub-volume, never on the
+    stored pressure value: a gauge pressure of exactly ``0.0`` is a
+    legitimate physical value (e.g. ``TaitMurnaghan`` at ``P0=0`` with
+    ``rho == rho0``), so ``p_phase[k] == 0.0`` must NOT be read as
+    "phase absent" — that sentinel misread broke gauge invariance and
+    pairwise momentum conservation at the case-default ``P0=0`` (see
+    ``docs_temp/audit/zero-gauge-pressure.md``).  Falls back to
+    "stores a phase-k entry" when no per-phase dual volume is cached.
+    """
     p_phase = getattr(v, 'p_phase', None)
     if p_phase is None or k >= len(p_phase):
+        return False
+    dvp = getattr(v, 'dual_vol_phase', None)
+    if dvp is not None and k < len(dvp):
+        return float(dvp[k]) > 1e-30
+    return True
+
+
+def _phase_pressure(v, k: int, fallback: float = 0.0) -> float:
+    """Return ``v.p_phase[k]`` if phase *k* is present at v, else fallback.
+
+    Presence is geometric (:func:`_phase_present_at`); the stored value
+    is returned even when it is exactly ``0.0`` (legitimate at gauge
+    ``P0=0``).
+    """
+    if not _phase_present_at(v, k):
         return fallback
-    val = float(p_phase[k])
-    if val == 0.0:
-        return fallback
-    return val
+    return float(v.p_phase[k])
+
+
+#: Rules for a sub-face whose phase is present at neither end (method
+#: axis ``face_closure``), see :func:`multiphase_stress_force`.
+FACE_CLOSURES = ('skip', 'renormalise')
+
+
+def _close_fractions(fractions, present_i, present_j):
+    """Renormalise *fractions* over the phases present at either end.
+
+    ``present_i`` / ``present_j`` are ``k -> bool`` callables.  Returns
+    *fractions* itself when every listed phase is present at one end
+    (the common case, bit-identical to the old loop).  A sub-face whose
+    phase is present at neither end would otherwise be dropped from
+    both sides and leave the cell open by ``frac * A_ij``; its share
+    goes to the listed phases that are present, or, if none is, equally
+    to the phases present at either end.
+    """
+    keep = {k: f for k, f in fractions.items() if present_i(k) or present_j(k)}
+    if len(keep) == len(fractions):
+        return fractions
+    total = sum(keep.values())
+    if total > 0.0:
+        return {k: f / total for k, f in keep.items()}
+    return fractions
 
 
 def _face_viscosity_for_phase(
@@ -111,6 +158,8 @@ def multiphase_stress_force(
     HC=None,
     pressure_model=None,
     curvature_path: str = 'integrated',
+    area_orientation: str = 'primal_edge',
+    face_closure: str = 'renormalise',
 ) -> np.ndarray:
     """Integrated force on a dual cell with per-phase summed stress.
 
@@ -130,7 +179,27 @@ def multiphase_stress_force(
         Typically :class:`MultiphaseEOS` — updates ``v.p_phase`` in-place.
         Not called inside the per-phase loop; ``mps.refresh()`` is
         expected to have already populated ``v.p_phase``.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        Sign rule of the 2D dual face vectors
+        (:func:`ddgclib.operators.stress.dual_area_vector`); the method
+        axis ``area_orientation``.  The ``csf_dual`` curvature path reads
+        the default rule.
+    face_closure : {'renormalise', 'skip'}
+        What becomes of a sub-face whose phase (from the interface-tag
+        rule of ``edge_phase_area_fractions``) is present at NEITHER end
+        by sub-volume; the method axis ``face_closure``.  ``'skip'`` (the
+        behaviour until laneF 2026-10-05) drops it from both sides: the
+        cell is then open by ``frac * A_ij`` and the ABSOLUTE pressure
+        acts on the gap (dam break: a 50/50 interface edge between two
+        interface vertices that lost their last bulk liquid neighbour
+        in one flip gives ``F = P_atm * A_ij / 2 = 494 N`` on a 1.6e-4
+        kg cell).  ``'renormalise'`` gives its share to the listed phases
+        present at either end (:func:`_close_fractions`), so every cell
+        closes; bit-identical where nothing is dropped.
     """
+    if face_closure not in FACE_CLOSURES:
+        raise ValueError(f"face_closure must be one of {FACE_CLOSURES}, "
+                         f"got {face_closure!r}")
     n_phases = mps.n_phases
     has_p_phase = hasattr(v, 'p_phase')
     is_interface_i = bool(getattr(v, 'is_interface', False))
@@ -156,7 +225,7 @@ def multiphase_stress_force(
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
         else:
-            A_ij = dual_area_vector(v, v_j, HC, dim)
+            A_ij = dual_area_vector(v, v_j, HC, dim, area_orientation)
 
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
@@ -167,18 +236,45 @@ def multiphase_stress_force(
         fractions = edge_phase_area_fractions(
             v, v_j, dim=dim, interface=HC,
         )
+        if face_closure == 'renormalise':
+            fractions = _close_fractions(
+                fractions,
+                (lambda k: _phase_present_at(v, k)) if has_p_phase
+                else (lambda k: k in p_i_by_phase),
+                lambda k: _phase_present_at(v_j, k),
+            )
 
         for k, frac in fractions.items():
-            if k not in phases_present:
-                # Sub-face lies in a phase not present at v.  Skip the
-                # contribution rather than add spurious flux — this
-                # happens only for bulk-bulk cross-phase edges (a mesh
-                # artefact) where v has no mass/pressure in phase k.
+            # Presence at both ends is keyed on geometry (per-phase
+            # dual sub-volume), never on the stored pressure value or
+            # on possibly-stale interface tags, so that both endpoints
+            # of a face book the SAME face pressure (F_ij = -F_ji;
+            # see docs_temp/audit/multiphase-momentum.md).
+            present_i = (_phase_present_at(v, k) if has_p_phase
+                         else k in p_i_by_phase)
+            present_j = _phase_present_at(v_j, k)
+            if not present_i and not present_j:
+                # No phase-k material at either end of this sub-face:
+                # skip it from BOTH sides (symmetric, no spurious flux,
+                # but the cell is OPEN by frac * A_ij: face_closure=
+                # 'skip', laneF 2026-10-05).  Under 'renormalise' this
+                # fires only when no listed phase is present at either
+                # end, i.e. both cells are empty.
                 continue
 
             A_k = frac * A_ij
-            p_i_k = p_i_by_phase[k]
-            p_j_k = _phase_pressure(v_j, k, fallback=p_i_k)
+            if present_i:
+                p_i_k = (p_i_by_phase[k] if k in p_i_by_phase
+                         else float(v.p_phase[k]))
+                p_j_k = _phase_pressure(v_j, k, fallback=p_i_k)
+            else:
+                # Phase k absent at v but present at the neighbour:
+                # mirror the one-sided extrapolation the neighbour
+                # books on this face (face pressure = p_j at both
+                # ends), the exact counterpart of the fallback branch
+                # above.  The previous code skipped this sub-face
+                # one-sidedly, breaking pairwise antisymmetry.
+                p_i_k = p_j_k = float(v_j.p_phase[k])
             mu_k = _face_viscosity_for_phase(mps, v, v_j, k)
 
             F += pressure_flux(p_i_k, p_j_k, A_k)
@@ -229,7 +325,15 @@ def _interface_surface_tension(
           quantify how much of the residual is direction-mismatch vs.
           magnitude-mismatch on irregular meshes.  Not a replacement for
           ``'integrated'`` — does not converge to ``γ κ N`` at the same
-          order on smooth interfaces.
+          order on smooth interfaces.  Measured worse on the droplet
+          (laneM, 2026-10-05; METHODS.md axis ``curvature_path``).
+
+        The former ``'stokes'`` value (3D conormal boundary integral of
+        the interface over the barycentric dual cell) is gone: on a
+        piecewise-linear surface it is the gradient of the triangle
+        areas, i.e. the cotangent form, and it reproduced
+        ``'integrated'`` to 1e-15 on static and moving meshes at 3.5x
+        the cost (laneM).
     """
     interface_nbs = {nb for nb in v.nn if getattr(nb, 'is_interface', False)}
     if len(interface_nbs) < 2:
@@ -247,25 +351,13 @@ def _interface_surface_tension(
     if curvature_path == 'csf_dual':
         return _csf_dual_surface_tension(v, dim, gamma, HC, interface_nbs)
 
-    if curvature_path == 'stokes':
-        # Stokes-theorem boundary integral on the barycentric dual cell
-        # of v_i restricted to interface triangles.  3D only; 2D delegates
-        # to the existing FTC form which is already an exact Stokes
-        # discretisation on piecewise-linear curves.
-        if dim == 3:
-            from ddgclib._curvatures_heron import integrated_hndA_i_interface
-            F3 = integrated_hndA_i_interface(
-                v, interface_nbs | {v}, HC=HC, gamma=gamma,
-            )
-            return F3[:dim]
-        F = np.zeros(dim)
-        F[:2] = surface_tension_force_2d(v, gamma, interface_nbs)
-        return F
-
     if curvature_path != 'integrated':
+        # 'stokes' (the conormal boundary integral over the barycentric
+        # dual cell, 2026-05-27 to 2026-10-05) was the cotangent form to
+        # round-off on static and moving meshes and was removed (laneM).
         raise ValueError(
             f"Unknown curvature_path={curvature_path!r}; "
-            f"expected 'integrated', 'stokes', or 'csf_dual'."
+            f"expected 'integrated' or 'csf_dual'."
         )
 
     if dim == 3:
@@ -317,7 +409,7 @@ def _csf_dual_surface_tension(
     # sum of dual-face area vectors weighted by each face's interior-side
     # phase fraction.  For a 2-phase interface vertex with phase set
     # {0, 1}, "interior side" is the higher-phase index by convention.
-    from ddgclib.operators.stress import dual_area_vector
+    from ddgclib.operators.stress import edge_area_vector
     from ddgclib.geometry._dual_split_2d import edge_phase_area_fractions
     phases = sorted(int(k) for k in getattr(v, 'interface_phases', set()))
     if len(phases) < 2:
@@ -326,7 +418,9 @@ def _csf_dual_surface_tension(
 
     S_inner = np.zeros(dim)
     for v_j in v.nn:
-        A_ij = dual_area_vector(v, v_j, HC, dim)
+        # the face the per-phase pressure flux reads (cache, else the
+        # per-edge construction of the axis edge_area_source; laneQ)
+        A_ij = edge_area_vector(v, v_j, HC, dim)
         fractions = edge_phase_area_fractions(v, v_j, dim=dim, interface=HC)
         if inner_phase in fractions:
             S_inner += fractions[inner_phase] * A_ij[:dim]
@@ -349,11 +443,15 @@ def multiphase_stress_acceleration(
     HC=None,
     pressure_model=None,
     curvature_path: str = 'integrated',
+    area_orientation: str = 'primal_edge',
+    face_closure: str = 'renormalise',
 ) -> np.ndarray:
     """Acceleration from multiphase stress: a_i = F_i / m_i."""
     F = multiphase_stress_force(v, dim=dim, mps=mps, HC=HC,
                                 pressure_model=pressure_model,
-                                curvature_path=curvature_path)
+                                curvature_path=curvature_path,
+                                area_orientation=area_orientation,
+                                face_closure=face_closure)
     if v.m < 1e-30:
         return np.zeros(dim)
     return F / v.m

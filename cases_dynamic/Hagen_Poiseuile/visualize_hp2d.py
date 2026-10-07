@@ -1,7 +1,8 @@
 """
 Visualization for 2D Hagen-Poiseuille case study.
 
-Loads the final simulation state and periodic snapshots from results/,
+Loads the final simulation state and periodic snapshots from
+results/hagen_poiseuille_2D/ (written by Hagen_Poiseuile_2D.py),
 then generates all plots and animations.  Each field is plotted on its
 own separate figure for clarity.
 
@@ -41,7 +42,16 @@ from ddgclib.visualization import (
 )
 
 # Local parameters
-from src._params import L, r, G, mu, rho, D, U_avg, U_max
+# (shipped parameters of Hagen_Poiseuile_2D.py; needs the repository root
+# on the path: PYTHONPATH=../..)
+from cases_dynamic.Hagen_Poiseuile.src._run import CASES
+
+_CASE = CASES['hagen_poiseuille_2D']
+L, D, rho, mu = _CASE['L'], _CASE['D'], _CASE['rho'], _CASE['mu']
+U_avg, n_refine = _CASE['U_avg'], _CASE['n_refine']
+r = D / 2
+G = 12 * mu * U_avg / D**2      # planar Poiseuille carrying U_avg
+U_max = 1.5 * U_avg
 
 
 # ============ CONFIGURABLE ZOOM WINDOW ============
@@ -55,10 +65,11 @@ DPI = 150
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_HERE, 'fig')
-_RESULTS = os.path.join(_HERE, 'results')
+# outputs of Hagen_Poiseuile_2D.py (preset hagen_poiseuille_2D)
+_RESULTS = os.path.join(_HERE, 'results', 'hagen_poiseuille_2D')
+_SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 os.makedirs(_FIG, exist_ok=True)
 
-n_refine = 1  # must match simulation script
 d = 2
 
 
@@ -130,7 +141,7 @@ if os.path.exists(history_path):
 else:
     # Fall back: reconstruct from saved state JSON files
     print("Reconstructing history from state files...")
-    state_files = sorted(glob.glob(os.path.join(_RESULTS, 'state_*.json')))
+    state_files = sorted(glob.glob(os.path.join(_SNAPSHOTS, 'state_*.json')))
     if state_files:
         history = StateHistory(fields=['u', 'p'], record_every=1)
         for path in state_files:
@@ -157,7 +168,7 @@ else:
 # Plot 0: First timestep — confirm initial domain geometry
 # ============================================================
 print("Plotting first timestep mesh...")
-state_files_sorted = sorted(glob.glob(os.path.join(_RESULTS, 'state_*.json')))
+state_files_sorted = sorted(glob.glob(os.path.join(_SNAPSHOTS, 'state_*.json')))
 if state_files_sorted:
     HC_t0, bV_t0, meta_t0 = load_state(state_files_sorted[0])
     prepare_loaded_state(HC_t0, dim=d)
@@ -414,10 +425,10 @@ def create_dual_animation(state_dir, fig_dir, zoom_xlim, zoom_ylim,
         print("  PIL not available; dual GIF not compiled (frames saved)")
 
 
-state_files_exist = len(glob.glob(os.path.join(_RESULTS, 'state_*.json'))) >= 2
+state_files_exist = len(glob.glob(os.path.join(_SNAPSHOTS, 'state_*.json'))) >= 2
 if state_files_exist:
     print("Creating dual complex animation...")
-    create_dual_animation(_RESULTS, _FIG, ZOOM_XLIM, ZOOM_YLIM)
+    create_dual_animation(_SNAPSHOTS, _FIG, ZOOM_XLIM, ZOOM_YLIM)
 else:
     print("Skipping dual animation (no state files)")
 

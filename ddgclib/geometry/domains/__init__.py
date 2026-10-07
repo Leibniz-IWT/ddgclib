@@ -55,7 +55,7 @@ from ddgclib.geometry.domains._cylinders import cylinder_volume, pipe
 from ddgclib.geometry.domains._spheres import ball
 from ddgclib.geometry.domains._periodic import periodic_rectangle, periodic_box
 from ddgclib.geometry.domains._multiphase_droplet import (
-    droplet_in_box_2d, droplet_in_box_3d,
+    droplet_in_box_2d, droplet_in_box_3d, BOX_SHIFTS,
 )
 
 __all__ = [
@@ -72,5 +72,5 @@ __all__ = [
     # Periodic domains
     'periodic_rectangle', 'periodic_box',
     # Multiphase domains
-    'droplet_in_box_2d', 'droplet_in_box_3d',
+    'droplet_in_box_2d', 'droplet_in_box_3d', 'BOX_SHIFTS',
 ]

@@ -35,8 +35,15 @@ L = 4.0 * a     # tank width along flow axis (x)
 H = 2.0 * a     # tank height along gravity axis (y)
 
 # Water column dimensions (lower-left corner of tank)
+#
+# NOTE(laneF-geometry): col_h was 2.0*a, which equals the tank height H
+# — the "column" filled the tank lid-to-floor with NO air above it (the
+# docstring diagram shows the column top at y=a with air above).  A
+# full-height slab pinned between the frozen floor and lid rows cannot
+# collapse as a dam break.  col_h = a restores the documented square
+# Martin–Moyce column with headspace.
 col_w = a       # width  (x direction)
-col_h = 2.0 * a # height (y direction)  -- classic 2:1 aspect dam
+col_h = a       # height (y direction)  -- square column, top at y = a < H
 
 # 3D depth (out-of-plane)
 W = 2.0 * a     # depth of the tank in z (3D cases)
@@ -88,7 +95,21 @@ K_g = rho_g * c_s**2                 # bulk modulus (gas) -- stiff enough to
 # Hydrostatic_column case and add an SPH-style artificial viscosity
 # ``mu_art = alpha * rho * c_s * dx`` on top of the physical viscosity
 # to damp those modes.  ``alpha = 0`` disables artificial viscosity.
-alpha_art = 2.0
+#
+# NOTE(laneF-alpha): default 2.0 -> 0.3 on the 2026-07-30 sweep.  At
+# alpha=2.0 the effective liquid viscosity is ~276 Pa s (276,000x
+# water): the collapse creeps at |u| ~ 0.015 m/s, the front moves
+# 1/8 of an edge length over 10x the shipped horizon, and Delaunay
+# reconnection NEVER fires — the case cannot demonstrate the physics
+# it exists for.  Sweep (refine 3, t_end 0.2, remap ON): 0.5 survives
+# (|u| 0.059, 2 flips), 0.4 survives (0.076, 2 flips), 0.3 survives
+# the full horizon with 6 reconnection events absorbed (|u| 0.112,
+# front +36% of col_w, KE rise-then-fall), 0.2 aborts at t=0.16,
+# 0.1 aborts at t=0.094 (air sliver-cell F/m ejection at reconnection
+# — the corner-vertex defect this crutch papers over).  0.3 is the
+# smallest surviving value; without the conservative retopo remap the
+# same alpha=0.3 run blows up at t=0.125.
+alpha_art = 0.3
 
 
 # =====================================================================
@@ -98,14 +119,16 @@ alpha_art = 2.0
 # Characteristic timescale of a dam break
 t_ref = np.sqrt(col_h / g)           # ~ 0.1 s for col_h = 0.1 m
 
-# End time (target).  The full dam break traversal would be
-# ``4 * t_ref ~ 0.4 s`` but the multiphase DDG pipeline currently
-# develops spurious accelerations at free-surface / interface corners
-# (see FEATURES.md "AMR remeshing" and "multiphase dual volume
-# splitting" sections).  A short default run is used here so the case
-# runs end-to-end out of the box; increase ``t_end`` and tune
-# ``alpha_art`` / ``n_refine`` for production runs.
-t_end = 0.02                         # ~ 0.2 * t_ref
+# End time.  NOTE(laneF-horizon): 0.02 -> 0.2 (~2.8 t_ref).  The old
+# 0.02 s horizon was 1/8 of the gravity ramp time — no configuration
+# can show a collapse there.  0.2 s is the horizon the laneF remap
+# A/B and endurance runs measured clean (KE peak at t ~ 0.05 then
+# decay; mass drift ~ 6e-15; reconnection events absorbed by
+# ``retopo_remap='conservative'``).  The air-side sliver-cell F/m
+# ejection defect (laneF log §4) still bounds refine=4 runs and
+# alpha_art <= 0.2 — fix that before pushing to ``4 * t_ref`` or
+# finer meshes.
+t_end = 0.2                          # ~ 2.8 * t_ref
 
 # CFL safety factor
 cfl = 0.1

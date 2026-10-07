@@ -36,6 +36,7 @@ Usage
               bc_set=bc_set, mu=8.9e-4, HC=HC)
 """
 
+import functools
 import inspect
 import os
 
@@ -45,11 +46,51 @@ from scipy.integrate import solve_ivp
 
 # Helpers
 
+# NOTE(laneL): measured on a channel (rectangle(L=2, h=1), walls y = 0, 1).
+# One adaptive retopology splits wall edges and the 8 new wall-line
+# vertices are not members (10 of 18 frozen against 18 of 18 under 'hull');
+# with 7 members off the hull, adaptive_remesh moved up to 7 of them
+# (Laplacian smoothing, up to 1.7e-01) and removed up to 5 (edge collapse).
+_MEMBERSHIP_ADAPTIVE_MSG = (
+    "frozen_set='membership' is not implemented with remesh_mode='adaptive': "
+    "hyperct.remesh protects vertices by the topological tag v.boundary, "
+    "not by bV, so a vertex created by splitting a wall edge is not a "
+    "member (it is integrated and leaves the wall) and a member that is "
+    "off the hull is collapsed and smoothed like an interior vertex"
+)
+
+
+# NOTE(laneH): the ``backend`` kwarg of the integrators (method axis
+# ``backend``) is a NAME, while hyperct's batch_e_star calls methods of a
+# backend INSTANCE: a name used to end in "'str' object has no attribute
+# 'batch_cross_areas'" at the first 3D retopology.  One instance per name,
+# because the multiprocessing backend owns a pool.
+_BACKEND_INSTANCES = {}
+
+# Values of the 3D method axis ``edge_area_source`` (laneQ); see
+# ``_retopologize``.  None = the legacy 'e_star_cache'.
+_EDGE_AREA_SOURCES = (None, 'e_star_cache', 'p_ij', 'p_ij_simplex',
+                      'p_ij_ring')
+
+
+def _resolve_backend(backend):
+    """Backend name -> ``hyperct._backend`` instance (cached).  ``None``
+    and instances pass through."""
+    if not isinstance(backend, str):
+        return backend
+    if backend not in _BACKEND_INSTANCES:
+        from hyperct._backend import get_backend
+        _BACKEND_INSTANCES[backend] = get_backend(backend)
+    return _BACKEND_INSTANCES[backend]
+
+
 def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   periodic_axes=None, domain_bounds=None, backend=None,
                   skip_triangulation=False,
                   pressure_model=None, redistribute_mass=False,
-                  remesh_mode='delaunay', remesh_kwargs=None):
+                  remesh_mode='delaunay', remesh_kwargs=None,
+                  retopo_remap=None, frozen_set='hull',
+                  edge_area_source=None):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -82,6 +123,11 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         When set, delegates to :func:`retopologize_periodic`.
     domain_bounds : list[tuple[float, float]] or None
         Domain extent per axis.  Required when *periodic_axes* is set.
+    backend : str, backend instance or None
+        Backend of the 3D ``batch_e_star`` call that fills the edge-area
+        cache: a name of ``hyperct._backend.get_backend`` (``'torch'``,
+        ``'gpu'``, ``'multiprocessing'``), an instance, or ``None``
+        (numpy).  Not read in 1D / 2D.
     skip_triangulation : bool
         If True, skip the disconnect/retriangulate steps (1-2) and keep
         the existing connectivity.  Boundary tagging, dual mesh
@@ -110,6 +156,98 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         Extra keyword arguments forwarded to
         :func:`hyperct.remesh.adaptive_remesh` (e.g. ``L_min``,
         ``L_max``, ``alpha_max``, ``quality_target_deg``).
+    retopo_remap : {None, 'conservative'}
+        Single-phase conservative remap of the thermodynamic state across
+        the connectivity rebuild (default ``None``: previous behaviour,
+        bit-identical).  A reconnection changes the barycentric dual
+        volume of a vertex by 33-100 % at fixed positions; with masses
+        held the EOS reads that as compression and the run blows up at
+        any time step (laneK).  ``'conservative'`` makes the pressure
+        field invariant across the rebuild:
+
+        1. snapshot ``p_i = eos(m_i / Vol_i)`` with ``Vol_i`` re-measured
+           on the OLD connectivity at the current positions
+           (:func:`~ddgclib.operators.mass_redistribution.snapshot_pressure_fresh`),
+           so the step's physical compression is kept;
+        2. rebuild connectivity and duals;
+        3. re-target the mass of EVERY vertex with a dual volume,
+           frozen boundary vertices included, to that pressure and
+           rescale once so total mass is conserved exactly.
+
+        Requires *pressure_model* (an EOS with ``.density``) and
+        ``redistribute_mass=True``; no-op when *skip_triangulation* is
+        True; not available on the periodic path.  The multiphase
+        counterpart is ``_retopologize_multiphase(retopo_remap=...)``.
+        See docs_temp/debug_session/laneK-single-phase-eos-instability.md.
+    frozen_set : {'hull', 'membership'}
+        Which vertices end up in *bV*, the set the integrators do not
+        move (method axis ``frozen_set``).
+
+        - ``'hull'`` (default: previous behaviour, bit-identical): *bV*
+          is rebuilt from the topological boundary of this call's
+          connectivity, narrowed by *boundary_filter*.  Nothing keeps a
+          vertex behind a wall, and one vertex that steps past a straight
+          wall takes the wall vertices next to it off the hull, i.e. out
+          of *bV*: the wall is integrated and collapses (audit
+          2026-09-25, F10 C1).
+        - ``'membership'``: *bV* is persistent.  This call keeps the
+          members that are still in the complex and, if *boundary_filter*
+          is given, pass it (that is how a runner's initial "whole hull"
+          set is narrowed to the walls).  It never adds a vertex because
+          it is on the hull and never drops one because it is not.
+          ``v.boundary``, which ``compute_vd`` needs for the half cells,
+          still follows the topological boundary, so the two sets are
+          no longer the same:
+
+          * a hull vertex that is not a member (inlet, outlet, free
+            surface, a vertex that left through a wall) is tagged, gets
+            a half cell and is integrated;
+          * a member that the hull no longer contains stays frozen and
+            gets a closed dual cell;
+          * a vertex that reaches a wall is not captured here.  That is
+            the decision of a BC that holds *bV*
+            (``PositionalNoSlipWallBC(bV=bV)`` adds what meets its
+            criterion, and the addition now persists).
+
+          With *skip_triangulation* the boundary tag is read from the
+          kept connectivity instead of being carried in *bV*.  In 3D a
+          vertex whose dual fan fails is tagged and zero-volumed as
+          before but not frozen.  Not available on the periodic path
+          and not with ``remesh_mode='adaptive'`` (both raise):
+          ``hyperct.remesh`` knows the topological tag ``v.boundary``
+          only, so a vertex it creates by splitting a wall edge is not
+          a member, and a member off the hull is collapsed and
+          smoothed like an interior vertex.
+          See docs_temp/debug_session/laneL-frozen-set-membership.md.
+    edge_area_source : {None, 'e_star_cache', 'p_ij', 'p_ij_simplex', 'p_ij_ring'}
+        Source of the oriented dual face area vectors ``A_ij`` the force
+        operators read in 3D (method axis ``edge_area_source``, laneQ);
+        not read in 1D / 2D.  ``HC._edge_area_source`` records the value
+        that ran.
+
+        - ``None`` / ``'e_star_cache'`` (previous behaviour, bit-identical):
+          ``HC._edge_area_cache`` holds the ``batch_e_star(orient=True)``
+          fan areas of every edge at an interior vertex; the fan walk also
+          promotes a vertex whose dual fan fails to the boundary.  Edges
+          outside the cache (hull vertices) read the legacy ring walk.
+          Not linearly precise (laneJ: 3 to 25 % at the droplet cells).
+        - ``'p_ij_simplex'``: ``HC._edge_area_cache`` holds the exact
+          barycentric dual face of every directed edge of every vertex,
+          hull included, from ``hyperct.ddg.simplex_dual_face_areas`` (one
+          vectorised pass over ``HC._simplices``; needs the simplex cache
+          and barycentric duals).  No fan walk runs, so no fan-failure
+          promotion happens.
+        - ``'p_ij'``: no cache; every edge is built on demand from the
+          tetrahedra around it (``stress._dual_area_vector_3d_simplex``,
+          the same polygon, uncached).
+        - ``'p_ij_ring'``: no cache; every edge from the legacy ring walk
+          with its nearest-barycentre face heuristic (status broken:
+          laneJ F4b, laneT tie on hull edges).  Kept so that laneJ's
+          ``p_ij`` arm and every pre-laneQ number of a cache-less path
+          can be reproduced.
+
+        The dual volumes do not depend on the value (exact simplex
+        volumes whenever ``HC._simplices`` exists).
 
     Steps:
         0. (Optional) Merge close vertices via ``HC.V.merge_all``
@@ -120,6 +258,44 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         3. Tag ``v.boundary`` on all vertices
         4. Recompute barycentric dual mesh via ``compute_vd``
     """
+    if retopo_remap not in (None, 'conservative'):
+        raise ValueError(
+            f"retopo_remap must be None or 'conservative', "
+            f"got {retopo_remap!r}"
+        )
+    if frozen_set not in ('hull', 'membership'):
+        raise ValueError(
+            f"frozen_set must be 'hull' or 'membership', got {frozen_set!r}"
+        )
+    membership = frozen_set == 'membership'
+    if membership and periodic_axes:
+        raise ValueError(
+            "frozen_set='membership' is not implemented on the periodic "
+            "retopology path"
+        )
+    if edge_area_source not in _EDGE_AREA_SOURCES:
+        raise ValueError(
+            f"edge_area_source must be one of {_EDGE_AREA_SOURCES}, got "
+            f"{edge_area_source!r}")
+    if edge_area_source is not None and (dim != 3 or periodic_axes):
+        raise ValueError(
+            "edge_area_source is a 3D axis of the non-periodic retopology "
+            f"(dim={dim}, periodic_axes={periodic_axes!r})")
+    if membership and remesh_mode == 'adaptive' and not skip_triangulation:
+        raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
+    remap_active = retopo_remap == 'conservative' and not skip_triangulation
+    if remap_active:
+        if periodic_axes:
+            raise ValueError(
+                "retopo_remap='conservative' is not implemented on the "
+                "periodic retopology path"
+            )
+        if not (redistribute_mass and hasattr(pressure_model, 'density')):
+            raise ValueError(
+                "retopo_remap='conservative' requires redistribute_mass=True "
+                "and an EquationOfState pressure_model"
+            )
+
     # Dispatch to periodic path if periodic_axes is set
     if periodic_axes:
         from ddgclib.geometry.periodic import retopologize_periodic
@@ -138,7 +314,15 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
 
     # Snapshot pressure field before topology change (for mass redistribution)
     _p_snap = None
-    if redistribute_mass and pressure_model is not None:
+    if remap_active:
+        # NOTE(laneR): fresh snapshot on the OLD connectivity at the
+        # current positions, not the stale v.p of the last force
+        # evaluation (which would erase this step's compression).
+        from ddgclib.operators.mass_redistribution import (
+            snapshot_pressure_fresh,
+        )
+        _p_snap = snapshot_pressure_fresh(HC, dim, pressure_model)
+    elif redistribute_mass and pressure_model is not None:
         from ddgclib.operators.mass_redistribution import snapshot_pressure
         _p_snap = snapshot_pressure(HC)
 
@@ -161,15 +345,31 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             # propagate so the user sees a clear error rather than a
             # silent fallback to Delaunay.
             from hyperct.remesh import adaptive_remesh
-            from hyperct.ddg import invalidate_simplex_cache
+            from hyperct.ddg import (
+                invalidate_simplex_cache,
+                rebuild_simplex_cache_2d,
+            )
             adaptive_remesh(HC, dim=dim, **(remesh_kwargs or {}))
             # Adaptive remesh mutates connectivity locally without going
             # through connect_and_cache_simplices, so the simplex cache
-            # (if any) is stale.  Drop it so subsequent boundary +
-            # compute_vd calls fall back cleanly to the 1-skeleton path.
-            invalidate_simplex_cache(HC)
-            # Recompute boundary from the updated connectivity.
-            dV = HC.boundary()
+            # (if any) is stale.  In 2D, REBUILD it from the updated
+            # 1-skeleton (ghost-K3 filtered) instead of dropping it:
+            # losing the cache silently downgrades compute_vd, boundary
+            # tagging and the exact dual volumes to the 1-skeleton
+            # fallbacks, which pumps kinetic energy into dynamic runs
+            # (adaptive KE tail 4.4x -> ~1x on the oscillating droplet,
+            # lane4-remesh-upstream 2026-07-02).
+            if dim == 2:
+                rebuild_simplex_cache_2d(HC)
+            else:
+                invalidate_simplex_cache(HC)
+            # Recompute boundary — prefer the exact simplex-aware path
+            # (parity with the Delaunay branch below).
+            if getattr(HC, '_simplices', None) is not None:
+                from hyperct.ddg import boundary_from_simplices
+                dV = boundary_from_simplices(HC, dim)
+            else:
+                dV = HC.boundary()
         else:
             # 1. Disconnect ALL existing edges
             for v in verts:
@@ -196,6 +396,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                 dV = boundary_from_simplices(HC, dim)
             else:
                 dV = HC.boundary()
+    elif membership:
+        # NOTE(laneL): bV is the frozen set here, not the boundary, so
+        # the boundary of the kept connectivity is read, not carried.
+        if getattr(HC, '_simplices', None) is not None:
+            from hyperct.ddg import boundary_from_simplices
+            dV = boundary_from_simplices(HC, dim)
+        else:
+            dV = HC.boundary()
     else:
         # skip_triangulation: keep existing connectivity,
         # use current bV as the boundary set
@@ -211,19 +419,77 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
 
     # 5b. Cache dual volumes and oriented edge areas for FVM operators.
     #     Use batch_e_star when available (vectorized, supports GPU backend).
+    if dim == 3:
+        # outside the try: a backend that cannot be imported must raise,
+        # not fall back to the other volume / edge-area source below
+        backend = _resolve_backend(backend)
     try:
         from hyperct.ddg import batch_e_star
         interior = [v for v in HC.V if v not in dV]
-        edge_areas, failed, vols = batch_e_star(
-            interior, HC, dim=dim, backend=backend,
-            orient=True, compute_volumes=True,
-        )
+        if dim == 3 and edge_area_source == 'p_ij_simplex':
+            # NOTE(laneQ): exact dual faces of every edge in one pass over
+            # the simplex cache; no fan walk, so nothing is promoted.
+            from hyperct.ddg import simplex_dual_face_areas
+            from ddgclib.operators.stress import (
+                _use_exact_barycentric_volume,
+            )
+            if not _use_exact_barycentric_volume(HC):
+                raise ValueError(
+                    "edge_area_source='p_ij_simplex' needs HC._simplices "
+                    "with barycentric duals")
+            edge_areas = simplex_dual_face_areas(HC, dim)
+            failed, vols = set(), {}
+        else:
+            edge_areas, failed, vols = batch_e_star(
+                interior, HC, dim=dim, backend=backend,
+                orient=True, compute_volumes=True,
+            )
         for v in failed:
             v.boundary = True
             dV.add(v)
-        for v in HC.V:
-            v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
-        HC._edge_area_cache = edge_areas
+        # NOTE(lane3-dual-volume): in 3D, prefer the exact
+        # simplex-container volumes (hyperct.ddg.simplex_dual_volumes,
+        # Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|) over batch_e_star's
+        # fan-walk volumes, which undercount 1-4% interior on
+        # unstructured 3D meshes (docs_temp/audit/dual-volume-3d.md).
+        # Enabled 2026-07-29 together with the matching
+        # cache_dual_volumes/dual_volume dim==3 branches in stress.py
+        # (mixed volume sources across setup/retopo create a
+        # first-retopo pressure jump) and the canonical 3D qhull input
+        # order in hyperct connect_and_cache_simplices
+        # (NOTE(laneA-canonical-order), kills the order-dependent
+        # settle-step artifact); the pinned 3D static-droplet
+        # retopology floor was re-pinned 7.3768e-5 -> 7.274172e-5
+        # accordingly (the switch alone measures 7.616854e-5: the
+        # exact measure honestly reports the larger settle-step volume
+        # jump that the redistribution rescale converts into a uniform
+        # pressure offset).  2D keeps
+        # batch_e_star's volumes here (bit-identical to the validated
+        # 2D baseline; the 2D fan walk is exact on interior vertices).
+        # Boundary zeroing convention preserved in both paths.  See
+        # docs_temp/debug_session/lane3-exact-dual-volumes.md.
+        exact_vols = None
+        if dim == 3:
+            from ddgclib.operators.stress import (
+                _use_exact_barycentric_volume,
+            )
+            if _use_exact_barycentric_volume(HC):
+                from hyperct.ddg import simplex_dual_volumes
+                exact_vols = simplex_dual_volumes(HC, dim)
+        if exact_vols is not None:
+            for v in HC.V:
+                v.dual_vol = exact_vols.get(v, 0.0) if v not in dV else 0.0
+        else:
+            for v in HC.V:
+                v.dual_vol = vols.get(id(v), 0.0) if v not in dV else 0.0
+        if edge_area_source in ('p_ij', 'p_ij_ring'):
+            # NOTE(laneQ): uncached sources (laneJ's no_cache wrapper):
+            # the force reads dual_area_vector on every edge.
+            HC._edge_area_cache = None
+        else:
+            HC._edge_area_cache = edge_areas
+        if dim == 3:
+            HC._edge_area_source = edge_area_source or 'e_star_cache'
     except (ImportError, NotImplementedError):
         from ddgclib.operators.stress import cache_dual_volumes
         cache_dual_volumes(HC, dim)
@@ -232,7 +498,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     # 6. Populate bV — controls which vertices are frozen (excluded
     #    from integration).  When boundary_filter is set, only matching
     #    vertices (e.g. walls) are frozen; the rest remain interior.
-    if boundary_filter is not None:
+    if membership:
+        # NOTE(laneL): persistent wall membership.  The hull of this
+        # rebuild decides v.boundary (above) but not who is frozen: a
+        # member stays frozen when it is off the hull, and a hull vertex
+        # that is not a member is integrated.
+        dV = {v for v in bV if HC.V.cache.get(v.x) is v
+              and (boundary_filter is None or boundary_filter(v))}
+    elif boundary_filter is not None:
         dV = {v for v in dV if boundary_filter(v)}
     bV.clear()
     bV.update(dV)
@@ -242,9 +515,17 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         from ddgclib.operators.mass_redistribution import (
             redistribute_mass_single_phase,
         )
-        redistribute_mass_single_phase(
-            HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
-        )
+        if remap_active:
+            # NOTE(laneR): frozen (bV) vertices are re-targeted too; the
+            # interior-only remap leaves the wall-cell flip jumps in.
+            redistribute_mass_single_phase(
+                HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
+                include_frozen=True,
+            )
+        else:
+            redistribute_mass_single_phase(
+                HC, dim, pressure_model, bV=bV, pressure_snapshot=_p_snap,
+            )
 
 
 def _displacement_gate_should_skip(HC, displacement_eps):
@@ -292,7 +573,7 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
-                     displacement_eps=None):
+                     displacement_eps=None, edge_area_source=None):
     """Dispatch topology management to custom or default function.
 
     Parameters
@@ -304,8 +585,14 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
           default.  ``remesh_mode`` and ``remesh_kwargs`` are forwarded
           as keyword arguments when the callable accepts them (detected
           via :mod:`inspect`), so existing 3-arg closures remain
-          backward-compatible.  Useful for surface meshes where
-          Delaunay/compute_vd don't apply, or for
+          backward-compatible.  The remaining retopology kwargs of this
+          function (``skip_triangulation``, ``boundary_filter``,
+          ``merge_cdist``, ``backend``, ``periodic_axes``,
+          ``domain_bounds``, ``pressure_model``, ``redistribute_mass``)
+          are forwarded only when the callable declares them by name
+          and a :func:`functools.partial` chain does not already bind
+          them (explicit partial bindings win).  Useful for surface
+          meshes where Delaunay/compute_vd don't apply, or for
           :func:`_retopologize_multiphase` wrappers.
     merge_cdist : float or None
         Forwarded to :func:`_retopologize`.  See its docstring.
@@ -315,8 +602,11 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
         Forwarded to :func:`_retopologize`.
     skip_triangulation : bool
         If True, skip Delaunay retriangulation but still recompute duals
-        and dual volumes.  Forwarded to :func:`_retopologize`.
-        Ignored when *retopologize_fn* is a callable or False.
+        and dual volumes.  Forwarded to :func:`_retopologize`, and to a
+        callable *retopologize_fn* that declares the parameter by name
+        (unless the callable is a :func:`functools.partial` that already
+        binds it — explicit partial bindings always win).  Ignored when
+        *retopologize_fn* is False.
     pressure_model : EquationOfState or None
         Forwarded to :func:`_retopologize` for mass redistribution.
     redistribute_mass : bool
@@ -344,6 +634,9 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
 
         Suggested first cut for dynamic runs: ``1e-4 * h_min`` where
         ``h_min`` is the minimum edge length.
+    edge_area_source : str or None
+        Forwarded to :func:`_retopologize` (and, by name, to a callable
+        *retopologize_fn* that declares it).  See its docstring.
     """
     if retopologize_fn is False:
         return
@@ -369,6 +662,38 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                 extra['remesh_mode'] = remesh_mode
             if accepts_var_kw or 'remesh_kwargs' in params:
                 extra['remesh_kwargs'] = remesh_kwargs
+            # NOTE(laneF-forward): keywords already bound in a
+            # functools.partial chain are the case's explicit retopo
+            # configuration (e.g. dual_only wrappers bind
+            # skip_triangulation=True in the partial) and must never be
+            # overridden by the integrator-level values.
+            bound_kw = set()
+            fn = retopologize_fn
+            while isinstance(fn, functools.partial):
+                bound_kw.update((fn.keywords or {}).keys())
+                fn = fn.func
+            # NOTE(laneF-forward): these integrator kwargs used to be
+            # silently DROPPED for callable retopo_fns — the shipped dam
+            # break ran per-step full Delaunay despite passing
+            # skip_triangulation=True (laneD §2.3).  Forward them when
+            # the callable declares them BY NAME (not into **kwargs
+            # sinks, which legacy dual-only closures use to ignore
+            # unknown keys) and the name is not partial-bound.
+            for name, value in (
+                ('skip_triangulation', skip_triangulation),
+                ('boundary_filter', boundary_filter),
+                ('merge_cdist', merge_cdist),
+                ('backend', backend),
+                ('periodic_axes', periodic_axes),
+                ('domain_bounds', domain_bounds),
+                ('pressure_model', pressure_model),
+                ('redistribute_mass', redistribute_mass),
+                ('edge_area_source', edge_area_source),
+            ):
+                if (name in params and name not in bound_kw
+                        and params[name].kind is not
+                        inspect.Parameter.VAR_KEYWORD):
+                    extra[name] = value
         except (ValueError, TypeError):
             pass  # C-builtins, partials without __signature__, etc.
         retopologize_fn(HC, bV, dim, **extra)
@@ -382,7 +707,8 @@ def _do_retopologize(HC, bV, dim, boundary_filter=None, retopologize_fn=None,
                       pressure_model=pressure_model,
                       redistribute_mass=redistribute_mass,
                       remesh_mode=remesh_mode,
-                      remesh_kwargs=remesh_kwargs)
+                      remesh_kwargs=remesh_kwargs,
+                      edge_area_source=edge_area_source)
 
     if displacement_eps is not None and displacement_eps > 0:
         _snapshot_retopo_positions(HC)
@@ -393,7 +719,12 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              skip_triangulation=False,
                              redistribute_mass=False,
                              remesh_mode='delaunay', remesh_kwargs=None,
-                             split_method='neighbour_count'):
+                             split_method='neighbour_count',
+                             retopo_remap=None,
+                             projection_every=1,
+                             frozen_set='hull',
+                             edge_area_source=None,
+                             phase_ledger='volume'):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -431,25 +762,192 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         adaptive driver.
     remesh_kwargs : dict or None
         Extra keyword arguments forwarded to the adaptive driver.
+    retopo_remap : {None, 'conservative'}
+        Opt-in conservative remap of the thermodynamic state across the
+        connectivity rebuild (default ``None`` — previous behaviour,
+        bit-identical).  ``'conservative'`` makes the pressure field
+        exactly invariant across the rebuild: since vertex positions
+        are frozen inside this call, any change the reconnection makes
+        to measured dual volumes is a measurement artifact, not a
+        physical compression, and must not enter the EOS.  Two stages:
+
+        1. Physical update on the OLD connectivity — the validated
+           dual-only per-step sequence (dual refresh at the current
+           positions, per-phase split, pressure-preserving mass
+           redistribution, EOS pressures).
+        2. Connectivity rebuild forced pressure-neutral — full
+           retriangulation + refresh + redistribution against the
+           stage-1 snapshot (per-vertex inertia consistent with the
+           new dual cells, exact per-phase mass conservation), then
+           :func:`restore_pressure_multiphase` cancels the residual
+           uniform per-phase offset ``~K_k*(scale_k - 1)`` that the
+           global mass-conservation rescale would otherwise inject as
+           a per-step interface jolt (see
+           docs_temp/debug_session/laneD-conservative-retopo-remap.md).
+
+        Requires *mps* and ``redistribute_mass=True``; no-op when
+        *skip_triangulation* is True (nothing to remap).
+    projection_every : int
+        Cadence of the pressure-structure PROJECTION — the step where
+        per-phase masses are re-targeted to reproduce the *pre-call*
+        pressure snapshot (``redistribute_mass_multiphase`` against the
+        field of the previous step).  Default 1 preserves the previous
+        every-call behaviour bit-exactly.
+
+        NOTE(laneH 2026-07-30): applied every call, the projection
+        erases each step's local EOS compression response, so the
+        pressure STRUCTURE can never evolve and the interface relaxes
+        far too fast (2D droplet l=2 amplitude decay 3-4x the
+        analytical rate; l2 0.17479 on the pinned benchmark).  With
+        ``projection_every=N`` (N in 5..20, saturated dose-response)
+        the local compression response accumulates between projection
+        calls while the occasional projection still damps the spurious
+        acoustic launch transient (the ``redistribute_mass=False``
+        end-member rings at KE ~1000x the mode level): benchmark l2
+        drops to 0.0363 and the trajectory lands on the exact two-fluid
+        reference to ~2% (l2_two_fluid 0.0203, KE-shape correlation
+        0.997).  See docs_temp/debug_session/laneH-2d-over-decay.md.
+
+        Cadence semantics per path:
+
+        - ``skip_triangulation=True`` (dual_only): the redistribution
+          block simply does not run on off-cadence calls (mass stays
+          Lagrangian; duals/splits/EOS pressures still refresh).
+        - ``retopo_remap='conservative'``: the remap machinery runs on
+          EVERY call (reconnection neutrality is not optional), but on
+          off-cadence calls the snapshot that redistribution/restore
+          reproduce is taken AFTER the stage-1 dual refresh at the new
+          positions — the physically EVOLVED field — instead of before
+          the call, so only the connectivity-rebuild artifact is
+          projected out, not the step's compression response.
+        - plain Delaunay without the remap: ``projection_every > 1``
+          raises — skipping redistribution while reconnection fires
+          re-opens the KE pump (lane-5 measured mechanism).
+
+        Requires *mps* and ``redistribute_mass=True`` when > 1.  The
+        call counter lives on ``mps._projection_call_idx`` (the first
+        call always projects).
+    frozen_set : {'hull', 'membership'}
+        Forwarded to every :func:`_retopologize` call of this function
+        (default ``'hull'``: previous behaviour).  See its docstring.
+        ``'membership'`` with ``remesh_mode='adaptive'`` raises.
+    edge_area_source : str or None
+        Forwarded to every :func:`_retopologize` call of this function
+        (3D source of the dual face areas; default ``None``: previous
+        behaviour).  See its docstring.
+    phase_ledger : {'snapshot', 'volume', 'adopt'}
+        What the per-phase redistribution does with a phase that
+        appears at or disappears from a vertex across the rebuild
+        (method axis ``phase_ledger``; ``ledger=`` of
+        :func:`~ddgclib.operators.mass_redistribution.redistribute_mass_multiphase`).
+        ``'snapshot'`` (default, previous behaviour): the new phase gets
+        no mass and reads ``p_phase = 0`` absolute, a pressure hole of
+        ``P0`` that ejects the neighbouring cell at atmospheric
+        reference pressure (laneF 2026-10-05).  ``'volume'``: the new
+        phase is targeted at the local pressure and a lost phase
+        releases its mass, inside the exact per-phase conservation;
+        under the remap the restore keeps the adopted pressure.
+        ``'adopt'``: the same for a new phase, a lost phase keeps its
+        mass as inertia.
     """
+    if retopo_remap not in (None, 'conservative'):
+        raise ValueError(
+            f"retopo_remap must be None or 'conservative', "
+            f"got {retopo_remap!r}"
+        )
+    if phase_ledger not in ('snapshot', 'volume', 'adopt'):
+        raise ValueError(
+            f"phase_ledger must be 'snapshot', 'volume' or 'adopt', got "
+            f"{phase_ledger!r}"
+        )
+    if (frozen_set == 'membership' and remesh_mode == 'adaptive'
+            and not skip_triangulation):
+        # Refuse before the remap's first stage touches anything.
+        raise ValueError(_MEMBERSHIP_ADAPTIVE_MSG)
+    remap_active = (retopo_remap == 'conservative'
+                    and not skip_triangulation and mps is not None)
+    if remap_active and not redistribute_mass:
+        raise ValueError(
+            "retopo_remap='conservative' requires redistribute_mass=True"
+        )
+    if not (isinstance(projection_every, int) and projection_every >= 1):
+        raise ValueError(
+            f"projection_every must be an int >= 1, got {projection_every!r}"
+        )
+    project_now = True
+    if projection_every > 1:
+        if mps is None or not redistribute_mass:
+            raise ValueError(
+                "projection_every > 1 requires mps and "
+                "redistribute_mass=True"
+            )
+        if not (skip_triangulation or remap_active):
+            raise ValueError(
+                "projection_every > 1 under active Delaunay reconnection "
+                "requires retopo_remap='conservative': skipping the "
+                "redistribution while connectivity reconnects re-opens "
+                "the per-rewire KE pump (lane-5 measured mechanism)"
+            )
+        _idx = getattr(mps, '_projection_call_idx', 0)
+        project_now = (_idx % projection_every == 0)
+        mps._projection_call_idx = _idx + 1
+
     # Snapshot per-phase pressure AND sub-volume before topology change.
     # The pre-retopo dual_vol_phase is needed by
     # redistribute_mass_multiphase to gate phase-presence at *v* —
     # otherwise a phase at reference pressure P0=0 looks identical to
     # an absent phase and is silently skipped.
     _p_snap = None
-    if redistribute_mass and mps is not None:
+    if redistribute_mass and mps is not None and (project_now
+                                                  or remap_active):
         from ddgclib.operators.mass_redistribution import (
             snapshot_geometry_multiphase,
         )
         _p_snap = snapshot_geometry_multiphase(HC, mps.n_phases)
+
+    _vol_mid = None
+    if remap_active:
+        from ddgclib.operators.mass_redistribution import (
+            evolve_snapshot_local_strain,
+            phase_volume_totals,
+        )
+        # Stage 1 — measurement pass on the OLD connectivity at the
+        # CURRENT (frozen) positions: refresh duals + per-phase split
+        # without touching masses or pressures, and record the total
+        # per-phase volumes.  Together with the same totals measured
+        # after the rebuild, this isolates the pure connectivity
+        # measurement artifact ratio (no physics can hide in it —
+        # positions do not move inside this call), which the level
+        # anchor below folds into the per-phase volume targets.
+        _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
+                      backend=backend, skip_triangulation=True,
+                      frozen_set=frozen_set,
+                      edge_area_source=edge_area_source)
+        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+        _vol_mid = phase_volume_totals(HC, mps.n_phases)
+        if not project_now:
+            # NOTE(laneH): off-cadence remap call — advance the
+            # pre-call snapshot by this step's LOCAL Lagrangian strain
+            # (mass-conserving compression of each parcel from its
+            # pre-call sub-volume to the refreshed one).
+            # Redistribution/restore below then reproduce THIS field
+            # across the rebuild: the connectivity artifact is still
+            # cancelled exactly, but the step's local EOS compression
+            # response survives instead of being erased.  Do NOT use
+            # the raw eos(m/dual_vol) recompute here — it loses the
+            # restore/anchor level corrections that live in p_phase
+            # but not in the mass ledger (see
+            # evolve_snapshot_local_strain).
+            _p_snap = evolve_snapshot_local_strain(HC, mps, _p_snap)
 
     # Retopologization (Delaunay or adaptive + duals, no single-phase redistrib)
     _retopologize(HC, bV, dim, boundary_filter=boundary_filter,
                   merge_cdist=merge_cdist, backend=backend,
                   skip_triangulation=skip_triangulation,
                   remesh_mode=remesh_mode,
-                  remesh_kwargs=remesh_kwargs)
+                  remesh_kwargs=remesh_kwargs,
+                  frozen_set=frozen_set,
+                  edge_area_source=edge_area_source)
 
     # Refresh multiphase state
     if mps is not None:
@@ -466,13 +964,53 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
             from ddgclib.operators.mass_redistribution import (
                 redistribute_mass_multiphase,
             )
-            redistribute_mass_multiphase(
+            _redist_diag = redistribute_mass_multiphase(
                 HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
+                ledger=phase_ledger,
             )
+            if remap_active:
+                # Stage 2 closure, part 1 — volume-gauge update: the
+                # redistribution scale factor is exactly the ratio of
+                # conserved phase mass to the phase volume measured on
+                # the NEW connectivity at the (frozen) stage-1
+                # positions and pressures, i.e. the pure connectivity
+                # measurement artifact of this rebuild (times the
+                # previous gauge).  Storing it as the per-phase EOS
+                # volume gauge makes the mass ledger and the pressure
+                # field self-consistent, so the NEXT redistribution
+                # does not bounce the artifact back in as a uniform
+                # pressure offset (K*(scale-1) jolt).
+                for _rec in _redist_diag['per_phase_diagnostics']:
+                    mps.vol_corr[_rec['phase']] = _rec['scale_factor']
             # Recompute pressures from the redistributed masses so that
             # v.p_phase (read by multiphase_stress_force) reflects the
             # adjusted densities, not the stale pre-redistribution values.
             mps.compute_phase_pressures(HC)
+            if remap_active:
+                # Stage 2 closure, part 2 — structure restore: the
+                # pre-call pressure STRUCTURE must survive the rebuild
+                # bit-exactly wherever phase presence persists (the
+                # global rescale reproduces it only up to a uniform
+                # per-phase offset).
+                from ddgclib.operators.mass_redistribution import (
+                    anchor_phase_pressure_levels,
+                    phase_volume_totals,
+                    restore_pressure_multiphase,
+                )
+                restore_pressure_multiphase(
+                    HC, mps, _p_snap, adopted=_redist_diag['adopted'])
+                # Stage 2 closure, part 3 — level anchor: pin each
+                # phase's pressure LEVEL to the volume strain relative
+                # to the artifact-corrected per-phase volume targets
+                # (p_ref pattern: rebuild targets after every retopo so
+                # connectivity changes are not read as compression).
+                # Without this the level is an integral of noisy
+                # per-step scale factors and reconnection noise
+                # rectifies into a runaway phase tension.
+                _vol_new = phase_volume_totals(HC, mps.n_phases)
+                anchor_phase_pressure_levels(
+                    HC, mps, _vol_mid, _vol_new,
+                )
 
 
 def _recompute_duals(HC):
@@ -531,6 +1069,17 @@ def _move(v, pos, HC, bV):
 def _interior_verts(HC, bV):
     """Return list of non-boundary vertices (stable ordering for one step)."""
     return [v for v in HC.V if v not in bV]
+
+
+def _density_diffusion(HC, verts, delta, pressure_model, dt, dim):
+    """Gradient-corrected density diffusion step on the interior vertices
+    (method axis ``density_diffusion``; needs an EOS for the sound speed)."""
+    from ddgclib.operators.stabilisation import density_diffusion_step
+    from ddgclib.operators.stress import _get_dual_vol
+    for v in HC.V:                      # make sure every cell has a volume
+        _get_dual_vol(v, HC, dim)
+    c0 = float(pressure_model.sound_speed(pressure_model.rho0))
+    return density_diffusion_step(HC, verts, delta, c0, dt, dim=dim)
 
 
 def _apply_bc_set(bc_set, HC, bV, dt):
@@ -656,7 +1205,8 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
-          displacement_eps=None,
+          displacement_eps=None, density_diffusion=None,
+          edge_area_source=None,
           **dudt_kwargs):
     """Explicit (forward) Euler integration.
 
@@ -727,8 +1277,14 @@ def euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
+        if density_diffusion:
+            if not hasattr(pressure_model, 'sound_speed'):
+                raise ValueError("density_diffusion needs an EquationOfState "
+                                 "pressure_model (sound speed)")
+            _density_diffusion(HC, verts, density_diffusion, pressure_model, dt, dim)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -761,7 +1317,8 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                      skip_triangulation=False,
                      pressure_model=None, redistribute_mass=False,
                      remesh_mode='delaunay', remesh_kwargs=None,
-                     displacement_eps=None,
+                     displacement_eps=None, density_diffusion=None,
+                     edge_area_source=None,
                      **dudt_kwargs):
     """Symplectic (semi-implicit) Euler integration.
 
@@ -801,12 +1358,22 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
         ``L_min``, ``L_max``, ``quality_target_deg``,
         ``max_iterations``, ``smooth_iterations``).  Ignored when
         ``remesh_mode='delaunay'``.
+    density_diffusion : float or None
+        Coefficient ``delta`` of the gradient-corrected density diffusion
+        (:func:`ddgclib.operators.stabilisation.density_diffusion_step`)
+        applied to the interior vertices before every force evaluation.
+        Requires an EOS *pressure_model* (sound speed).  Damps the
+        checkerboard density mode of the centred pressure flux; method
+        axis ``density_diffusion``.
 
     Returns
     -------
     float
         Final time.
     """
+    if density_diffusion and not hasattr(pressure_model, 'sound_speed'):
+        raise ValueError("density_diffusion needs an EquationOfState "
+                         "pressure_model (sound speed)")
     t = 0.0
     for step in range(n_steps):
         _do_retopologize(HC, bV, dim, boundary_filter, retopologize_fn,
@@ -817,8 +1384,11 @@ def symplectic_euler(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
+        if density_diffusion:
+            _density_diffusion(HC, verts, density_diffusion, pressure_model, dt, dim)
 
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -850,7 +1420,7 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
           domain_bounds=None, skip_triangulation=False,
           pressure_model=None, redistribute_mass=False,
           remesh_mode='delaunay', remesh_kwargs=None,
-          displacement_eps=None,
+          displacement_eps=None, edge_area_source=None,
           **dudt_kwargs):
     """Runge-Kutta 4(5) integration via :func:`scipy.integrate.solve_ivp`.
 
@@ -935,7 +1505,8 @@ def rk45(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None, bc_set=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         n = len(verts)
         if n == 0:
@@ -996,7 +1567,7 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                         domain_bounds=None, skip_triangulation=False,
                         pressure_model=None, redistribute_mass=False,
                         remesh_mode='delaunay', remesh_kwargs=None,
-                        displacement_eps=None,
+                        displacement_eps=None, edge_area_source=None,
                         **dudt_kwargs):
     """Explicit Euler that only advances velocity (mesh stays fixed).
 
@@ -1048,7 +1619,8 @@ def euler_velocity_only(HC, bV, dudt_fn, dt, n_steps, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 
@@ -1074,7 +1646,7 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                    domain_bounds=None, skip_triangulation=False,
                    pressure_model=None, redistribute_mass=False,
                    remesh_mode='delaunay', remesh_kwargs=None,
-                   displacement_eps=None,
+                   displacement_eps=None, edge_area_source=None,
                    **dudt_kwargs):
     """Explicit Euler with CFL-based adaptive time stepping.
 
@@ -1161,7 +1733,8 @@ def euler_adaptive(HC, bV, dudt_fn, dt_initial, t_end, dim=3, callback=None,
                              redistribute_mass=redistribute_mass,
                              remesh_mode=remesh_mode,
                              remesh_kwargs=remesh_kwargs,
-                             displacement_eps=displacement_eps)
+                             displacement_eps=displacement_eps,
+                             edge_area_source=edge_area_source)
         verts = _interior_verts(HC, bV)
         accel = _compute_accel(dudt_fn, verts, workers, **dudt_kwargs)
 

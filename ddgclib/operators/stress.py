@@ -43,13 +43,68 @@ Constitutive relation TODOs
 
 import numpy as np
 
+from ddgclib.operators._registry import MethodRegistry
+
 
 # ---------------------------------------------------------------------------
 # Geometry: dual area vectors and dual volumes
 # TODO: move dual_area_vector and dual_volume to hyperct.ddg (pure geometry)
 # ---------------------------------------------------------------------------
 
-def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
+#: Sign rules of the 2D dual face vector (method axis ``area_orientation``
+#: of :mod:`ddgclib.methods`).  ``'primal_edge'``: ``A_ij . (x_j - x_i) > 0``,
+#: exact for any pair of non-degenerate triangles (the dual segment crosses
+#: the primal edge, laneO).  ``'dual_midpoint'``: the rule before laneO,
+#: the vector points away from ``x_i`` as seen from the midpoint of the
+#: dual segment; wrong (flipped) when the two triangles at the edge subtend
+#: more than 180 degrees at ``x_i`` (status 'broken', kept so that the
+#: numbers pinned before the fix can be reproduced).
+AREA_ORIENTATIONS = ('primal_edge', 'dual_midpoint')
+
+
+def _orient_2d(A_ij: np.ndarray, x_i: np.ndarray, x_j: np.ndarray,
+               centroid: np.ndarray, orientation: str) -> np.ndarray:
+    """Sign of a 2D dual face vector so that it points outward from i."""
+    if orientation == 'primal_edge':
+        if np.dot(A_ij, x_j - x_i) < 0:
+            return -A_ij
+        return A_ij
+    if orientation == 'dual_midpoint':
+        if np.dot(A_ij, x_i - centroid) > 0:
+            return -A_ij
+        return A_ij
+    raise KeyError(f"unknown area orientation {orientation!r}; available: "
+                   f"{AREA_ORIENTATIONS}")
+
+
+# 3D per-edge sources of dual_area_vector (method axis ``edge_area_source``):
+# the exact polygon read from HC._simplices, or the legacy ring walk with
+# its face-barycentre heuristic.  The retopology records the axis value on
+# HC._edge_area_source; the cache-filling values read the exact polygon
+# for any edge outside their cache.
+_EXACT_EDGE_SOURCES = ('p_ij', 'p_ij_simplex')
+
+
+def edge_area_vector(v_i, v_j, HC, dim: int = 3,
+                     orientation: str = 'primal_edge') -> np.ndarray:
+    """``A_ij`` as the force operators read it: the entry of
+    ``HC._edge_area_cache`` when the retopology cached this directed edge,
+    else :func:`dual_area_vector`.  One lookup for every operator that
+    reads a dual face, so that all of them follow the axis
+    ``edge_area_source``."""
+    cache = getattr(HC, '_edge_area_cache', None)
+    if cache is not None:
+        row = cache.get(id(v_i))
+        if row is not None:
+            A_ij = row.get(id(v_j))
+            if A_ij is not None:
+                return A_ij
+    return dual_area_vector(v_i, v_j, HC, dim, orientation)
+
+
+def dual_area_vector(v_i, v_j, HC, dim: int = 3,
+                     orientation: str = 'primal_edge',
+                     source: str | None = None) -> np.ndarray:
     """Oriented dual area vector for the interface between parcels i and j.
 
     Computes A_ij, the total outward area vector of the dual face separating
@@ -61,14 +116,37 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
 
     In 2D the dual face is the line segment between the two shared dual
     vertices; A_ij is the outward-facing normal with magnitude equal to the
-    segment length.
+    segment length.  Its sign is fixed by *orientation* (see
+    :data:`AREA_ORIENTATIONS`): the default ``'primal_edge'`` takes the
+    normal on the side of ``x_j`` (``A_ij . d_ij > 0``, which is
+    ``(2/3) (|T_left| + |T_right|) > 0`` for the barycentric segment of any
+    valid pair of triangles, and ``(2/3) |T|`` for a hull edge), so that
+    ``A_ij = -A_ji`` and the cell of an interior vertex closes on every
+    mesh.  ``'dual_midpoint'`` is the legacy rule (broken on skewed meshes).
+    1D and 3D ignore *orientation*.
 
     In 3D the dual face is the DEC p_ij polygon: tet barycenters interleaved
     with face barycenters (x_i + x_j + x_k)/3.  This construction guarantees
     linear precision (machine eps) for barycentric duals on any tetrahedral
-    mesh.  See :func:`_dual_area_vector_3d_p_ij`.  Falls back to the legacy
-    e_star fan-walk (:func:`_dual_area_vector_3d_e_star`) for boundary or
-    degenerate edges.
+    mesh.  Which construction builds it is *source* (method axis
+    ``edge_area_source``, laneQ):
+
+    - ``'p_ij'`` / ``'p_ij_simplex'``: the polygon read from the
+      tetrahedra of ``HC._simplices`` around the edge
+      (:func:`_dual_area_vector_3d_simplex`): exact faces and ring order,
+      open chain through the edge midpoint on a hull edge, flat
+      tetrahedra oriented by their neighbours.  Requires the simplex
+      cache.
+    - ``'p_ij_ring'`` / ``'e_star_cache'`` / ``None`` on a mesh that no
+      retopology has tagged: the legacy ring walk over the shared dual
+      vertices with the nearest-barycentre face heuristic
+      (:func:`_dual_area_vector_3d_p_ij`; wrong face on some edges with
+      non-face 3-cycles, laneJ, and tie-decided on hull edges, laneT).
+      Falls back to the e_star fan-walk
+      (:func:`_dual_area_vector_3d_e_star`) for degenerate edges.
+
+    ``source=None`` reads ``HC._edge_area_source``, which the retopology
+    sets to the axis value that ran.
 
     Parameters
     ----------
@@ -78,6 +156,10 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         Simplicial complex with duals computed (``compute_vd``).
     dim : int
         Spatial dimension (1, 2, or 3).
+    orientation : {'primal_edge', 'dual_midpoint'}
+        2D sign rule (above).
+    source : {None, 'p_ij', 'p_ij_simplex', 'p_ij_ring', 'e_star_cache'}
+        3D construction (above); ignored in 1D / 2D.
 
     Returns
     -------
@@ -124,10 +206,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
                 midpt = 0.5 * (x_i + x_j)
                 dual_edge = bary - midpt
                 A_ij = np.array([-dual_edge[1], dual_edge[0]])
-                vec_to_i = x_i - 0.5 * (bary + midpt)
-                if np.dot(A_ij, vec_to_i) > 0:
-                    A_ij = -A_ij
-                return A_ij
+                return _orient_2d(A_ij, x_i, x_j, 0.5 * (bary + midpt),
+                                  orientation)
             # Interior edge: pick two triangles (one on each side of edge).
             # With ghost resolution, shared count can be >2. Use cross
             # product sign to find one neighbor on each side.
@@ -149,11 +229,8 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
             bary_r = (x_i + x_j + right) / 3.0
             dual_edge = bary_l - bary_r
             A_ij = np.array([-dual_edge[1], dual_edge[0]])
-            centroid = 0.5 * (bary_l + bary_r)
-            vec_to_i = x_i - centroid
-            if np.dot(A_ij, vec_to_i) > 0:
-                A_ij = -A_ij
-            return A_ij
+            return _orient_2d(A_ij, x_i, x_j, 0.5 * (bary_l + bary_r),
+                              orientation)
 
         # Standard (non-periodic) path
         vdnn = v_i.vd.intersection(v_j.vd)
@@ -166,17 +243,92 @@ def dual_area_vector(v_i, v_j, HC, dim: int = 3) -> np.ndarray:
         # Normal to dual edge: rotation of the dual edge direction vector
         A_ij = np.array([-dual_edge[1], dual_edge[0]])
         # Orient outward from v_i
-        centroid = 0.5 * (vd1.x_a[:2] + vd2.x_a[:2])
-        vec_to_i = v_i.x_a[:2] - centroid
-        if np.dot(A_ij, vec_to_i) > 0:
-            A_ij = -A_ij
-        return A_ij
+        return _orient_2d(A_ij, v_i.x_a[:2], v_j.x_a[:2],
+                          0.5 * (vd1.x_a[:2] + vd2.x_a[:2]), orientation)
 
     elif dim == 3:
+        if source is None:
+            source = getattr(HC, '_edge_area_source', None)
+        if source in _EXACT_EDGE_SOURCES:
+            if getattr(HC, '_simplices', None) is None:
+                raise ValueError(
+                    f"edge_area_source={source!r} needs the top-simplex "
+                    "cache HC._simplices (a Delaunay retopology or a domain "
+                    "builder provides it); it is None")
+            return _dual_area_vector_3d_simplex(v_i, v_j, HC)
         return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
 
     else:
         raise NotImplementedError(f"dual_area_vector not implemented for dim={dim}")
+
+
+def _dual_area_vector_3d_simplex(v_i, v_j, HC) -> np.ndarray:
+    """3D dual area vector of the edge from the tetrahedra around it.
+
+    The DEC ``p_ij`` polygon (tet barycentres interleaved with the
+    barycentres ``(x_i + x_j + x_k) / 3`` of the faces between consecutive
+    tets) with the ring order and the face vertices ``k`` read from the
+    link of the edge in ``HC._simplices``: the per-edge form of
+    ``hyperct.ddg.simplex_dual_face_areas`` (laneJ's construction, which
+    closes to 2e-16 and is linearly precise to 2e-15 where the
+    nearest-barycentre heuristic of :func:`_dual_area_vector_3d_p_ij`
+    picks a non-face vertex).  On a hull edge the link is an open chain
+    and the polygon runs from the edge midpoint over the first boundary
+    face barycentre, the tets, the last boundary face barycentre and back
+    (laneT's tie between the midpoint and a boundary face barycentre
+    does not arise).  A flat tetrahedron takes its place in the ring like
+    any other, so it is oriented by its neighbours.  Oriented so that
+    ``A_ij . (x_j - x_i) > 0`` (the sum over the tets is
+    ``|T| / 2`` each).  Needs ``HC._simplices``; an edge with a
+    non-manifold link falls back to the ring walk.
+    """
+    tets = [s for s in _vertex_simplices(HC).get(id(v_i), ())
+            if any(w is v_j for w in s)]
+    if not tets:
+        return np.zeros(3)
+    others = [tuple(w for w in T if w is not v_i and w is not v_j)
+              for T in tets]
+    count: dict = {}
+    for o in others:
+        for w in o:
+            count[id(w)] = count.get(id(w), 0) + 1
+    ends = [w for w in count if count[w] == 1]
+    if any(len(o) != 2 for o in others) or any(c > 2 for c in count.values()) \
+            or len(ends) not in (0, 2):
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+    n = len(tets)
+    # walk the link: start at an end of an open chain, else anywhere
+    if ends:
+        start = next(t for t in range(n) if any(id(w) == ends[0] for w in others[t]))
+        cur = next(w for w in others[start] if id(w) == ends[0])
+    else:
+        start, cur = 0, others[0][0]
+    x_i, x_j = v_i.x_a[:3], v_j.x_a[:3]
+    pts = []
+    if ends:
+        pts.append(0.5 * (x_i + x_j))
+        pts.append((x_i + x_j + cur.x_a[:3]) / 3.0)
+    used = [False] * n
+    t = start
+    for _ in range(n):
+        used[t] = True
+        T = tets[t]
+        pts.append((T[0].x_a[:3] + T[1].x_a[:3] + T[2].x_a[:3]
+                    + T[3].x_a[:3]) / 4.0)
+        cur = next(w for w in others[t] if w is not cur)
+        pts.append((x_i + x_j + cur.x_a[:3]) / 3.0)
+        t = next((u for u in range(n)
+                  if not used[u] and any(w is cur for w in others[u])), None)
+        if t is None:
+            break
+    if not all(used):
+        return _dual_area_vector_3d_p_ij(v_i, v_j, HC)
+    P = np.array(pts)
+    c = P.mean(axis=0)
+    A_ij = 0.5 * np.cross(P - c, np.roll(P, -1, axis=0) - c).sum(axis=0)
+    if np.dot(A_ij, x_j - x_i) < 0:
+        A_ij = -A_ij
+    return A_ij
 
 
 def _dual_area_vector_3d_p_ij(v_i, v_j, HC) -> np.ndarray:
@@ -308,6 +460,22 @@ def _dual_area_vector_3d_e_star(v_i, v_j, HC) -> np.ndarray:
     return A_ij
 
 
+def _use_exact_barycentric_volume(HC) -> bool:
+    """True when the exact simplex-based barycentric dual volume applies.
+
+    Requires (a) the explicit top-simplex cache ``HC._simplices`` and
+    (b) barycentric duals — the closed form
+    ``Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|`` holds only for the
+    barycentric dual partition.  ``HC._vd_method`` is recorded by
+    ``hyperct.ddg.compute_vd``; when absent, the pipeline default
+    (barycentric) is assumed.
+    """
+    return (
+        getattr(HC, '_simplices', None) is not None
+        and getattr(HC, '_vd_method', 'barycentric') == 'barycentric'
+    )
+
+
 def dual_volume(v, HC, dim: int = 3) -> float:
     """Volume (area in 2D) of the dual cell around vertex v.
 
@@ -334,7 +502,19 @@ def dual_volume(v, HC, dim: int = 3) -> float:
 
     Notes
     -----
-    # TODO: move to hyperct.ddg._operators (pure geometry, no physics)
+    For barycentric duals with an explicit simplex cache
+    (``HC._simplices``), dim 2 AND dim 3 use the exact closed form
+    ``Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|`` from
+    ``hyperct.ddg.vertex_dual_volume`` — exact to machine precision,
+    tiles the domain including boundary/corner cells, and has no
+    degenerate/exception paths.  The legacy geometric reconstruction
+    (``dual_cell_area_2d`` / ``v_star`` fan walk) is kept for
+    circumcentric duals and as fallback when no simplex cache exists.
+    The 3D exact path was enabled 2026-07-29 (lane A), together with a
+    canonical 3D qhull input order in hyperct
+    ``connect_and_cache_simplices``; the 3D droplet retopology floor
+    was re-pinned 7.3768e-5 -> 7.274172e-5 accordingly — see the
+    NOTE(lane3-dual-volume) below.
     """
     if dim == 1:
         # 1D dual cell = interval between the two dual vertices
@@ -349,10 +529,36 @@ def dual_volume(v, HC, dim: int = 3) -> float:
         return max(positions) - min(positions)
 
     elif dim == 2:
+        if _use_exact_barycentric_volume(HC):
+            from hyperct.ddg import vertex_dual_volume
+            return vertex_dual_volume(HC, v, dim=2)
         from hyperct.ddg import dual_cell_area_2d
         return dual_cell_area_2d(v, include_edge_midpoints=True)
 
     elif dim == 3:
+        # NOTE(lane3-dual-volume): exact simplex path ENABLED 2026-07-29
+        # (lane A), mirroring the dim==2 branch.  All three switch
+        # points (this branch, cache_dual_volumes dim in (2, 3), and
+        # the _integrators_dynamic.py step-5b batch_e_star preference)
+        # flipped TOGETHER — mixed volume sources across setup/retopo
+        # create a first-retopo pressure jump much larger than either
+        # consistent choice.  Alone, the switch moves the pinned 3D
+        # static-droplet retopology floor 7.3768e-5 -> 7.616854e-5
+        # (+3.3%): the exact measure honestly reports the larger real
+        # settle-step volume jump that the redistribution rescale
+        # converts into a uniform pressure offset (order-dependent
+        # qhull tie-breaking at retopo #1-2, NOT a volume bug).  The
+        # companion canonical 3D qhull input order in hyperct
+        # connect_and_cache_simplices (NOTE(laneA-canonical-order))
+        # kills that settle artifact; the floor is pinned at
+        # 7.274172e-5 (below the old fan floor).  See
+        # docs_temp/debug_session/lane3-exact-dual-volumes.md.
+        if _use_exact_barycentric_volume(HC):
+            from hyperct.ddg import vertex_dual_volume
+            return vertex_dual_volume(HC, v, dim=3)
+        # Legacy fan walk (circumcentric / no simplex cache): known to
+        # undercount 1-4% interior / ~20% boundary on unstructured
+        # meshes (audit/dual-volume-3d.md).
         from hyperct.ddg import v_star as _v_star
         total_vol = 0.0
         for v_j in v.nn:
@@ -391,6 +597,19 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
     dim : int
         Spatial dimension.
     """
+    if dim in (2, 3) and _use_exact_barycentric_volume(HC):
+        # Exact barycentric dual volumes in one vectorized pass over the
+        # simplex cache (Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|).
+        # dim==3 enabled 2026-07-29 together with the dual_volume
+        # dim==3 branch and the _integrators_dynamic.py step-5b
+        # preference — see the NOTE(lane3-dual-volume) in dual_volume
+        # above.
+        from hyperct.ddg import simplex_dual_volumes
+        vols = simplex_dual_volumes(HC, dim)
+        for v in HC.V:
+            v.dual_vol = vols.get(v, 0.0)
+        return
+
     for v in HC.V:
         try:
             v.dual_vol = dual_volume(v, HC, dim)
@@ -682,6 +901,44 @@ def pressure_flux(p_i: float, p_j: float, A_ij: np.ndarray) -> np.ndarray:
     return -0.5 * (p_i + p_j) * A_ij
 
 
+def pressure_flux_riemann(p_i: float, p_j: float, rho_i: float, rho_j: float,
+                          c_i: float, c_j: float, u_i: np.ndarray, u_j: np.ndarray,
+                          A_ij: np.ndarray) -> np.ndarray:
+    """Acoustic-Riemann (Lagrangian Godunov) contact pressure flux.
+
+    ::
+
+        p*_ij  = 0.5 (p_i + p_j) - 0.5 rho_f c_f (u_j - u_i) . n_ij
+        F_p_ij = -p*_ij A_ij,     rho_f = 0.5 (rho_i + rho_j),  c_f = 0.5 (c_i + c_j)
+
+    The velocity-jump term is the contact pressure of the linearised
+    (acoustic) Riemann problem across the dual face: cells separating
+    along the face normal see a lower face pressure and are pushed back
+    together, cells approaching see a higher one.  It is pairwise
+    antisymmetric (momentum conserving), vanishes for rigid translation
+    and for any velocity field with no jump normal to the face, and
+    damps the grid-scale acoustic (checkerboard) velocity mode that the
+    centred flux cannot see.  Its price is a numerical bulk viscosity of
+    order ``rho c |d_ij|`` on compressive modes, which at low Mach
+    number can exceed the physical viscosity (use the density-diffusion
+    stabilisation for density noise instead).
+    """
+    An = float(np.linalg.norm(A_ij))
+    if An == 0.0:
+        return np.zeros_like(A_ij)
+    w = float((u_j - u_i) @ A_ij) / An          # normal velocity jump
+    p_star = 0.5 * (p_i + p_j) - 0.25 * (rho_i + rho_j) * 0.5 * (c_i + c_j) * w
+    return -p_star * A_ij
+
+
+pressure_flux_methods = MethodRegistry("pressure_flux")
+pressure_flux_methods.register("centred", pressure_flux)
+pressure_flux_methods.register("acoustic-riemann", pressure_flux_riemann)
+# stress_force takes the method KEY as a keyword named ``pressure_flux``,
+# which shadows the function inside that scope: keep an alias.
+_pressure_flux_centred = pressure_flux
+
+
 def viscous_flux(
     mu: float,
     delta_u: np.ndarray,
@@ -699,16 +956,272 @@ def viscous_flux(
     return (mu / d_norm) * delta_u * np.dot(d_hat, A_ij)
 
 
+# ---------------------------------------------------------------------------
+# Simplex-gradient fluxes (piecewise-linear reconstruction on the primal
+# simplices, integrated over the barycentric dual cell)
+# ---------------------------------------------------------------------------
+
+# A simplex whose measure is below _SIMPLEX_FLAT_TOL * (shortest edge)**dim
+# is left out of the simplex-gradient viscous force: its gradient is not
+# defined (flat) or its stiffness, ~ 1 / thickness, is beyond an explicit
+# integrator (see viscous_force_simplex_gradient).
+_SIMPLEX_FLAT_TOL = 1e-3
+_FACTORIAL = {2: 2.0, 3: 6.0}
+
+
+def _vertex_simplices(HC) -> dict:
+    """``{id(v): [top simplices containing v]}`` for ``HC._simplices``.
+
+    Cached on ``HC._vertex_simplices`` together with the simplex list it
+    was built from.  ``HC._simplices`` is replaced, never edited in place,
+    whenever the connectivity changes, so the identity of the list says
+    whether the map is current.  Only the incidence is cached; positions
+    are read fresh by the caller.
+    """
+    simplices = getattr(HC, '_simplices', None)
+    if simplices is None:
+        raise ValueError(
+            "the 'simplex_gradient' fluxes need the top-simplex cache "
+            "HC._simplices (a Delaunay retopology or a domain builder "
+            "provides it); it is None")
+    cached = getattr(HC, '_vertex_simplices', None)
+    if cached is not None and cached[0] is simplices:
+        return cached[1]
+    incidence: dict = {}
+    for s in simplices:
+        for w in s:
+            incidence.setdefault(id(w), []).append(s)
+    HC._vertex_simplices = (simplices, incidence)
+    return incidence
+
+
+def _simplex_fan(v, HC, dim: int):
+    """Geometry of the top simplices at *v*: ``(verts, idx, X, vol, b)``.
+
+    *verts* are the other vertices of the ``n`` simplices that contain
+    *v* (each once), ``idx[t, k]`` is the position in *verts* of the
+    ``k``-th other vertex of simplex ``t``, ``X[t, k] = x_k - x_v``,
+    ``vol[t]`` the measure of the simplex and ``b[t, k] = |T|
+    grad(phi_k)`` with ``phi_k`` the barycentric coordinate of that
+    vertex.  ``-b[t, k]`` is the outward area vector of the face opposite
+    it divided by ``dim``; it is built from the adjugate of ``X`` (no
+    division), so it stays finite on a flat simplex.  ``None`` if no
+    simplex contains *v*.
+    """
+    simplices = _vertex_simplices(HC).get(id(v))
+    if not simplices:
+        return None
+    local: dict = {}
+    verts: list = []
+    idx = np.empty((len(simplices), dim), dtype=int)
+    for t, s in enumerate(simplices):
+        k = 0
+        for w in s:
+            if w is v:
+                continue
+            j = local.get(id(w))
+            if j is None:
+                j = local[id(w)] = len(verts)
+                verts.append(w)
+            idx[t, k] = j
+            k += 1
+    X = np.array([w.x_a[:dim] for w in verts])[idx] - v.x_a[:dim]
+    b = np.empty_like(X)
+    if dim == 2:
+        det = X[:, 0, 0] * X[:, 1, 1] - X[:, 0, 1] * X[:, 1, 0]
+        b[:, 0, 0] = X[:, 1, 1]
+        b[:, 0, 1] = -X[:, 1, 0]
+        b[:, 1, 0] = -X[:, 0, 1]
+        b[:, 1, 1] = X[:, 0, 0]
+    elif dim == 3:
+        b[:, 0] = np.cross(X[:, 1], X[:, 2])
+        b[:, 1] = np.cross(X[:, 2], X[:, 0])
+        b[:, 2] = np.cross(X[:, 0], X[:, 1])
+        det = np.einsum('tc,tc->t', X[:, 0], b[:, 0])
+    else:
+        raise NotImplementedError(
+            f"the 'simplex_gradient' fluxes support dim 2 and 3, got {dim}")
+    b *= (np.sign(det) / _FACTORIAL[dim])[:, None, None]
+    return verts, idx, X, np.abs(det) / _FACTORIAL[dim], b
+
+
+def simplex_area_vectors(v, HC, dim: int):
+    """Exact barycentric dual area vectors of the edges at *v*, from the
+    simplex cache: ``(verts, A)`` with ``A[k]`` the vector of the edge
+    ``(v, verts[k])``.
+
+    Inside a simplex ``T`` the face between the dual cells of ``i`` and
+    ``j`` has the area vector ``|T| (grad(phi_j) - grad(phi_i)) / (dim + 1)``
+    (outward from ``i``), so::
+
+        A_ij = 1 / (dim + 1) * sum_{T contains i, j} |T| (grad(phi_j) - grad(phi_i))
+
+    No dual vertex is read and no orientation is chosen: the sign comes
+    from the gradients.  Closed (``sum_j A_ij = 0``) at every vertex whose
+    simplices surround it, antisymmetric, and the half cell of a hull
+    vertex is closed by its hull faces.  An exactly flat simplex
+    contributes nothing.
+
+    This is the reference :func:`dual_area_vector` is tested against
+    (laneO: equal to the 2D segment and to the 3D ``p_ij`` ring of an
+    interior edge to round-off) and the per-vertex form of the registered
+    ``edge_area_source='p_ij_simplex'`` (laneJ); no force reads it.
+    Needs ``HC._simplices``.
+    """
+    fan = _simplex_fan(v, HC, dim)
+    if fan is None:
+        return [], np.zeros((0, dim))
+    verts, idx, _, _, b = fan
+    # |T| (grad(phi_k) - grad(phi_v)), with grad(phi_v) = -sum_k grad(phi_k)
+    piece = b + b.sum(axis=1)[:, None, :]
+    A = np.zeros((len(verts), dim))
+    np.add.at(A, idx, piece)
+    return verts, A / (dim + 1)
+
+
+def viscous_force_simplex_gradient(v, HC, dim: int, mu: float,
+                                   flat_tol: float = _SIMPLEX_FLAT_TOL,
+                                   _fan=None) -> np.ndarray:
+    """Viscous force on the dual cell of *v* from the simplex gradients.
+
+    The flux through the barycentric dual faces of cell ``i`` with the
+    velocity gradient of the piecewise-linear interpolant on each primal
+    simplex ``T``::
+
+        F_v_i = mu * sum_{T contains i} G_T . a_iT
+        G_T   = sum_{k in T} u_k (x) grad(phi_k)        (constant on T)
+        a_iT  = -|T| grad(phi_i)                        (area vector of the
+                                                         dual face of i in T)
+
+    ``phi_k`` are the barycentric coordinates of ``T``.  ``a_iT`` is the
+    outward vector area of the part of the barycentric dual boundary of
+    cell ``i`` that lies inside ``T`` (it equals the outward area vector
+    of the face of ``T`` opposite ``i`` divided by ``dim``, whatever the
+    interior dual points are).  Written per edge this is
+    ``sum_j w_ij (u_j - u_i)`` with ``w_ij = -mu sum_T |T| grad(phi_i) .
+    grad(phi_j)``: the cotangent weights in 2D.
+
+    Properties, against the two-point form of :func:`viscous_flux`:
+
+    - LINEAR PRECISION: zero for a linear velocity field at every
+      interior vertex of any simplicial mesh.  The two-point form has
+      that property only on meshes whose edge stencil is symmetric; on a
+      sheared or jittered Delaunay mesh its error is O(|grad u| / h)
+      (laneH: residual of a linear field with the wall shear rate of a
+      Poiseuille profile 0.6 to 5 of the driving force ``G Vol``, growing
+      with refinement).
+    - Pairwise antisymmetric (``w_ij = w_ji``): momentum conserving.
+    - Negative semi-definite (energy never grows), but ``w_ij`` can be
+      negative on an edge whose opposite angles sum to more than 180
+      degrees (never on an interior edge of a 2D Delaunay mesh).
+    - A hull vertex gets the natural (zero normal gradient) condition.
+
+    Diffusion form (``mu`` Laplacian), like the two-point flux.
+
+    Simplices with ``|T| <= flat_tol * (shortest edge)**dim`` are left
+    out.  A flat simplex has no gradient (the coplanar tetrahedra qhull
+    returns on a structured mesh, 4 to 8 % of the simplices of a builder
+    cylinder), and a nearly flat one couples its vertices with a
+    stiffness ``~ 1 / thickness`` that an explicit integrator cannot
+    follow.  Leaving one out is a slit of zero width between simplices
+    that still share all its vertices: harmless on the hull (another
+    triangulation of the boundary), but between interior vertices the
+    dual cells no longer close and linear precision is lost at those
+    vertices.  Short edges are not filtered: the measure is relative to
+    the shortest edge, so a thin simplex between two close vertices is
+    kept.
+
+    Needs ``HC._simplices``.
+    """
+    F = np.zeros(dim)
+    fan = _simplex_fan(v, HC, dim) if _fan is None else _fan
+    if fan is None:
+        return F
+    verts, idx, X, vol, b = fan
+    # squared edge lengths: the dim edges at v and those among the others
+    l2 = np.einsum('tkc,tkc->tk', X, X).min(axis=1)
+    for i in range(dim):
+        for j in range(i + 1, dim):
+            e = X[:, i] - X[:, j]
+            l2 = np.minimum(l2, np.einsum('tc,tc->t', e, e))
+    keep = vol > flat_tol * l2 ** (0.5 * dim)
+    if not keep.any():
+        return F
+    # w[t, k] = -|T| grad(phi_k) . grad(phi_v), with b_v = -sum_k b_k
+    w = (np.einsum('tkc,tc->tk', b, b.sum(axis=1))
+         * (keep / np.where(keep, vol, 1.0))[:, None])
+    dU = np.array([nb.u[:dim] for nb in verts])[idx] - v.u[:dim]
+    return mu * np.einsum('tk,tkc->c', w, dU)
+
+
+def pressure_force_simplex_gradient(v, HC, dim: int, pressure_model=None,
+                                    _fan=None) -> np.ndarray:
+    """Pressure force on the dual cell of *v* from the simplex gradients.
+
+    Minus the integral over the barycentric dual cell of the gradient of
+    the piecewise-linear pressure (the cell owns ``1 / (dim + 1)`` of
+    every simplex at the vertex)::
+
+        F_p_i = - sum_{T contains i} |T| / (dim + 1) * grad(p)_T
+              = - 1 / (dim + 1) * sum_T sum_{k in T} (p_k - p_i) |T| grad(phi_k)
+
+    This is the volume form ``-int grad(p) dV``, not the surface form
+    ``-int p n dA`` of :func:`pressure_flux`:
+
+    - exact for a linear pressure on ANY simplicial mesh, in 2D and 3D,
+      and independent of the dual face areas (the 3D edge-area cache of
+      ``batch_e_star`` is not linearly precise, laneJ);
+    - zero for a uniform pressure at EVERY vertex, hull vertices
+      included.  An open cell therefore feels no ambient pressure: right
+      for a prescribed pressure field, wrong for a free surface that an
+      EOS pressure should push outwards;
+    - total momentum changes by the boundary integral of the
+      piecewise-linear pressure only, but the force is not a sum of
+      pairwise antisymmetric fluxes.
+
+    ``|T| grad(phi_k)`` is an area vector and stays finite on a flat
+    simplex, so nothing is filtered.  Needs ``HC._simplices``.
+    """
+    F = np.zeros(dim)
+    fan = _simplex_fan(v, HC, dim) if _fan is None else _fan
+    if fan is None:
+        return F
+    verts, idx, _, _, b = fan
+    dp = (np.array([_resolve_pressure(nb, pressure_model, HC, dim)
+                    for nb in verts])[idx]
+          - _resolve_pressure(v, pressure_model, HC, dim))
+    return -np.einsum('tk,tkc->c', dp, b) / (dim + 1)
+
+
+pressure_flux_methods.register("simplex_gradient",
+                               pressure_force_simplex_gradient)
+
+viscous_flux_methods = MethodRegistry("viscous_flux")
+viscous_flux_methods.register("two_point", viscous_flux)
+viscous_flux_methods.register("simplex_gradient", viscous_force_simplex_gradient)
+# stress_force takes the method KEY as a keyword named ``viscous_flux``
+# (as for ``pressure_flux`` above): keep an alias.
+_viscous_flux_two_point = viscous_flux
+
+
 def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
-                 pressure_model=None) -> np.ndarray:
+                 pressure_model=None, pressure_flux: str = "centred",
+                 viscous_flux: str = "two_point",
+                 area_orientation: str = "primal_edge") -> np.ndarray:
     """Integrated force on FVM via face-centered fluxes (Stokes' theorem).
 
     For each dual flux plane between parcels i and j, the force has two
     contributions computed directly from edge data:
 
-    Pressure (face-average, conservative):
+    Pressure (face-average, conservative; ``pressure_flux='centred'``):
 
         F_p_ij = -0.5 * (p_i + p_j) * A_ij
+
+    or, with ``pressure_flux='acoustic-riemann'`` (needs an EOS as
+    *pressure_model* for the density and sound speed), the Lagrangian
+    Godunov contact pressure of :func:`pressure_flux_riemann`.  The
+    registry ``pressure_flux_methods`` lists the available keys; the
+    method axis ``pressure_flux`` of :mod:`ddgclib.methods` records them.
 
     Viscous (face-centered diffusion):
 
@@ -722,6 +1235,16 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
     div(mu * (grad u + grad u^T)) for incompressible flow (div u = 0).
     The symmetric (transpose) term mu * grad(div u) is omitted because
     the rank-1 face gradient has spurious discrete compressibility.
+
+    With ``viscous_flux='simplex_gradient'`` the viscous part is
+    :func:`viscous_force_simplex_gradient` instead (same dual faces, the
+    gradient of the piecewise-linear velocity on each primal simplex):
+    linearly precise on any mesh, which the two-point form is not.  The
+    registry ``viscous_flux_methods`` lists the keys; the method axis
+    ``viscous_flux`` of :mod:`ddgclib.methods` records them.
+    ``pressure_flux='simplex_gradient'`` is the pressure counterpart
+    (:func:`pressure_force_simplex_gradient`, the volume form of the
+    pressure force).
 
     Total: F_i = sum_j (F_p_ij + F_v_ij)
 
@@ -744,15 +1267,42 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
         - :class:`~ddgclib.eos.EquationOfState`: weakly compressible
           pressure from density ``rho = m / dual_vol``.  Updates ``v.p``
           and ``v.rho`` in-place.
+    pressure_flux : {'centred', 'acoustic-riemann', 'simplex_gradient'}
+        Pressure flux formulation (see above).  ``'acoustic-riemann'``
+        requires an EOS *pressure_model* (density and sound speed),
+        ``'simplex_gradient'`` requires ``HC._simplices``.
+    viscous_flux : {'two_point', 'simplex_gradient'}
+        Viscous flux formulation (see above).  ``'simplex_gradient'``
+        requires ``HC._simplices``.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        Sign rule of the 2D dual face vectors the fluxes read
+        (:func:`dual_area_vector`); the method axis ``area_orientation``.
 
     Returns
     -------
     np.ndarray
         Force vector, shape ``(dim,)``.
     """
+    if pressure_flux not in pressure_flux_methods:
+        raise KeyError(
+            f"unknown pressure_flux {pressure_flux!r}; available: "
+            f"{pressure_flux_methods.available()}")
+    if viscous_flux not in viscous_flux_methods:
+        raise KeyError(
+            f"unknown viscous_flux {viscous_flux!r}; available: "
+            f"{viscous_flux_methods.available()}")
+    two_point = viscous_flux == "two_point"
+    simplex_p = pressure_flux == "simplex_gradient"
+    riemann = pressure_flux == "acoustic-riemann"
+    if riemann and not hasattr(pressure_model, "sound_speed"):
+        raise ValueError("pressure_flux='acoustic-riemann' needs an "
+                         "EquationOfState pressure_model (density + sound speed)")
     p_i = _resolve_pressure(v, pressure_model, HC, dim)
     u_i = v.u[:dim]
     x_i = v.x_a[:dim]
+    if riemann:
+        rho_i = v.rho
+        c_i = float(pressure_model.sound_speed(rho_i))
 
     # Use cached oriented edge area vectors when available (set by
     # batch_e_star(..., orient=True) during retopologization).
@@ -760,17 +1310,36 @@ def stress_force(v, dim: int = 3, mu: float = 8.9e-4, HC=None,
     _vid = id(v) if _cache is not None else None
 
     F = np.zeros(dim)
+    if simplex_p or not two_point:
+        # NOTE(laneH): the simplex-gradient fluxes share the geometry of
+        # the simplices at v; with both selected no dual face is read.
+        fan = _simplex_fan(v, HC, dim)
+        if simplex_p:
+            F += pressure_force_simplex_gradient(v, HC, dim, pressure_model,
+                                                 _fan=fan)
+        if not two_point:
+            F += viscous_force_simplex_gradient(v, HC, dim, mu, _fan=fan)
+        if simplex_p and not two_point:
+            return F
+
     for v_j in v.nn:
         if _cache is not None and _vid in _cache and id(v_j) in _cache[_vid]:
             A_ij = _cache[_vid][id(v_j)]
         else:
-            A_ij = dual_area_vector(v, v_j, HC, dim)
+            A_ij = dual_area_vector(v, v_j, HC, dim, area_orientation)
 
         p_j = _resolve_pressure(v_j, pressure_model, HC, dim)
         delta_u = v_j.u[:dim] - u_i
         d_ij = v_j.x_a[:dim] - x_i
-        F += pressure_flux(p_i, p_j, A_ij)
-        F += viscous_flux(mu, delta_u, d_ij, A_ij)
+        if riemann:
+            rho_j = v_j.rho
+            F += pressure_flux_riemann(p_i, p_j, rho_i, rho_j, c_i,
+                                       float(pressure_model.sound_speed(rho_j)),
+                                       u_i, v_j.u[:dim], A_ij)
+        elif not simplex_p:
+            F += _pressure_flux_centred(p_i, p_j, A_ij)
+        if two_point:
+            F += _viscous_flux_two_point(mu, delta_u, d_ij, A_ij)
 
     return F
 
@@ -781,6 +1350,9 @@ def stress_acceleration(
     mu: float = 8.9e-4,
     HC=None,
     pressure_model=None,
+    pressure_flux: str = "centred",
+    viscous_flux: str = "two_point",
+    area_orientation: str = "primal_edge",
 ) -> np.ndarray:
     """Acceleration from Cauchy stress: a_i = F_stress_i / m_i.
 
@@ -815,6 +1387,12 @@ def stress_acceleration(
         Simplicial complex with duals computed.
     pressure_model : None, callable, or EquationOfState
         See :func:`stress_force`.
+    pressure_flux : {'centred', 'acoustic-riemann'}
+        See :func:`stress_force`.
+    viscous_flux : {'two_point', 'simplex_gradient'}
+        See :func:`stress_force`.
+    area_orientation : {'primal_edge', 'dual_midpoint'}
+        See :func:`stress_force`.
 
     Returns
     -------
@@ -822,7 +1400,10 @@ def stress_acceleration(
         Acceleration vector, shape ``(dim,)``.
     """
     return stress_force(v, dim=dim, mu=mu, HC=HC,
-                        pressure_model=pressure_model) / v.m
+                        pressure_model=pressure_model,
+                        pressure_flux=pressure_flux,
+                        viscous_flux=viscous_flux,
+                        area_orientation=area_orientation) / v.m
 
 
 # Simplified alias for use as dudt_fn in dynamic integrators

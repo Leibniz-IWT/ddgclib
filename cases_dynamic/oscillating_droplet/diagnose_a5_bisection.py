@@ -34,7 +34,6 @@ import json
 import os
 import sys
 import time
-from functools import partial
 
 import numpy as np
 
@@ -48,7 +47,6 @@ from cases_dynamic.oscillating_droplet.src._setup import (
     setup_oscillating_droplet,
 )
 from ddgclib.operators.multiphase_stress import multiphase_stress_force
-from ddgclib.dynamic_integrators import euler
 from ddgclib.data import compute_conservation
 
 
@@ -103,7 +101,17 @@ def run_a5a(
     split_method: str = 'neighbour_count',
     curvature_path: str = 'integrated',
 ) -> dict:
-    """A.5.a — frozen mesh, no retopology, evaluate F once."""
+    """A.5.a: frozen mesh, no retopology, evaluate F once.
+
+    The setup is built from ``SolverMethods(dim, phases='multi',
+    split_method=..., curvature_path=...)`` (connectivity='frozen':
+    nothing retopologizes here) and the stencil of the measurement is
+    the config's ``curvature_path``.
+    """
+    from ddgclib.methods import SolverMethods
+    methods = SolverMethods(dim=dim, phases='multi', connectivity='frozen',
+                            split_method=split_method,
+                            curvature_path=curvature_path)
     print(f"\n{'=' * 70}")
     print(f"A.5.a ({dim}D) — frozen mesh, retopology DISABLED, "
           f"split_method={split_method!r}, "
@@ -117,7 +125,7 @@ def run_a5a(
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
-            split_method=split_method,
+            methods=methods,
         )
 
     n_verts = sum(1 for _ in HC.V)
@@ -179,6 +187,8 @@ def run_a5b(
     redistribute_mass: bool = False,
     curvature_path: str = 'integrated',
     displacement_eps: float | None = None,
+    methods=None,
+    box_shift: str = 'move_all',
 ) -> dict:
     """A.5.b — retopology ON, velocity forced to zero every step.
 
@@ -191,13 +201,50 @@ def run_a5b(
         (Phase 1 of the 2026-04-28 stabilisation plan — diagnoses
         whether neighbour-count majority-vote on cross-phase reconnection
         is the dominant retopology bug in 3D).
+    methods : ddgclib.methods.SolverMethods or None
+        Reproducibility path (2026-09-25): when given, the retopology
+        policy, ``split_method``, ``redistribute_mass`` and
+        ``displacement_eps`` are taken from the config (the explicit
+        kwargs above are ignored for those axes) and the run goes through
+        ``methods.integrate``; the returned dict carries
+        ``methods.to_dict()``.  Use ``PRESETS['static_droplet_floor_2D']``
+        / ``['static_droplet_floor_3D']`` (``integrator='euler'``) for the
+        pinned floors.  Since laneM (2026-10-05) ``methods.curvature_path``
+        selects both the force in the run (``setup_oscillating_droplet(
+        methods=)``) and the MEASUREMENT stencil, and the explicit
+        ``curvature_path`` kwarg is ignored.  ``None`` (laneW, 2026-10-05)
+        builds the config from the explicit kwargs: ``SolverMethods(dim,
+        phases='multi', integrator='euler', connectivity='delaunay',
+        split_method=..., redistribute_mass=..., curvature_path=...,
+        displacement_eps=...)``, i.e. what the hand-written ``euler(...)``
+        call of this function ran before, with the stencil now applied to
+        the force as well as to the measurement.
+    box_shift : {'move_all', 'evict'}
+        Outer box shift of the droplet builders (laneB, 2026-10-05).
+        ``'evict'`` is the lossy pre-laneB mesh the floors before laneB
+        were pinned on.  Recorded in the returned dict.
     """
+    if methods is None:
+        from ddgclib.methods import SolverMethods
+        methods = SolverMethods(
+            dim=dim, phases='multi', integrator='euler',
+            connectivity='delaunay', split_method=split_method,
+            redistribute_mass=redistribute_mass,
+            curvature_path=curvature_path,
+            displacement_eps=displacement_eps)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
+    redistribute_mass = methods.redistribute_mass
+    displacement_eps = methods.displacement_eps
+    curvature_path = methods.curvature_path
     print(f"\n{'=' * 70}")
     print(f"A.5.b ({dim}D) — retopology ON, u forced to 0 every step "
           f"({n_steps} steps), split_method={split_method!r}, "
           f"redistribute_mass={redistribute_mass}, "
           f"curvature_path={curvature_path!r}, "
-          f"displacement_eps={displacement_eps!r}")
+          f"displacement_eps={displacement_eps!r}"
+          f", methods={methods.label or methods.connectivity!r}")
     print('=' * 70)
 
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
@@ -207,13 +254,14 @@ def run_a5b(
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
-            split_method=split_method,
-            redistribute_mass=redistribute_mass,
+            box_shift=box_shift,
+            methods=methods,
         )
 
     n_verts0 = sum(1 for _ in HC.V)
     n_iface0 = len(_interface_vertices(HC))
-    print(f"  Initial mesh: {n_verts0} vertices, {n_iface0} interface")
+    print(f"  Initial mesh: {n_verts0} vertices, {n_iface0} interface "
+          f"(box_shift={box_shift})")
 
     c_s = float(np.sqrt(K_d / rho_d))
     dt, dx_min = _compute_dt(HC, dim, c_s)
@@ -276,13 +324,9 @@ def run_a5b(
                   f"nV={step_n_verts[-1]}  nI={step_n_iface[-1]}")
 
     t0 = time.perf_counter()
-    euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=zero_u_callback,
-        retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
-        displacement_eps=displacement_eps,
+    methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=zero_u_callback, mps=mps,
     )
     wall = time.perf_counter() - t0
 
@@ -320,6 +364,8 @@ def run_a5b(
         'split_method': split_method,
         'redistribute_mass': redistribute_mass,
         'displacement_eps': displacement_eps,
+        'methods': methods.to_dict() if methods is not None else None,
+        'box_shift': box_shift,
         'max_abs_F_peak': maxF_overall,
         'max_abs_F_end': maxF_end,
         'mean_abs_F_end': meanF_end,
@@ -398,22 +444,22 @@ def main():
              'Default: False (matches production setup).',
     )
     parser.add_argument(
-        '--curvature-path', choices=['integrated', 'csf_dual', 'stokes'],
+        '--curvature-path', choices=['integrated', 'csf_dual'],
         default='integrated',
         help='Surface-tension curvature stencil for the |F| evaluation: '
              "'integrated' (default) — FTC in 2D / cotangent-Heron in "
              '3D, exact for piecewise-linear / triangulated interfaces; '
              "'csf_dual' — Continuum-Surface-Force form aligned with "
              'the dual face-area vector S_inner used by the per-phase '
-             "pressure flux; 'stokes' — Stokes-theorem boundary integral "
-             'on the barycentric dual cell of v_i restricted to interface '
-             'triangles (3D only; 2D delegates to the existing FTC form). '
+             'pressure flux (measured worse, laneM 2026-10-05). '
              'Per Tier 2B step 1 audit (2026-05-06): the '
              "static-droplet residual under 'integrated' is provably "
              'first-order discretization error of the polygon mesh '
              'and converges as O(h) (32→2.37e-3, 64→1.11e-3, 128→5.4e-4 '
-             "in 2D); 'stokes' is the Probe 2 (2026-05-27) integrated "
-             'rewrite targeting the 3D pointwise truncation residual.',
+             "in 2D).  The former 'stokes' value (Probe 2, 2026-05-27, "
+             'the conormal boundary integral on the barycentric dual) '
+             'was the cotangent form to round-off on static and moving '
+             'meshes and was removed in laneM.',
     )
     parser.add_argument(
         '--displacement-eps', type=float, default=None,

@@ -36,6 +36,7 @@ _REPO_ROOT = os.path.abspath(
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from ddgclib.methods import PRESETS  # noqa: E402
 from cases_dynamic.oscillating_droplet.diagnose_a5_bisection import (  # noqa: E402
     run_a5b,
 )
@@ -59,8 +60,24 @@ from cases_dynamic.oscillating_droplet.diagnose_a5_bisection import (  # noqa: E
 # 3D: post-Probe-2c (2026-04-29 redistribute_mass guard fix),
 # confirmed flat at 7.3768e-05 over n_steps=2000 by Probe 6
 # (2026-05-27).  Refinement 2/2, 472 vertices / 98 interface.
-A5B_3D_PEAK = 7.3768e-05
-A5B_3D_END = 7.3768e-05
+# RE-PIN 2026-07-29 (lane A): 7.3768e-05 -> 7.274172e-05 for BOTH peak
+# and end — the 3D production path switched to exact simplex-container
+# dual volumes (NOTE(lane3-dual-volume) in stress.py) AND hyperct
+# connect_and_cache_simplices canonicalizes the 3D qhull input order
+# (NOTE(laneA-canonical-order)), which makes static-cloud retopo
+# idempotent: plateau 7.274172178727318e-05 from step 1, rel spread
+# 6.05e-12 over 100 steps (diagnose_a5_bisection.py
+# --redistribute-mass --n-steps 100; the exact switch WITHOUT
+# canonical order measures 7.616854e-05).  Peak == end because the
+# step-1 transient IS the plateau now.  2D pins below are bit-unchanged.
+# RE-PIN 2026-10-05 (lane B): the droplet builders keep every outer
+# vertex (box_shift='move_all'; 475 vertices / 98 walls instead of 472 /
+# 96, the box corner included): 7.274172e-05 -> 7.274134e-05 (measured
+# peak 7.2741338970e-05, end 7.2741338968e-05 over 20 steps; -5.3e-6
+# relative).  box_shift='evict' reproduces 7.2741721787e-05.  The 2D
+# floors move by 1.8e-10 relative (step 1) and keep their digits.
+A5B_3D_PEAK = 7.274134e-05
+A5B_3D_END = 7.274134e-05
 
 # 2D: post-Phase-2c, curvature-stencil bound on the polygon-vs-circle
 # truncation.  Refinement 3/3, 311 vertices / 32 interface.  Peak is
@@ -87,15 +104,17 @@ class TestA5BLongRunRegression2D(unittest.TestCase):
     """A.5.b 2D steady-state regression (fast: ~1-2 s)."""
 
     def test_a5b_2d_steady_state_floor(self):
+        # The pinned configuration is the named preset (METHODS.md):
+        # euler + per-step Delaunay + redistribution, neighbour_count.
         result = run_a5b(
             dim=2,
             refinement_outer=3,
             refinement_droplet=3,
             n_steps=20,
-            split_method='neighbour_count',
-            redistribute_mass=True,
             curvature_path='integrated',
+            methods=PRESETS['static_droplet_floor_2D'],
         )
+        self.assertEqual(result['methods']['connectivity'], 'delaunay')
         _assert_within_tolerance(
             result['max_abs_F_peak'], A5B_2D_PEAK,
             'A.5.b 2D peak max|F|',
@@ -122,9 +141,8 @@ class TestA5BLongRunRegression3D(unittest.TestCase):
             refinement_outer=2,
             refinement_droplet=2,
             n_steps=20,
-            split_method='neighbour_count',
-            redistribute_mass=True,
             curvature_path='integrated',
+            methods=PRESETS['static_droplet_floor_3D'],
         )
         _assert_within_tolerance(
             result['max_abs_F_peak'], A5B_3D_PEAK,

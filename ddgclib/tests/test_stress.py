@@ -697,6 +697,182 @@ class TestDualVolume3D:
 
 
 # ---------------------------------------------------------------------------
+# Exact simplex-based dual volumes (barycentric duals + HC._simplices)
+# ---------------------------------------------------------------------------
+
+def _build_jittered_delaunay_mesh(dim, n_refine, jitter=0.05, seed=42,
+                                  method='barycentric'):
+    """Unit-cube Delaunay mesh with HC._simplices cached.
+
+    Same pattern as ``_retopologize`` /
+    ``test_p_ij_linear_precision_jittered_3d``: structured refine,
+    interior jitter, global disconnect, scipy Delaunay, simplex cache.
+    """
+    from scipy.spatial import Delaunay as _Delaunay
+
+    HC = Complex(dim, domain=[(0.0, 1.0)] * dim)
+    HC.triangulate()
+    for _ in range(n_refine):
+        HC.refine_all()
+    bV = set()
+    for v in HC.V:
+        v.boundary = any(
+            abs(v.x_a[d]) < 1e-14 or abs(v.x_a[d] - 1.0) < 1e-14
+            for d in range(dim)
+        )
+        if v.boundary:
+            bV.add(v)
+    if jitter > 0.0:
+        rng = np.random.default_rng(seed)
+        for v in list(HC.V):
+            if v not in bV and v.nn:
+                el = min(np.linalg.norm(v.x_a - vn.x_a) for vn in v.nn)
+                off = rng.uniform(-jitter * el, jitter * el, size=dim)
+                HC.V.move(v, tuple(v.x_a[d] + off[d] for d in range(dim)))
+    verts = list(HC.V)
+    for v in verts:
+        for nb in list(v.nn):
+            v.disconnect(nb)
+    coords = np.array([v.x_a[:dim] for v in verts])
+    tri = _Delaunay(coords)
+    for s in tri.simplices:
+        for i in range(dim + 1):
+            for j in range(i + 1, dim + 1):
+                verts[s[i]].connect(verts[s[j]])
+    HC._simplices = [
+        tuple(verts[s[i]] for i in range(dim + 1)) for s in tri.simplices
+    ]
+    compute_vd(HC, method=method, cdist=1e-10)
+    return HC, bV
+
+
+class TestDualVolumeExactSimplex:
+    """Regressions for the exact barycentric dual volume path.
+
+    Historically ``dual_volume`` reconstructed the cell geometrically
+    (``dual_cell_area_2d`` / ``v_star`` fan walk), undercounting the 2D
+    box corners by O(h^2) and 1-4 % interior / ~20 % boundary in 3D
+    (partition-of-unity deficit 6-14 %,
+    docs_temp/audit/dual-volume-3d.md).  With ``HC._simplices`` cached
+    and barycentric duals, dim==2 AND dim==3 now use the exact identity
+    Vol_i = (1/(dim+1)) * sum_{T ∋ i} |T|.  The dim==3 production
+    switch was enabled 2026-07-29 (lane A) together with the canonical
+    3D qhull input order and the 3D droplet retopology floor re-pin
+    7.3768e-5 -> 7.274172e-5 (NOTE(lane3-dual-volume) in stress.py);
+    the fan walk remains as the circumcentric / no-simplex-cache
+    fallback.
+    """
+
+    def test_partition_of_unity_2d_jittered(self):
+        """Refined + jittered 2D mesh tiles the unit square to 1e-12."""
+        from ddgclib.operators.stress import dual_volume
+
+        HC, _ = _build_jittered_delaunay_mesh(2, n_refine=3)
+        total = sum(dual_volume(v, HC, dim=2) for v in HC.V)
+        npt.assert_allclose(total, 1.0, rtol=1e-12)
+
+    def test_partition_of_unity_3d_jittered_hyperct(self):
+        """Exact 3D dual volumes tile the unit cube to 1e-12.
+
+        Uses ``hyperct.ddg.simplex_dual_volumes`` directly — the exact
+        3D routine is upstream; the ddgclib production 3D path is
+        gated (see class docstring).
+        """
+        from hyperct.ddg import simplex_dual_volumes
+
+        HC, _ = _build_jittered_delaunay_mesh(3, n_refine=2)
+        vols = simplex_dual_volumes(HC, 3)
+        npt.assert_allclose(sum(vols.values()), 1.0, rtol=1e-12)
+
+    def test_partition_of_unity_3d_jittered_production(self):
+        """Production 3D dual_volume tiles the unit cube to 1e-12.
+
+        Was a strict xfail (fan-walk undercount, sums 0.86-0.94 on
+        unstructured meshes, audit/dual-volume-3d.md) until the 3D
+        exact-simplex switch was enabled 2026-07-29, together with the
+        3D droplet retopology floor re-pin 7.3768e-5 -> 7.274172e-5 —
+        see NOTE(lane3-dual-volume) in stress.py.
+        """
+        from ddgclib.operators.stress import dual_volume
+
+        HC, _ = _build_jittered_delaunay_mesh(3, n_refine=2)
+        total = sum(dual_volume(v, HC, dim=3) for v in HC.V)
+        npt.assert_allclose(total, 1.0, rtol=1e-12)
+
+    def test_agreement_with_geometric_path_2d_interior(self):
+        """Exact rule matches dual_cell_area_2d on structured interior
+        vertices (the legacy path is known-exact there)."""
+        from hyperct.ddg import dual_cell_area_2d
+        from ddgclib.operators.stress import dual_volume
+
+        HC, bV = _build_jittered_delaunay_mesh(2, n_refine=3, jitter=0.0)
+        n_checked = 0
+        for v in HC.V:
+            if v in bV:
+                continue
+            npt.assert_allclose(
+                dual_volume(v, HC, dim=2),
+                dual_cell_area_2d(v, include_edge_midpoints=True),
+                rtol=1e-12,
+            )
+            n_checked += 1
+        assert n_checked > 0
+
+    def test_cache_dual_volumes_uses_exact_path(self):
+        """cache_dual_volumes assigns the exact per-vertex values (2D)."""
+        from hyperct.ddg import vertex_dual_volume
+        from ddgclib.operators.stress import cache_dual_volumes
+
+        HC, _ = _build_jittered_delaunay_mesh(2, n_refine=2)
+        cache_dual_volumes(HC, dim=2)
+        for v in HC.V:
+            npt.assert_allclose(
+                v.dual_vol, vertex_dual_volume(HC, v, 2), rtol=1e-13,
+            )
+
+    def test_circumcentric_falls_back_to_geometric(self):
+        """Circumcentric duals must NOT use the barycentric 1/3-rule."""
+        from hyperct.ddg import dual_cell_area_2d
+        from ddgclib.operators.stress import (
+            _use_exact_barycentric_volume, dual_volume,
+        )
+
+        HC, bV = _build_jittered_delaunay_mesh(
+            2, n_refine=2, method='circumcentric',
+        )
+        assert not _use_exact_barycentric_volume(HC)
+        for v in HC.V:
+            if v in bV:
+                continue
+            npt.assert_allclose(
+                dual_volume(v, HC, dim=2),
+                dual_cell_area_2d(v, include_edge_midpoints=True),
+                rtol=1e-13,
+            )
+            break
+
+    def test_retopologize_exact_2d(self):
+        """_retopologize (2D path) assigns exact dual_vol to every
+        vertex and the cached volumes tile the domain."""
+        from hyperct.ddg import vertex_dual_volume
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize,
+        )
+
+        HC, bV = _build_jittered_delaunay_mesh(2, n_refine=2)
+        for v in HC.V:
+            v.u = np.zeros(2)
+        bV_run = set(bV)
+        _retopologize(HC, bV_run, dim=2)
+        for v in HC.V:
+            npt.assert_allclose(
+                v.dual_vol, vertex_dual_volume(HC, v, 2), rtol=1e-13,
+            )
+        total = sum(v.dual_vol for v in HC.V)
+        npt.assert_allclose(total, 1.0, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # Test dudt_i alias and integrator integration
 # ---------------------------------------------------------------------------
 

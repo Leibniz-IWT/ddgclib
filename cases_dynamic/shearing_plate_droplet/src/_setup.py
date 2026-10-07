@@ -17,14 +17,14 @@ post-processing its boundary set to:
    so that they are treated as interior after the first periodic
    retriangulation.
 
-The retopologize function composes the periodic retriangulation
-(``retopologize_periodic``) with the multiphase state refresh
-(``mps.refresh``) — effectively the periodic analogue of
-``_retopologize_multiphase``.
+The retopologize function is the library's
+``ddgclib.methods._retopo.retopologize_multiphase_periodic`` (periodic
+retriangulation + multiphase refresh + redistribution, the periodic
+analogue of ``_retopologize_multiphase``), built by
+``methods.retopologize_fn`` of a ``connectivity='periodic'`` config;
+the force is ``methods.dudt_fn`` (laneW, 2026-10-05).
 """
 from __future__ import annotations
-
-from functools import partial
 
 import numpy as np
 
@@ -35,8 +35,7 @@ from ddgclib._boundary_conditions import (
     BoundaryConditionSet, ShearingPlateBC,
 )
 from ddgclib.geometry.domains import droplet_in_box_2d, droplet_in_box_3d
-from ddgclib.geometry.periodic import retopologize_periodic
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
+from ddgclib.methods import SolverMethods
 
 
 _WALL_TOL = 1e-10
@@ -98,6 +97,8 @@ def setup_shearing_plate_droplet(
     P0: float = 0.0,
     distr_law: str = "sinusoidal",
     redistribute_mass: bool = True,
+    box_shift: str = 'move_all',
+    methods=None,
 ):
     """Build the shearing-plate droplet problem.
 
@@ -108,7 +109,27 @@ def setup_shearing_plate_droplet(
         periodic Delaunay reconnection so that the pre-retopo per-phase
         pressure field is preserved while total per-phase mass is
         conserved.  See ``setup_oscillating_droplet`` for the full
-        rationale.
+        rationale.  Ignored when *methods* is given.
+    box_shift : {'move_all', 'evict'}
+        Passed to ``droplet_in_box_2d`` / ``_3d`` (laneB, 2026-10-05).
+        ``'evict'`` reproduces the pre-laneB outer mesh (2D shipped
+        setup: 22 outer vertices lost in the shift).  The anisotropic
+        rescale below is a separate step with its own collision.
+    methods : ddgclib.methods.SolverMethods or None
+        The solver configuration (``PRESETS['shearing_plate_droplet_2D']``
+        / ``['shearing_plate_droplet_3D']``, normally); it must have
+        ``connectivity='periodic'``, and its ``periodic_axes``,
+        ``split_method`` and ``redistribute_mass`` are the ones used.
+        ``dudt_fn`` is ``methods.dudt_fn(HC, mps=mps, pressure_model=
+        meos)`` (the force axes of the preset are applied), ``retopo_fn``
+        is ``methods.retopologize_fn(mps=mps, domain_bounds=...)`` and
+        is also what step 3 below applies once at setup (laneW,
+        2026-10-05).  ``None`` builds ``SolverMethods(dim, phases=
+        'multi', connectivity='periodic', periodic_axes=(0,) or (0, 2),
+        redistribute_mass=...)`` from the explicit kwarg (the partials
+        the setup used to build by hand; the periodic closure it carried
+        is proven bit-identical to the library function in
+        ``ddgclib/tests/test_methods.py``).
 
     Returns
     -------
@@ -130,6 +151,23 @@ def setup_shearing_plate_droplet(
         Echo of all input parameters plus ``periodic_axes``,
         ``domain_bounds``, ``shear_rate``.
     """
+    # -- Solver configuration --
+    if methods is None:
+        methods = SolverMethods(
+            dim=dim, phases='multi', connectivity='periodic',
+            periodic_axes=(0,) if dim == 2 else (0, 2),
+            redistribute_mass=redistribute_mass)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    elif methods.connectivity != 'periodic':
+        raise ValueError(
+            "the shearing-plate setup runs on connectivity='periodic' "
+            f"(the side faces are periodic, not walls); got "
+            f"{methods.connectivity!r}")
+    periodic_axes = list(methods.periodic_axes)
+    split_method = methods.split_method
+    redistribute_mass = methods.redistribute_mass
+
     # -- Weakly-compressible sound speed default --
     if K_d is None or K_o is None:
         u_scale = max(U_wall, np.sqrt(gamma / (rho_o * R0)))
@@ -165,6 +203,7 @@ def setup_shearing_plate_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
         scale = np.array([L_x / L_build, L_y / L_build])
     elif dim == 3:
@@ -173,6 +212,7 @@ def setup_shearing_plate_droplet(
             refinement_outer=refinement_outer,
             refinement_droplet=refinement_droplet,
             distr_law=distr_law,
+            box_shift=box_shift,
         )
         scale = np.array([L_x / L_build, L_y / L_build, L_z / L_build])
     else:
@@ -191,8 +231,12 @@ def setup_shearing_plate_droplet(
                 new_pos = v.x_a.copy()
                 new_pos[:dim] = v.x_a[:dim] * scale
                 moved.append((v, tuple(new_pos)))
+        # NOTE(laneL): the rescale can put an outer vertex on a key that
+        # another vertex still holds (shipped 2D setup: 1 collision here,
+        # 22 more in the droplet_in_box_2d shift; each loses a vertex).
+        # Old behaviour kept explicitly until the case is repaired.
         for v, new_pos in moved:
-            HC.V.move(v, new_pos)
+            HC.V.move(v, new_pos, on_collision='evict')
 
     # -- Classify walls into plates + periodic faces --
     # Must be done *after* the rescale because HC.V.move mutates the
@@ -223,21 +267,15 @@ def setup_shearing_plate_droplet(
     # 2. Multiphase refresh on the non-periodic mesh so that
     #    v.dual_vol_phase / v.m_phase exist before the first periodic
     #    retopo consumes them.
-    split_method = 'neighbour_count'
     mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
 
-    # -- Periodic + multiphase retopologize (build the closure now so
-    # we can apply it once before the Young-Laplace preload).
-    periodic_axes = [0] if dim == 2 else [0, 2]
+    # -- Periodic + multiphase retopologize (the configuration's; built
+    # now so it can be applied once before the Young-Laplace preload).
     domain_bounds = [(-L_x, L_x), (-L_y, L_y)]
     if dim == 3:
         domain_bounds.append((-L_z, L_z))
 
-    retopo_fn = _make_periodic_multiphase_retopo(
-        mps=mps, periodic_axes=periodic_axes,
-        domain_bounds=domain_bounds, split_method=split_method,
-        redistribute_mass=redistribute_mass,
-    )
+    retopo_fn = methods.retopologize_fn(mps=mps, domain_bounds=domain_bounds)
 
     # 3. Apply the periodic retopologize ONCE so the dual volumes,
     #    per-phase splits and bV reflect the final periodic topology.
@@ -302,10 +340,7 @@ def setup_shearing_plate_droplet(
 
     # -- Acceleration function --
     meos = MultiphaseEOS([eos_outer, eos_drop])
-    dudt_fn = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
+    dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos)
 
     params = {
         'dim': dim, 'R0': R0,
@@ -315,6 +350,7 @@ def setup_shearing_plate_droplet(
         'gamma': gamma, 'K_d': K_d, 'K_o': K_o,
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
+        'box_shift': box_shift,
         'P0': P0, 'distr_law': distr_law,
         'periodic_axes': periodic_axes,
         'domain_bounds': domain_bounds,
@@ -325,50 +361,3 @@ def setup_shearing_plate_droplet(
     groups['interface'] = result.boundary_groups.get('interface', set())
 
     return HC, bV, mps, bc_set, dudt_fn, retopo_fn, groups, params
-
-
-def _make_periodic_multiphase_retopo(
-    mps, periodic_axes, domain_bounds, split_method='neighbour_count',
-    redistribute_mass=False,
-):
-    """Build a retopologize_fn that combines periodic Delaunay with
-    multiphase state refresh.
-
-    Mirrors ``_retopologize_multiphase`` but swaps the non-periodic
-    Delaunay step for :func:`retopologize_periodic`.  Accepts
-    ``remesh_mode`` / ``remesh_kwargs`` for signature compatibility
-    with the integrator — they are currently ignored (periodic adaptive
-    remesh is not implemented).
-
-    When ``redistribute_mass`` is True the pre-retopo per-phase
-    ``dual_vol_phase`` is snapshotted and used as the gating mask in
-    ``redistribute_mass_multiphase`` so that per-phase pressure is
-    preserved across reconnection (mirrors the geometry-aware path in
-    ``_retopologize_multiphase``).
-    """
-    def _retopo(HC, bV, dim, remesh_mode='delaunay', remesh_kwargs=None):
-        _p_snap = None
-        if redistribute_mass and mps is not None:
-            from ddgclib.operators.mass_redistribution import (
-                snapshot_geometry_multiphase,
-            )
-            _p_snap = snapshot_geometry_multiphase(HC, mps.n_phases)
-
-        retopologize_periodic(
-            HC, bV, dim,
-            periodic_axes=periodic_axes,
-            domain_bounds=domain_bounds,
-        )
-        if mps is not None:
-            mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
-
-            if redistribute_mass and _p_snap is not None:
-                from ddgclib.operators.mass_redistribution import (
-                    redistribute_mass_multiphase,
-                )
-                redistribute_mass_multiphase(
-                    HC, dim, mps, bV=bV, pressure_snapshot=_p_snap,
-                )
-                mps.compute_phase_pressures(HC)
-
-    return _retopo

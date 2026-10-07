@@ -366,8 +366,7 @@ class TestHagenPoiseuilleEquilibrium:
         If dudt ≈ 0 at equilibrium, then after one small dt the velocity
         should remain very close to the analytical profile.
         """
-        from functools import partial
-        from ddgclib.dynamic_integrators import euler_velocity_only
+        from ddgclib.methods import SolverMethods
 
         HC, bV, bV_wall, p = equil_fine
         G, mu, h = p["G"], p["mu"], p["h"]
@@ -379,12 +378,13 @@ class TestHagenPoiseuilleEquilibrium:
         bc_set = BoundaryConditionSet()
         bc_set.add(NoSlipWallBC(dim=2), bV_wall)
 
-        from ddgclib.operators.stress import dudt_i
-        dudt_fn = partial(dudt_i, dim=2, mu=mu, HC=HC)
+        # One Eulerian (velocity-only) step on the default per-step
+        # Delaunay retopology, the force bound by the configuration.
+        methods = SolverMethods(dim=2, integrator='euler_velocity_only')
+        dudt_fn = methods.dudt_fn(HC, mu=mu)
 
         dt = 1e-4
-        euler_velocity_only(HC, bV, dudt_fn, dt=dt, n_steps=1, dim=2,
-                            bc_set=bc_set)
+        methods.integrate(HC, bV, dudt_fn, dt=dt, n_steps=1, bc_set=bc_set)
 
         # Velocity change should be small
         max_delta = 0.0

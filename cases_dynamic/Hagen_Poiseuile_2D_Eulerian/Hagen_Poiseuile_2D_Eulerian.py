@@ -19,7 +19,6 @@ with the euler_velocity_only integrator (explicit Euler, fixed mesh).
 import os
 import pickle
 import numpy as np
-from functools import partial
 
 import matplotlib
 matplotlib.use('Agg')
@@ -41,8 +40,7 @@ from ddgclib.initial_conditions import (
     UniformMass,
     PoiseuillePlanar,
 )
-from ddgclib.operators.stress import dudt_i
-from ddgclib.dynamic_integrators import euler_velocity_only
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.data import StateHistory, save_state
 from ddgclib.visualization import plot_fluid
 
@@ -142,7 +140,12 @@ print(f"ICs applied: zero velocity, P gradient G={G:.4f} Pa/m")
 # ============================================================
 # Step 4: Dynamic Integration (Eulerian — fixed mesh)
 # ============================================================
-dudt_fn = partial(dudt_i, dim=d, mu=mu, HC=HC)
+# Solver methods (METHODS.md): Eulerian fixed mesh (velocity-only
+# integrator, validation use), default per-step Delaunay on the unmoved
+# mesh.  dudt = integrated Cauchy stress, p held at the IC.
+methods = PRESETS['hagen_poiseuille_2D_eulerian']
+print(methods.describe())
+dudt_fn = methods.dudt_fn(HC, mu=mu)
 
 dt = 0.005
 n_steps = 2000
@@ -153,12 +156,12 @@ history = StateHistory(fields=['u', 'p'], record_every=record_every)
 print(f"\nRunning: dt={dt}, n_steps={n_steps}, t_final={dt * n_steps:.2f}")
 print(f"Recording every {record_every} steps ({n_steps // record_every} snapshots)")
 
-t_final = euler_velocity_only(
-    HC, bV, dudt_fn,
-    dt=dt, n_steps=n_steps, dim=d,
-    bc_set=bc_set,
-    callback=history.callback,
+t_final = methods.integrate(
+    HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+    bc_set=bc_set, callback=history.callback,
 )
+record_methods(os.path.join(_RESULTS, 'methods.json'), methods, HC,
+               extra={'dt': dt, 'n_steps': n_steps, 'mu': mu, 'G': G})
 
 print(f"Simulation complete: t = {t_final:.4f}")
 

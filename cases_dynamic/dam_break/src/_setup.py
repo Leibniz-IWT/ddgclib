@@ -11,10 +11,13 @@ Two families of setups:
   downstream side are free-surface boundaries that advect freely under
   gravity.  The absolute pressure is tracked by the EOS so that the
   free surface relaxes toward the atmospheric reference pressure.
+
+Both build the force (stress + gravity) and the retopology function
+from :class:`ddgclib.methods.SolverMethods` (``methods.dudt_fn(...,
+body_force=g)`` / ``methods.retopologize_fn``), never by hand (laneW,
+2026-10-05).
 """
 from __future__ import annotations
-
-from functools import partial
 
 import numpy as np
 
@@ -26,14 +29,8 @@ from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
 from ddgclib.geometry.domains import rectangle, box
 from ddgclib.geometry.domains._boundary_groups import identify_face_groups
-from ddgclib.operators.stress import (
-    cache_dual_volumes,
-    stress_acceleration,
-)
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.dynamic_integrators._integrators_dynamic import (
-    _retopologize_multiphase,
-)
+from ddgclib.methods import SolverMethods
+from ddgclib.operators.stress import cache_dual_volumes
 
 
 # =====================================================================
@@ -62,6 +59,7 @@ def setup_dam_break_multiphase(
     n_refine: int,
     alpha_art: float = 0.0,
     redistribute_mass: bool = True,
+    methods=None,
 ):
     """Build a rectangular tank (2D) or box (3D) filled with two phases.
 
@@ -77,11 +75,33 @@ def setup_dam_break_multiphase(
         Delaunay reconnection so that the pre-retopo per-phase pressure
         field is preserved while total per-phase mass is conserved.
         See ``setup_oscillating_droplet`` for the full rationale.
+        Ignored when *methods* is given.
+    methods : ddgclib.methods.SolverMethods or None
+        The solver configuration (``PRESETS['dam_break_2D']`` /
+        ``['dam_break_3D']``, normally).  ``split_method`` and
+        ``redistribute_mass`` are taken from it, ``dudt_fn`` is
+        ``methods.dudt_fn(HC, mps=mps, pressure_model=meos,
+        body_force=g_vec)`` (so ``curvature_path`` and
+        ``area_orientation`` of the preset are applied; gravity is the
+        library's ``body_force`` wrapper, ``dudt_fn.stress_fn`` and
+        ``dudt_fn.body_force`` expose the parts) and ``retopo_fn`` is
+        ``methods.retopologize_fn(mps=mps)`` (laneW, 2026-10-05).
+        ``None`` builds ``SolverMethods(dim, phases='multi',
+        redistribute_mass=...)`` from the explicit kwarg (per-step
+        Delaunay, no remap, hull-frozen walls: the partial the setup
+        used to build by hand, ``ddgclib/tests/test_methods.py``).
 
     Returns
     -------
     HC, bV, mps, bc_set, dudt_fn, retopo_fn, params
     """
+    if methods is None:
+        methods = SolverMethods(dim=dim, phases='multi',
+                                redistribute_mass=redistribute_mass)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    split_method = methods.split_method
+
     # -- Build the tank mesh (single-phase geometry) --
     if dim == 2:
         result = rectangle(
@@ -146,27 +166,77 @@ def setup_dam_break_multiphase(
 
     # -- Initial conditions --
     #
-    # We initialise each phase with uniform density equal to its
-    # reference rho0 so that ``EOS(rho0) = P_atm`` uniformly.  The
-    # initial pressure field is therefore flat at ``P_atm`` in both
-    # phases, and the only net force at t=0 is gravity (minus the
-    # interface surface tension).  This avoids the large initial
-    # transient that a hydrostatic IC would produce at truncated-dual
-    # corner vertices.  The hydrostatic profile then develops
-    # dynamically as the simulation runs.
+    # NOTE(laneF-hydrostatic-ic): the phases are initialised in the
+    # HYDROSTATIC state via a per-phase mass preload (the oscillating-
+    # droplet Young–Laplace preload pattern), NOT with a flat pressure
+    # field.  Under ``redistribute_mass=True`` the per-vertex pressure
+    # STRUCTURE is preserved across every step (redistribution rebuilds
+    # masses from the pre-step pressure snapshot; only a uniform
+    # per-phase offset can evolve — laneD §1.1).  With the previous
+    # flat-at-P_atm IC the hydrostatic gradient could therefore NEVER
+    # develop: measured after 0.098 s under gravity the liquid column
+    # read a uniform +0.121 Pa gauge instead of the ~981 Pa hydrostatic
+    # head, the dam face saw ~0 horizontal driving force, and the
+    # collapse stalled at |u| ~ 0.02 m/s (laneF log).  The hydrostatic
+    # IC puts the collapse-driving pressure structure (liquid head vs
+    # atmospheric air across the dam face) into the state that the
+    # redistribution preserves.
     #
     # We run the Delaunay retopologisation once here and assign mass
-    # AFTER retopology so that density equals rho0 on the mesh that
-    # the integrator will actually see at step 0.  Without this the
-    # first retopologisation inside the integrator re-splits dual
-    # volumes while preserving mass, which creates large spurious
-    # density deviations at interface vertices.
+    # AFTER retopology so that density matches the target pressure on
+    # the mesh that the integrator will actually see at step 0.  This is
+    # a one-shot GEOMETRY rebuild (connectivity, boundary, duals; no
+    # multiphase refresh, no remap), deliberately not the preset's
+    # per-step retopology, which the integrator runs at step 0 anyway.
     ZeroVelocity(dim=dim).apply(HC, bV_walls)
-    mps.refresh(HC, dim, reset_mass=True)
+    mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
 
     from ddgclib.dynamic_integrators._integrators_dynamic import _retopologize
     _retopologize(HC, bV_walls, dim)
-    mps.refresh(HC, dim, reset_mass=True)
+    mps.refresh(HC, dim, reset_mass=True, split_method=split_method)
+    # NOTE(laneF-vote-labels, 2026-10-05): the refresh above labels the
+    # simplices with the spatial criterion; every refresh the integrator
+    # runs labels them by the vertex vote (assign_simplex_phases_from_
+    # vertices).  In 3D the two differ (laneS: 9 of 189 vertices change
+    # label), so a preload on the criterion sub-volumes is not
+    # hydrostatic on the vote sub-volumes: measured p_liq 101203 to
+    # 120945 Pa (the EOS clip, +9.6 kPa) at t = 0 instead of P_atm + the
+    # head, which blew the 3D column apart (|a| 4e3 m/s^2 at step 0).
+    # One vote refresh BEFORE the preload puts the masses on the labels
+    # that run.  In 2D the vote reproduces the criterion labels, so the
+    # setup state is bit-identical (digest 952d4544676ca366 of the
+    # shipped run).
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+
+    # Hydrostatic targets (linear EOS n=1 -> exact closed-form density).
+    # Gas: atmospheric column over the full tank height.  Liquid:
+    # continuous with the gas pressure at the column top y = col_h.
+    def _p_gas(y: float) -> float:
+        return P_atm + rho_g * g * (H - y)
+
+    def _p_liq(y: float) -> float:
+        return P_atm + rho_g * g * (H - col_h) + rho_l * g * (col_h - y)
+
+    _p_target = (_p_gas, _p_liq)
+    for v in HC.V:
+        y = float(v.x_a[gravity_axis])
+        for k in (0, 1):
+            vol_k = v.dual_vol_phase[k]
+            if vol_k > 1e-30:
+                rho_k = float(mps.phases[k].eos.density(_p_target[k](y)))
+                v.m_phase[k] = rho_k * vol_k
+            else:
+                # NOTE(laneF-vote-labels): no mass where the vote
+                # sub-volume is zero.  The criterion-label refresh above
+                # left liquid mass on 3D vertices the vote gives no
+                # liquid, and the volume ledger released it into the
+                # pool at step 0 (+8.7 % liquid mass, +8.5 kPa).
+                v.m_phase[k] = 0.0
+        v.m = float(np.sum(v.m_phase))
+
+    # Final refresh: recompute per-phase pressures from the preloaded
+    # masses (reset_mass=False preserves them).
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
 
     # -- Boundary conditions: all outer walls no-slip --
     bc_set = BoundaryConditionSet()
@@ -174,19 +244,11 @@ def setup_dam_break_multiphase(
 
     # -- Acceleration (pressure + viscous + surface tension) + gravity --
     meos = MultiphaseEOS([eos_gas, eos_liq])
-    _stress_fn = partial(
-        multiphase_dudt_i,
-        dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
-
     g_vec = np.zeros(dim)
     g_vec[gravity_axis] = -g
-
-    def dudt_fn(v):
-        return _stress_fn(v) + g_vec
-
-    retopo_fn = partial(_retopologize_multiphase, mps=mps,
-                        redistribute_mass=redistribute_mass)
+    dudt_fn = methods.dudt_fn(HC, mps=mps, pressure_model=meos,
+                              body_force=g_vec)
+    retopo_fn = methods.retopologize_fn(mps=mps)
 
     params = {
         'dim': dim,
@@ -220,6 +282,7 @@ def setup_dam_break_single_phase(
     P_atm: float,
     n_refine: int,
     alpha_art: float = 0.0,
+    methods=None,
 ):
     """Build only the liquid column mesh with a free surface.
 
@@ -235,10 +298,23 @@ def setup_dam_break_single_phase(
     surface this collapses to ``P = P_atm`` which the EOS tracks
     through the weakly-compressible Tait–Murnaghan relation.
 
+    *methods* (``PRESETS['dam_break_2D_no_air']`` / ``['dam_break_3D_no_air']``,
+    normally; ``None`` = ``SolverMethods(dim)``, the single-phase
+    default: symplectic Euler, per-step Delaunay, hull-frozen) builds
+    ``dudt_fn = methods.dudt_fn(HC, mu=mu_eff, pressure_model=eos,
+    body_force=g_vec)``; the runners pass ``boundary_filter`` (the wall
+    criterion ``v.is_wall``) to ``methods.integrate``.  The configuration
+    is laneK's measured-unstable one (bare Delaunay + EOS, no remap):
+    construction of the force warns.
+
     Returns
     -------
     HC, bV, bc_set, dudt_fn, params
     """
+    if methods is None:
+        methods = SolverMethods(dim=dim)
+    elif methods.dim != dim:
+        raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
     if dim == 2:
         result = rectangle(
             L=col_w, h=col_h, refinement=n_refine, flow_axis=0,
@@ -324,16 +400,10 @@ def setup_dam_break_single_phase(
     bc_set.add(NoSlipWallBC(dim=dim), bV_walls)
 
     # -- Gravity-augmented single-phase stress acceleration --
-    _stress_fn = partial(
-        stress_acceleration, dim=dim, mu=mu_eff, HC=HC,
-        pressure_model=eos_liq,
-    )
-
     g_vec = np.zeros(dim)
     g_vec[gravity_axis] = -g
-
-    def dudt_fn(v):
-        return _stress_fn(v) + g_vec
+    dudt_fn = methods.dudt_fn(HC, mu=mu_eff, pressure_model=eos_liq,
+                              body_force=g_vec)
 
     params = {
         'dim': dim, 'a': a,

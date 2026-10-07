@@ -3,13 +3,22 @@
 Cluster-ready 3D Hagen-Poiseuille pipe flow with PyTorch/CUDA backend.
 =====================================================================
 
-Designed for GPU nodes (e.g. H100).  Wraps the existing case script with:
+Designed for GPU nodes (e.g. H100).  Runs the shared runner body
+(``cases_dynamic/Hagen_Poiseuile/src/_run.py``, preset ``hagen_poiseuille_3D``)
+with:
 
-  - Explicit backend selection (``--backend torch|gpu|numpy|multiprocessing``)
+  - Explicit backend selection (``--backend torch|gpu|numpy|multiprocessing``),
+    the method axis ``backend`` replaced on the preset.  The backend only
+    computes the dual face areas of the 3D retopology (``batch_e_star``);
+    the forces of the preset do not read them, so the result is the numpy
+    one.  ``torch`` needs PyTorch (ImportError otherwise); ``gpu`` picks
+    PyTorch + CUDA, then PyTorch on the CPU, then numpy.
   - CUDA device reporting (driver, memory, compute capability)
-  - Wall-clock timing per phase and per-step throughput
-  - Headless (no display) — all plots saved to ``fig/``
+  - Wall-clock throughput
+  - Headless (no display): all plots saved to ``fig/``
   - SLURM-friendly: reads ``SLURM_*`` env vars for logging
+
+Outputs: ``results/hagen_poiseuille_3D_cluster/``.
 
 Usage on a SLURM cluster::
 
@@ -35,9 +44,9 @@ Usage on a SLURM cluster::
         --workers 8
     EOF
 
-Local test (quick smoke test)::
+Local test (quick smoke test; runs without PyTorch as well)::
 
-    python run_cluster.py --backend torch --n-refine 1 --n-steps 50 --dt 0.01
+    python run_cluster.py --backend gpu --n-refine 1 --n-steps 50 --dt 0.01
 """
 
 import argparse
@@ -100,70 +109,6 @@ def print_torch_info():
     print()
 
 
-def get_backend_instance(name, workers=None):
-    """Create a backend instance by name, with diagnostics."""
-    from hyperct._backend import get_backend
-
-    print(f"Initializing backend: {name!r}")
-    print_torch_info()
-
-    if name == "multiprocessing":
-        w = workers or 4
-        backend = get_backend("multiprocessing", workers=w)
-        print(f"  Multiprocessing workers = {w}")
-    elif name in ("torch", "gpu"):
-        backend = get_backend(name)
-        print(f"  Backend device = {backend.device}")
-        if hasattr(backend, 'has_cuda'):
-            print(f"  Using CUDA     = {backend.has_cuda}")
-    elif name == "numpy":
-        backend = get_backend("numpy")
-    else:
-        raise ValueError(f"Unknown backend: {name!r}.  "
-                         "Choose from: numpy, torch, gpu, multiprocessing")
-
-    print(f"  Backend ready: {backend.name}")
-    print()
-    return backend
-
-
-# ============================================================
-# Timer utility
-# ============================================================
-
-class PhaseTimer:
-    """Simple wall-clock timer for named phases."""
-
-    def __init__(self):
-        self.phases = {}
-        self._current = None
-        self._t0 = None
-
-    def start(self, name):
-        self._current = name
-        self._t0 = time.perf_counter()
-
-    def stop(self):
-        if self._current and self._t0:
-            elapsed = time.perf_counter() - self._t0
-            self.phases[self._current] = elapsed
-            self._current = None
-            self._t0 = None
-            return elapsed
-        return 0.0
-
-    def report(self):
-        print("\n" + "=" * 72)
-        print("Timing summary")
-        print("=" * 72)
-        total = 0.0
-        for name, dt in self.phases.items():
-            print(f"  {name:<30s}  {dt:>10.2f} s")
-            total += dt
-        print(f"  {'TOTAL':<30s}  {total:>10.2f} s")
-        print()
-
-
 # ============================================================
 # Main
 # ============================================================
@@ -183,97 +128,34 @@ def main():
     parser.add_argument('--dt', type=float, default=0.01,
                         help='Time step size')
     parser.add_argument('--workers', type=int, default=8,
-                        help='Threads for parallel stress computation')
-    parser.add_argument('--record-every', type=int, default=100,
-                        help='Record snapshot every N steps')
-    parser.add_argument('--save-every', type=int, default=500,
-                        help='Save state to disk every N steps')
+                        help='Processes for the force evaluation')
     args = parser.parse_args()
 
-    timer = PhaseTimer()
-
-    # --- Environment ---
     print_env()
+    if args.backend != 'numpy':
+        print(f"Backend: {args.backend!r}")
+        print_torch_info()
 
-    # --- Backend ---
-    timer.start("Backend initialization")
-    backend = get_backend_instance(args.backend, workers=args.workers)
-    timer.stop()
+    # The run itself is the shared runner body with the preset
+    # hagen_poiseuille_3D; backend and workers are method axes replaced on
+    # it (recorded in methods.json).
+    from cases_dynamic.Hagen_Poiseuile.src._run import run_case
+    argv = ['--n-refine', str(args.n_refine), '--steps', str(args.n_steps),
+            '--dt', str(args.dt), '--workers', str(args.workers),
+            '--headless', '--tag', 'cluster']
+    if args.backend != 'numpy':
+        argv += ['--backend', args.backend]
 
-    # --- Import case module (after backend is ready) ---
-    import Hagen_Poiseuile_3D as hp3d
+    t0 = time.perf_counter()
+    summary = run_case('hagen_poiseuille_3D', argv)
+    wall = time.perf_counter() - t0
 
-    # Override module-level config from CLI args
-    hp3d.n_refine = args.n_refine
-    hp3d.n_workers = args.workers
-    hp3d.record_every = args.record_every
-    hp3d.save_every = args.save_every
-    hp3d._retop_backend = backend
-
-    hp3d.print_params()
-
-    # --- Step 1: Build domain ---
-    timer.start("Domain construction")
-    HC, bV, domain_result = hp3d.build_domain(args.n_refine)
-    timer.stop()
-
-    n_verts = sum(1 for _ in HC.V)
-    print(f"  Total vertices: {n_verts}")
-
-    # --- Step 2: Inlet ghost mesh ---
-    timer.start("Inlet mesh construction")
-    unit_mesh = hp3d.build_inlet_mesh(args.n_refine)
-    timer.stop()
-
-    # --- Step 3: Boundary conditions ---
-    timer.start("Boundary conditions setup")
-    bc_set = hp3d.build_bc_set(HC, bV, unit_mesh)
-    timer.stop()
-
-    # --- Step 4: Initial conditions ---
-    timer.start("Initial conditions")
-    hp3d.apply_initial_conditions(HC, bV)
-    bc_set.apply_all(HC, bV, dt=0.0)
-
-    from hyperct.ddg import compute_vd
-    compute_vd(HC, method="barycentric", backend=backend)
-    timer.stop()
-
-    # --- Step 5: Run simulation ---
-    timer.start("Simulation")
-    t0_sim = time.perf_counter()
-
-    t_final, history = hp3d.run_simulation(
-        HC, bV, bc_set,
-        n_steps_override=args.n_steps,
-        dt_override=args.dt,
-    )
-
-    sim_wall = time.perf_counter() - t0_sim
-    timer.stop()
-
-    # Throughput metrics
-    n_verts_final = sum(1 for _ in HC.V)
-    steps_per_sec = args.n_steps / sim_wall if sim_wall > 0 else 0
-    print(f"\n  Throughput: {steps_per_sec:.1f} steps/s")
-    print(f"  Final vertex count: {n_verts_final}")
-    print(f"  Wall time: {sim_wall:.1f} s "
-          f"({sim_wall/60:.1f} min)")
-
-    # --- Step 6: Save and analyse ---
-    timer.start("Post-processing")
-    hp3d.save_results(HC, bV, t_final, history)
-    hp3d.analyse_profile(HC, bV)
-    timer.stop()
-
-    # --- Timing report ---
-    timer.report()
-
-    print("Done. Results in:")
-    print(f"  {hp3d._RESULTS}/")
-    print(f"  {hp3d._FIG}/")
+    print(f"\n  Throughput: {args.n_steps / wall:.1f} steps/s")
+    print(f"  Final vertex count: {summary['n_vertices_end']}")
+    print(f"  Wall time: {wall:.1f} s ({wall / 60:.1f} min)")
     print("\nVisualize with:")
-    print(f"  python visualize_hp3d.py --no-polyscope")
+    print("  python visualize_hp3d.py --no-polyscope "
+          "--results-dir results/hagen_poiseuille_3D_cluster")
 
 
 if __name__ == "__main__":

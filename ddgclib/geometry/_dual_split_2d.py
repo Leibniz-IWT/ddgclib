@@ -376,7 +376,23 @@ def _clip_tet_by_plane(
 
 
 def _dual_volume_3d(v, HC) -> float:
-    """Total dual cell volume at ``v`` (3D)."""
+    """Total dual cell volume at ``v`` (3D).
+
+    Prefers the cached ``v.dual_vol`` — the authoritative value used
+    throughout the multiphase pipeline (set by ``cache_dual_volumes`` /
+    the integrator retopo step) — so the per-phase split partitions
+    exactly the volume the EOS reads.  Recomputing here instead can
+    desync from the cache: e.g. ``assign_simplex_phases`` auto-populates
+    ``HC._simplices`` via Delaunay on meshes built with structured
+    (non-Delaunay) connectivity, after which the exact simplex path of
+    ``dual_volume`` (NOTE(lane3-dual-volume), enabled in 3D 2026-07-29)
+    measures a different triangulation than the one ``v.dual_vol`` was
+    cached from.  Falls back to on-the-fly computation when no cache
+    exists.
+    """
+    cached = getattr(v, 'dual_vol', None)
+    if cached is not None:
+        return float(cached)
     from ddgclib.operators.stress import dual_volume
     return float(dual_volume(v, HC, dim=3))
 

@@ -11,7 +11,11 @@ Produces:
   fig_equilibrium/static_droplet_2D_radius.png
   results_equilibrium/snapshots/  (JSON snapshots)
   results_equilibrium/score.json  (equilibrium_score)
+
+``--box-shift evict`` runs the lossy pre-laneB outer mesh (A/B; suffixed
+artifacts, see oscillating_droplet_2D.py).
 """
+import argparse
 import os
 import sys
 
@@ -32,8 +36,8 @@ from cases_dynamic.oscillating_droplet.src._plot_helpers import (
 from cases_dynamic.oscillating_droplet.src._metrics import (
     equilibrium_score, save_score,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _FIG = os.path.join(_CASE_DIR, 'fig_equilibrium')
@@ -41,24 +45,39 @@ _RESULTS = os.path.join(_CASE_DIR, 'results_equilibrium')
 _SNAPSHOTS = os.path.join(_RESULTS, 'snapshots')
 
 
-def main():
+def main(box_shift: str = 'move_all'):
     dim = 2
     epsilon = 0.0
     print("=" * 60)
     print("2D Static Droplet — Equilibrium Metric")
     print("=" * 60)
+    suffix = '' if box_shift == 'move_all' else f'_{box_shift}'
+    snapshots_dir = _SNAPSHOTS + suffix
 
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = \
+    # connectivity='dual_only_bare': ddgclib.methods._retopo.bare_dual_refresh
+    # (formerly a closure in this file): HC.boundary + compute_vd +
+    # cache_dual_volumes + per-phase split every step, no mps.refresh, no
+    # redistribution, no EOS update.  Delaunay edge flips on the
+    # nearly-static mesh cause discontinuous dual-volume changes that
+    # break the Young-Laplace balance (INVESTIGATION_PROMPT.md §3); the
+    # force balance at fixed topology is what this test validates.
+    methods = PRESETS['static_droplet_2D']
+    print(methods.describe())
+
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, params = \
         setup_oscillating_droplet(
             dim=dim, R0=R0, epsilon=epsilon, l=l,
             rho_d=rho_d, rho_o=rho_o, mu_d=mu_d, mu_o=mu_o,
             gamma=gamma, K_d=K_d, K_o=K_o, L_domain=L_domain,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            box_shift=box_shift,
+            methods=methods,   # every method choice of the setup and run
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
-    print(f"Mesh: {n_verts} vertices, {n_iface} interface")
+    print(f"Mesh: {n_verts} vertices, {n_iface} interface "
+          f"(box_shift={box_shift})")
 
     c_s = float(np.sqrt(K_d / rho_d))
     dx_min = min(
@@ -73,12 +92,12 @@ def main():
     record_every = 1
     print(f"dt={dt:.2e}, n_steps={n_steps}, t_end={t_end:.4e}")
 
-    os.makedirs(_SNAPSHOTS, exist_ok=True)
+    os.makedirs(snapshots_dir, exist_ok=True)
     os.makedirs(_FIG, exist_ok=True)
 
     history = StateHistory(
         fields=['u', 'p', 'phase', 'is_interface'],
-        record_every=record_every, save_dir=_SNAPSHOTS,
+        record_every=record_every, save_dir=snapshots_dir,
     )
 
     diag_list: list[dict] = []
@@ -101,39 +120,24 @@ def main():
                       f"R_max={d['R_max']:.6f} R_min={d['R_min']:.6f} | "
                       f"mass={d['total_mass']:.6e}")
 
-    # Use dual-only recomputation (no Delaunay retopologization) for
-    # this equilibrium test.  Delaunay edge flips on the nearly-static
-    # mesh cause discontinuous dual-volume changes that break the
-    # Young-Laplace pressure balance (see INVESTIGATION_PROMPT.md §3).
-    # The underlying physics (force balance at fixed topology) is what
-    # this test validates; mesh adaptivity is tested separately.
-    from hyperct.ddg import compute_vd
-    from ddgclib.operators.stress import cache_dual_volumes
-    from functools import partial as _partial
-
-    def _dual_only_retopo(HC, bV, dim, _mps=None, **_kw):
-        dV = HC.boundary()
-        for v in HC.V:
-            v.boundary = v in dV
-        compute_vd(HC, method="barycentric")
-        cache_dual_volumes(HC, dim)
-        if _mps is not None:
-            _mps.split_dual_volumes(HC, dim)
-        bV.clear()
-        bV.update(dV)
-
     print("\nRunning simulation (dual-only retopo)...")
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback,
-        retopologize_fn=_partial(_dual_only_retopo, _mps=mps),
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
     )
     record(t_final)
 
     # -- Score --
     score = equilibrium_score(diag_list, M0=M0, c_s=c_s, R0=R0)
-    score_path = os.path.join(_RESULTS, 'score.json')
-    save_score(score_path, score)
+    score_path = os.path.join(_RESULTS, f'score{suffix}.json')
+    save_score(score_path, score, methods=methods)   # self-describing score
+    record_methods(
+        os.path.join(_RESULTS, f'methods{suffix}.json'), methods, HC,
+        extra={'dt': dt, 'n_steps': n_steps,
+               'refinement_outer': n_refine_outer,
+               'refinement_droplet': n_refine_droplet,
+               'box_shift': params['box_shift']},
+    )
     print(f"\nEquilibrium score saved to {score_path}")
     print(f"  summary                  = {score['summary']:.4e}")
     print(f"  max_KE_normalized        = {score['max_KE_normalized']:.4e}")
@@ -153,14 +157,14 @@ def main():
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_radius_envelope(t_arr, R_max_arr, None, R0=R0, ax=ax,
                              title="Static droplet R_max (should stay at R0)")
-        fig.savefig(os.path.join(_FIG, 'static_droplet_2D_radius.png'),
+        fig.savefig(os.path.join(_FIG, f'static_droplet_2D_radius{suffix}.png'),
                     dpi=150)
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(8, 5))
         plot_energy_history(t_arr, KE_arr, ax=ax,
                             title="Static droplet KE (should stay ~0)")
-        fig.savefig(os.path.join(_FIG, 'static_droplet_2D_energy.png'),
+        fig.savefig(os.path.join(_FIG, f'static_droplet_2D_energy{suffix}.png'),
                     dpi=150)
         plt.close(fig)
         print("Plots saved to fig_equilibrium/")
@@ -174,13 +178,13 @@ def main():
             zoom = 2.2 * R0
             dynamic_plot_fluid(
                 history, HC, bV=bV,
-                save_path=os.path.join(_FIG, 'static_droplet_2D.mp4'),
+                save_path=os.path.join(_FIG, f'static_droplet_2D{suffix}.mp4'),
                 fps=20, dpi=100,
                 xlim=(-zoom, zoom), ylim=(-zoom, zoom),
                 phase_field='phase', interface_field='is_interface',
                 reference_R=R0,
             )
-            print(f"Animation saved to {_FIG}/static_droplet_2D.mp4")
+            print(f"Animation saved to {_FIG}/static_droplet_2D{suffix}.mp4")
         except Exception as e:
             print(f"Animation failed: {e}")
 
@@ -188,4 +192,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--box-shift', choices=('move_all', 'evict'), default='move_all',
+        dest='box_shift',
+        help="Outer box shift of droplet_in_box_2d (laneB): 'evict' is "
+             "the lossy pre-laneB mesh, written to suffixed artifacts")
+    main(box_shift=parser.parse_args().box_shift)

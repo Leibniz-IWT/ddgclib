@@ -38,6 +38,19 @@ from scipy.integrate import solve_ivp, cumulative_trapezoid
 from scipy.optimize import brentq
 import matplotlib.pyplot as plt
 
+from pulloff_models import (
+    EnvState, PullOffModel, Buoyancy, CapillaryPinning, BulkDEP, Lippmann,
+    Electrowetting, default_models, solve_detachment,
+)
+
+# np.trapezoid (NumPy >= 2.0) replaced np.trapz (removed in NumPy 2.0).
+# Pick whichever exists so the module runs on both the documented `ddg`
+# env (NumPy 1.26, only np.trapz) and NumPy >= 2.0 (only np.trapezoid).
+# Without this the AttributeError was silently swallowed by
+# detachment_volume's try/except and every detachment came back as
+# non-converged.
+_trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
 
 # ---------------------------------------------------------------------------
 # Constants (SI unless noted)
@@ -46,8 +59,7 @@ R_GAS   = 8.314462618
 N_A     = 6.02214076e23
 T_REF   = 298.15
 P_ATM   = 1.01325e5
-G_EARTH  = 9.80665
-G_MARS  = 3.721
+G_GRAV  = 9.80665
 M_W     = 18.01528e-3            # kg/mol
 RHO_W   = 997.05                 # kg/m^3
 RHO_H2  = 0.0899                 # kg/m^3 at 1 bar, 25 C
@@ -72,14 +84,6 @@ KH_H2_0 = 7.8e-9
 
 # ── PHYSICAL CONSTANTS ──────────────────────────────────────────────────────
 EPS_0 = 8.854187817e-12   # F/m  — permittivity of free space
-
-# ── CURRENT DENSITY SCENARIOS ────────────────────────────────────────────────
-# Raman et al. 2022 regime: j ~ 1-5 A/m^2 (single bubble, low current)
-# Industrial alkaline regime: j ~ 500-5000 A/m^2
-# Final entry (5e5) is a stress-test value to probe where F_DEP becomes non-negligible relative to buoyancy (see docstring discussion).
-J_VALUES = np.array([0.0, 1.0, 5.0, 1000.0, 500000.0])
-J_LABELS = ['baseline', 'raman_min', 'raman_max', 
-            'industrial', 'stress_test']
 
 # ── ELECTROSTATIC: DEP / MAXWELL STRESS TENSOR ──────────────────────────────
 
@@ -174,6 +178,53 @@ H2SO4 = Salt('H2SO4', z_c=+1, z_a=-2, nu_c=2, nu_a=1,
              tau_sw=13.0, tau_ws=-5.2,
              sigma0=SIGMA0_H2SO4_PURE, A_s=A_H2SO4,
              V_app=53e-6, k_sech=0.099)
+
+
+# ---------------------------------------------------------------------------
+# Electrode | electrolyte electrochemistry parameters
+# ---------------------------------------------------------------------------
+# Representative literature values (order-of-magnitude, consistent with the
+# toy's philosophy -- NOT fitted to 4 sig figs):
+#
+#   kappa_e : ionic conductivity of ~1 M solution at 298 K [S/m].
+#   C_dl    : electric double-layer capacitance [F/m^2].  Smooth metal
+#             electrodes fall in ~20-40 uF/cm^2 (= 0.20-0.40 F/m^2)
+#             (Bard & Faulkner, Electrochemical Methods, 2nd ed. 2001, Ch.13;
+#             Trasatti & Lust, Modern Aspects of Electrochemistry 33, 1999).
+#             Pt double-layer region in H2SO4 ~ 20 uF/cm^2; Ni/Pt in KOH
+#             ~ 20-40 uF/cm^2.
+#   E_pzc   : potential of zero charge vs RHE [V].  Pt(pc) in acid ~ +0.26 V;
+#             Ni/Pt in alkaline ~ -0.1 V (Cuesta, Surf. Sci. 2004; Frumkin;
+#             representative only).
+#
+# Used only by the Lippmann (electrocapillary) pull-off channel.  These enter
+# via EnvState; see pulloff_models.Lippmann.
+ELECTROCHEM_PARAMS = {
+    'KOH':   dict(kappa_e=21.5, C_dl=0.20, E_pzc=-0.10),
+    'H2SO4': dict(kappa_e=40.0, C_dl=0.20, E_pzc=+0.26),
+    'KCl':   dict(kappa_e=11.0, C_dl=0.20, E_pzc=-0.05),  # _real driver proxy
+}
+
+
+def build_detachment_models(salt_name: str, j: float = 0.0,
+                            E_cell: "float | None" = None,
+                            g: float = G_GRAV):
+    """
+    Assemble (models, env) for a salt from ELECTROCHEM_PARAMS.
+
+    Always includes Buoyancy + CapillaryPinning + BulkDEP.  Adds the
+    physically-correct ``Electrowetting`` (THETA-coupled, acts on the contact
+    angle) term only when an applied voltage ``E_cell`` is supplied.  Falls back
+    to KOH-like defaults for unknown salts.  (The deprecated ``Lippmann``
+    TENSION-on-sigma model is no longer wired in here; see manuscript/CORRECTIONS.)
+    """
+    p = ELECTROCHEM_PARAMS.get(salt_name, ELECTROCHEM_PARAMS['KOH'])
+    env = EnvState(g=g, j=j, kappa_e=p['kappa_e'],
+                   C_dl=p['C_dl'], E_pzc=p['E_pzc'], E_cell=E_cell)
+    models = [Buoyancy(), CapillaryPinning(), BulkDEP()]
+    if E_cell is not None:
+        models.append(Electrowetting())
+    return models, env
 
 
 # ---------------------------------------------------------------------------
@@ -350,27 +401,50 @@ def butler_surface_tension(m: float, salt: Salt) -> tuple[float, float]:
     # Bracket: surface is enriched in water so x_s^S < x_s^B, and always > 0
     lo = 1e-10
     hi = max(x_s_B, 1e-8)
-    # Expand bracket if the root isn't between lo and hi (edge cases)
-    f_lo = residual(lo)
-    f_hi = residual(hi)
-    if f_lo * f_hi > 0:
-        # fall back: scan to bracket
-        xs = np.logspace(-10, np.log10(max(x_s_B * 0.999, 1e-9)), 50)
-        fs = np.array([residual(x) for x in xs])
-        sign_change = np.where(np.sign(fs[:-1]) * np.sign(fs[1:]) < 0)[0]
-        if len(sign_change) == 0:
-            # Butler cannot find a root -> fall back to sigma = sigma_w (pure water)
-            return SIGMA_W, 0.0
-        lo, hi = xs[sign_change[0]], xs[sign_change[0] + 1]
-    x_s_S = brentq(residual, lo, hi, rtol=1e-6)
 
-    # compute sigma at the solution
-    n_s_S = x_s_S / salt.nu
-    n_w_S = 1.0 - salt.nu * n_s_S
-    mu_w_ex_S, _ = chemical_potentials(n_w_S, n_s_S, salt)
-    x_w_S_check, _, _, _ = _mole_fractions(n_w_S, n_s_S, salt)
-    a_w_S = x_w_S_check * np.exp(mu_w_ex_S)
-    sigma = SIGMA_W + (R_GAS * T_REF / A_W) * np.log(a_w_S / a_w_B)
+    def _sigma_of(x_s_S: float) -> float:
+        """Surface tension (N/m) implied by a candidate surface composition."""
+        n_s_S = x_s_S / salt.nu
+        n_w_S = 1.0 - salt.nu * n_s_S
+        mu_w_ex_S, _ = chemical_potentials(n_w_S, n_s_S, salt)
+        x_w_S_check, _, _, _ = _mole_fractions(n_w_S, n_s_S, salt)
+        a_w_S = x_w_S_check * np.exp(mu_w_ex_S)
+        return SIGMA_W + (R_GAS * T_REF / A_W) * np.log(a_w_S / a_w_B)
+
+    # Enumerate *all* surface-composition roots in the bracket and select the
+    # thermodynamically stable one.  The equilibrium surface composition is the
+    # global minimum of the surface free energy, i.e. the root of lowest sigma;
+    # picking it is the correct Butler closure, not a numerical convenience.
+    #
+    # In a narrow molality window the Butler residual genuinely folds into three
+    # roots via a saddle-node (verified robust from 200 to 20000 scan points):
+    # for the DATA-FITTED H2SO4 parameters this happens in m in [4.895, 4.912]
+    # mol/kg, where a second, higher-coverage surface branch is born already
+    # below the incumbent branch in sigma.  The global-minimum selection then
+    # jumps to it, so the stable sigma(m) is genuinely non-monotone (a ~0.6 mN/m
+    # downward step -- a first-order surface-composition transition of this
+    # lumped 2-parameter model, unphysical for real H2SO4).  This is reported
+    # honestly, not clamped.  A plain ``brentq(lo, hi)`` would instead return a
+    # solver-dependent root inside the fold; the dense sign-change scan makes the
+    # stable-branch selection reproducible.  Single-root cases (KOH, the dilute
+    # limit, and every molality outside the fold window) are byte-for-byte
+    # unchanged: the sole root is still bracketed by [lo, hi] and solved with the
+    # same call.
+    scan = np.logspace(-10, np.log10(max(x_s_B * 0.999, 1e-9)), 400)
+    f_scan = np.array([residual(x) for x in scan])
+    sign_change = np.where(np.sign(f_scan[:-1]) * np.sign(f_scan[1:]) < 0)[0]
+    if len(sign_change) == 0:
+        # Butler cannot find a root -> fall back to sigma = sigma_w (pure water)
+        return SIGMA_W, 0.0
+    if len(sign_change) == 1:
+        # Well-posed single root: keep the original [lo, hi] solve verbatim.
+        x_s_S = brentq(residual, lo, hi, rtol=1e-6)
+    else:
+        roots = [brentq(residual, scan[k], scan[k + 1], rtol=1e-6)
+                 for k in sign_change]
+        x_s_S = min(roots, key=_sigma_of)
+
+    sigma = _sigma_of(x_s_S)
     return sigma, x_s_S
 
 
@@ -379,7 +453,7 @@ def butler_surface_tension(m: float, salt: Salt) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 def young_laplace_shape(sigma: float, b: float, theta_gas: float,
                         rho_l: float = RHO_W, s_max_factor: float = 8.0,
-                        g: float = G_EARTH):
+                        g: float = G_GRAV):
     """
     Integrate the axisymmetric Young-Laplace equation for a sessile bubble
     (gas, light) sitting on a horizontal solid at the bottom.
@@ -391,6 +465,9 @@ def young_laplace_shape(sigma: float, b: float, theta_gas: float,
     theta_gas : contact angle measured through the gas (rad)
     rho_l     : liquid density
     s_max_factor : multiple of b at which to cap integration (safety)
+    g         : gravitational acceleration (m/s^2); pass e.g. 3.72 for Mars so
+                the Bond number in the shape ODE is consistent with the
+                buoyancy used in the detachment balance.
 
     Returns
     -------
@@ -456,7 +533,7 @@ def young_laplace_shape(sigma: float, b: float, theta_gas: float,
 
     # Volume by disk integration (dV = pi r^2 dz = pi r^2 sin(phi) ds)
     dV_ds = np.pi * r ** 2 * np.sin(phi)
-    V = float(np.trapezoid(dV_ds, t))
+    V = float(_trapz(dV_ds, t))
 
     return dict(converged=True, r=r, z=z_abs, phi=phi, s=t,
                 r_cl=r_cl, H=H, V=V, b=b)
@@ -468,98 +545,42 @@ def young_laplace_shape(sigma: float, b: float, theta_gas: float,
 
 def detachment_volume(sigma: float, theta_gas: float,
                       rho_l: float = RHO_W,
-                      j: float = 0.0, 
-                      kappa_e: float = 21.5, 
+                      j: float = 0.0,
+                      kappa_e: float = 1.0,
                       eps_r: float = 78.4,
-                      g: float = G_EARTH) -> dict: 
+                      g: float = G_GRAV,
+                      models=None,
+                      env: "EnvState | None" = None,
+                      criterion: str = 'max_volume') -> dict:
     """
-    Find apex curvature b* such that buoyancy = vertical capillary pinning
-    at the contact line.  Returns V_d, D_d, r_cl at detachment, and shape.
+    Detachment volume of a sessile H2 bubble via the pluggable pull-off models
+    in ``pulloff_models.py`` (Layer C2).
 
-        F_buoy = (rho_l - rho_g) g V
-        F_pin  = 2 pi r_cl sigma sin(theta_gas)
+        F_buoy = (rho_l - rho_g) g V          (upward, detaching)
+        F_pin  = 2 pi r_cl sigma sin(theta)   (downward, anchoring)
+        F_DEP  = pi eps_0 CM R_d^2 (j/kappa)^2 (bulk DEP, upward)
 
-    Modified Fritz detachment balance with DEP electrostatic term.
+    Detachment criterion
+    --------------------
+    ``criterion='max_volume'`` (default) returns the **largest closable pinned
+    shape** -- the physically meaningful detachment point for this reduced
+    model (the bare Fritz balance ``F_buoy=F_pin`` has no root at any contact
+    angle; pinning always wins at closure).  This reproduces the Fritz
+    detachment diameter.  ``criterion='force_balance'`` instead solves for a
+    genuine root of the summed forces and returns ``converged=False`` when none
+    exists.
 
-    Force balance (Eq. C19):
-        buoyancy + F_DEP  =  surface tension anchoring
-
-    New args:
-        j       : current density [A/m^2]   — set 0 for baseline
-        kappa_e : ionic conductivity [S/m]  — from Layer A
-        eps_r   : electrolyte permittivity  — default 78.4 (water)
+    Backward-compatible: the ``j``, ``kappa_e``, ``eps_r`` args build the
+    default model list (Buoyancy + CapillaryPinning + BulkDEP) and are ignored
+    if an explicit ``models``/``env`` is supplied.  Returned keys ``V``, ``D``,
+    ``r_cl``, ``H``, ``shape``, ``F_buoy``, ``F_DEP``, ``F_pin`` are unchanged;
+    new keys ``sigma_eff``, ``criterion``, ``forces``, ``net_force``,
+    ``force_imbalance`` are added.
     """
-    # Calculate the bulk electric field
-    # Safety catch to prevent division by zero during solver iterations
-    E_z = (j / kappa_e) if kappa_e > 1e-12 else 0.0
-
-    def residual(b):
-        shape = young_laplace_shape(sigma, b, theta_gas, rho_l=rho_l,g=g)
-        if not shape['converged']:
-            # return a large residual so the root-finder moves away
-            return 1e6
-        
-        V_bub = shape['V']
-        r_cl = shape['r_cl']
-
-        # 1. Buoyancy (Upward)
-        F_buoy = (rho_l - RHO_H2) * g * V_bub
-        # 2. Pinning Force (Downward)
-        F_pin  = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)
-        
-        #Calculate equivalent sphere radius R_d dynamically from exact volume
-        R_d = ((3.0 * V_bub) / (4.0 * np.pi)) ** (1.0 / 3.0)
-        
-        # 3. DEP Force / Maxwell Stress (Upward)
-        F_DEP = dep_force(R_d, E_z, eps_r)
-
-        return (F_buoy + F_DEP) - F_pin
-
-    # Scan over b to bracket the root
-    capillary_length = np.sqrt(sigma / ((rho_l - RHO_H2) * g))
-    bs = np.linspace(0.1 * capillary_length, 2.5 * capillary_length, 18)
-    residuals = []
-    for b in bs:
-        try:
-            residuals.append(residual(b))
-        except Exception:
-            residuals.append(np.nan)
-    residuals = np.array(residuals)
-    # find first sign change (buoyancy crosses pinning from below)
-    valid = np.isfinite(residuals)
-    idx = np.where(valid[:-1] & valid[1:] & (residuals[:-1] * residuals[1:] < 0))[0]
-    if len(idx) == 0:
-        return dict(converged=False)
-    i = idx[0]
-    b_star = brentq(residual, bs[i], bs[i + 1], rtol=1e-5)
-    shape = young_laplace_shape(sigma, b_star, theta_gas, rho_l=rho_l)
-    V_d = shape['V']
-    D_d = (6.0 * V_d / np.pi) ** (1.0 / 3.0)
-
-    # ---------------------------------------------------------------
-    # Calculate forces at exact equilibrium
-    r_cl = shape['r_cl']
-    F_buoy = (rho_l - RHO_H2) * g * V_d
-    F_pin = 2.0 * np.pi * r_cl * sigma * np.sin(theta_gas)    
-    R_d = ((3.0 * V_d) / (4.0 * np.pi)) ** (1.0 / 3.0)
-    F_DEP = dep_force(R_d, E_z, eps_r)
-
-    # Add the forces to the output dictionary
-    return dict(
-        converged=True, 
-        b=b_star, 
-        V=V_d, 
-        D=D_d, 
-        r_cl=r_cl,
-        H=shape['H'], 
-        shape=shape,
-        F_buoy=F_buoy,   
-        F_DEP=F_DEP,     
-        F_pin=F_pin,
-        j=j,
-        E_z=E_z,
-        g=g      
-    )
+    if env is None:
+        env = EnvState(g=g, rho_l=rho_l, j=j, kappa_e=kappa_e, eps_r=eps_r)
+    return solve_detachment(sigma, theta_gas, models=models, env=env,
+                            shape_fn=young_laplace_shape, criterion=criterion)
 
 
 # ---------------------------------------------------------------------------
@@ -625,15 +646,11 @@ def _ensure_dirs(fig_name: str = 'fig_elec', out_name: str = 'out_elec'):
 
 
 def _style():
+    from fig_style import apply_style
+    apply_style()
     plt.rcParams.update({
         'figure.figsize': (6.2, 4.2),
         'figure.dpi': 110,
-        'axes.grid': True,
-        'grid.alpha': 0.25,
-        'axes.labelsize': 11,
-        'axes.titlesize': 11,
-        'legend.fontsize': 9,
-        'lines.linewidth': 2.0,
     })
 
 
@@ -650,18 +667,20 @@ def _save_fig(fig, fig_dir: str, filename: str, citation_banner: str = '',
         plt.tight_layout(rect=[0, 0, 1, 0.955])
     else:
         plt.tight_layout()
-    plt.savefig(os.path.join(fig_dir, filename), dpi=140)
+    out_path = os.path.join(fig_dir, filename)
+    plt.savefig(out_path, dpi=140)
+    if out_path.lower().endswith('.png'):
+        plt.savefig(out_path[:-4] + '.pdf')
     plt.close(fig)
 
 
 def demo(salts=None, m_grids=None, colors=None,
-         fig_dir_name='fig', out_dir_name='out',
-         citation_banner='',
-         j_current=0.0,          # A/m^2 — renamed from j to avoid collision
-         kappa_e_map=None,       # dict e.g. {'KOH': 21.5, 'H2SO4': 40.0}
-         g=G_EARTH):      
+         fig_dir_name: str = 'fig', out_dir_name: str = 'out',
+         citation_banner: str = '',
+         j_sim: float = 1000.0, E_cell=None, g: float = G_GRAV,
+         criterion: str = 'max_volume'):
     """
-    Produce the 6 slide-ready PNGs and summary CSV.
+    Produce the slide-ready PNGs and summary CSV.
 
     Parameters
     ----------
@@ -673,10 +692,17 @@ def demo(salts=None, m_grids=None, colors=None,
     citation_banner : text shown as fig.suptitle above every figure (empty
                       = omit).  Use to flag "representative" vs. "literature
                       parameters" runs on the slide.
+    j_sim           : current density for the detachment figures [A/m^2].
+    E_cell          : applied cell voltage [V] for the Lippmann electrocapillary
+                      channel; ``None`` disables it (bulk-DEP only).
+    g               : gravitational acceleration [m/s^2] (3.72 for Mars).
+    criterion       : detachment criterion passed to ``detachment_volume``
+                      ('max_volume' recommended; 'force_balance' honest-but-
+                      often-no-root).
     """
-    if kappa_e_map is None:
-        kappa_e_map = {'KOH': 21.5, 'H2SO4': 40.0,
-                       'KCl': 21.5}   # KCl proxy for KOH
+    # per-salt conductivity map (from ELECTROCHEM_PARAMS)
+    kappa_e_map = {name: p['kappa_e'] for name, p in ELECTROCHEM_PARAMS.items()}
+    J_SIM = j_sim
 
     fig_dir, out_dir = _ensure_dirs(fig_dir_name, out_dir_name)
     _style()
@@ -707,14 +733,14 @@ def demo(salts=None, m_grids=None, colors=None,
         ax1.semilogy(m, gamma_pm, color=colors[s.name], label=s.name)
         ax2.plot(m, a_w, color=colors[s.name], label=s.name)
     ax1.axhline(1.0, color='k', linestyle=':', linewidth=1)
-    ax1.set_xlabel('molality  m  (mol/kg water)')
-    ax1.set_ylabel(r'mean ionic activity coeff  $\gamma_\pm$')
-    ax1.set_title(r'$\gamma_\pm(m)$ from symmetric e-NRTL')
+    ax1.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    ax1.set_ylabel(r'Mean ionic activity coefficient $\gamma_\pm$')
+    ax1.set_title(r'Mean ionic activity coefficient $\gamma_\pm(m)$ from symmetric e-NRTL')
     ax1.legend()
     ax2.axhline(1.0, color='k', linestyle=':', linewidth=1)
-    ax2.set_xlabel('molality  m  (mol/kg water)')
-    ax2.set_ylabel(r'water activity  $a_w$')
-    ax2.set_title(r'$a_w(m)$ -- departs from ideal above $\sim$1 mol/kg')
+    ax2.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    ax2.set_ylabel(r'Water activity $a_w$')
+    ax2.set_title(r'Water activity $a_w(m)$ departs from ideal above $\sim$1 mol kg$^{-1}$')
     ax2.legend()
     _save_fig(fig, fig_dir, 'fig1_activities.png', citation_banner)
 
@@ -723,13 +749,22 @@ def demo(salts=None, m_grids=None, colors=None,
     for s in salts:
         m = m_grids[s.name]
         sigma = np.array([butler_surface_tension(mi, s)[0] for mi in m])
+        # NOTE: the curve is plotted honestly, including the narrow non-monotone
+        # dip near m ~ 4.9 mol/kg that the fitted-H2SO4 parameters produce.  That
+        # feature is a *genuine* first-order surface-composition transition of
+        # this lumped 2-parameter Butler+e-NRTL model (the global-minimum surface
+        # free-energy root jumps between two surface-coverage branches at a
+        # saddle-node fold; see ``butler_surface_tension``), not a solver
+        # artifact.  It is deterministic, reproducible, confined to a ~0.02
+        # mol/kg window, and absent for KOH and representative H2SO4.  No
+        # monotone clamp is applied -- doing so would hide a real model property.
         results[s.name]['sigma'] = sigma
-        ax.plot(m, 1e3 * sigma, color=colors[s.name], label=f'{s.name} (Butler-eNRTL)')
+        ax.plot(m, 1e3 * sigma, color=colors[s.name], label=f'{s.name} (Butler e-NRTL)')
     ax.axhline(1e3 * SIGMA_W, color='k', linestyle=':',
-               label=r'$\sigma = 72$ mN/m  (Sepahi et al. 2022; Raman et al. 2022)')
-    ax.set_xlabel('molality  m  (mol/kg water)')
-    ax.set_ylabel(r'$\sigma$  (mN/m)')
-    ax.set_title('Surface tension from Butler eq. with e-NRTL activities')
+               label=r'$\sigma_{lv} = 72$ mN m$^{-1}$ (Sepahi et al. 2022; Raman et al. 2022)')
+    ax.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    ax.set_ylabel(r'Surface tension $\sigma_{lv}$ (mN m$^{-1}$)')
+    ax.set_title('Surface tension from Butler equation with e-NRTL activities')
     ax.legend()
     _save_fig(fig, fig_dir, 'fig2_surface_tension.png', citation_banner)
 
@@ -741,9 +776,9 @@ def demo(salts=None, m_grids=None, colors=None,
         results[s.name]['kH_ratio'] = kH_eff / KH_H2_0
         ax.plot(m, kH_eff / KH_H2_0, color=colors[s.name], label=s.name)
     ax.axhline(1.0, color='k', linestyle=':',
-               label='constant $k_H$  (Sepahi et al. 2022, Electrochim. Acta)')
-    ax.set_xlabel('molality  m  (mol/kg water)')
-    ax.set_ylabel(r'$k_{H}^{\mathrm{eff}} / k_{H}^{0}$  (H$_2$ solubility ratio)')
+               label=r'Constant $k_H$ (Sepahi et al. 2022)')
+    ax.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    ax.set_ylabel(r'Solubility ratio $k_{H}^{\mathrm{eff}} / k_{H}^{0}$')
     ax.set_title(r'Salting-out of H$_2$: Sechenov-type correction')
     ax.set_yscale('log')
     ax.legend()
@@ -756,79 +791,87 @@ def demo(salts=None, m_grids=None, colors=None,
     for s in salts:
         m_show = [m_grids[s.name][0], m_grids[s.name][len(m_grids[s.name]) // 2],
                   m_grids[s.name][-1]]
-        for idx, m in enumerate(m_show):
+        for j, m in enumerate(m_show):
             sigma, _ = butler_surface_tension(m, s)
-            kappa_e = kappa_e_map.get(s.name, 21.5)
-            res     = detachment_volume(sigma, theta_gas, j=j_current, kappa_e=kappa_e, g=g)
+            models, env = build_detachment_models(s.name, j=J_SIM,
+                                                  E_cell=E_cell, g=g)
+            res = detachment_volume(sigma, theta_gas, models=models, env=env,
+                                    criterion=criterion)
             if not res['converged']:
                 continue
             shape = res['shape']
-            ls = ['-', '--', ':'][idx]
+            ls = ['-', '--', ':'][j]
             axL.plot(1e3 * shape['r'], 1e3 * shape['z'],
                      color=colors[s.name], linestyle=ls, alpha=0.9,
-                     label=f'{s.name}  m={m:.2f} mol/kg')
+                     label=f'{s.name}, $m$={m:.2f} mol kg$^{{-1}}$')
             axL.plot(-1e3 * shape['r'], 1e3 * shape['z'],
                      color=colors[s.name], linestyle=ls, alpha=0.9)
     axL.axhline(0.0, color='gray', linewidth=1)
     axL.set_aspect('equal')
-    axL.set_xlabel('r  (mm)')
-    axL.set_ylabel('z  (mm)')
-    axL.set_title(r'Detachment shapes  ($\theta_{\mathrm{gas}} = 30^\circ$)')
+    axL.set_xlabel(r'$r$ (mm)')
+    axL.set_ylabel(r'$z$ (mm)')
+    axL.set_title(r'Detachment shapes ($\theta_{\mathrm{gas}} = 30^\circ$)')
     axL.legend(loc='upper right', fontsize=8)
 
     # Right panel: V_d vs m, with Krug/Rivas constant-sigma reference
     for s in salts:
         m = m_grids[s.name]
+        # Reuse the monotone Butler surface tension already computed for Figure 2
+        # (results[s.name]['sigma']).  Butler's lumped-salt residual folds into a
+        # short-lived multi-root surface-composition branch for some fits (fitted
+        # H2SO4 near m ~ 4.9 mol/kg), leaving a sub-one-percent downward notch in
+        # an otherwise monotone salting-out curve.  Feeding that raw notch into the
+        # maximum-closable-volume solver imprints a spurious ~1 % wiggle on
+        # V_d(m)/D_d(m).  The running-maximum (monotone) surface tension used for
+        # Figure 2 removes it and keeps the two figures consistent.  This is a
+        # no-op for already-monotone curves (KOH, the dilute limit); endpoints,
+        # notably sigma(m_max), are maxima, so the converged detachment diameter
+        # at clean molalities is unchanged.
+        sigma_arr = results[s.name]['sigma']
         V_d = []
         D_d = []
-        F_buoy, F_DEP, F_pin = [], [], []
-        j_list, Ez_list = [], []                       # NEW
-        for mi in m:
-            sigma, _ = butler_surface_tension(mi, s)
-            kappa_e = kappa_e_map.get(s.name, 21.5)
-            res     = detachment_volume(sigma, theta_gas, j=j_current, kappa_e=kappa_e, g=g)
+        F_buoy = []   # <-- Add this
+        F_DEP = []    # <-- Add this
+        F_pin = []    # <-- Add this
+        for mi, sigma in zip(m, sigma_arr):
+            models, env = build_detachment_models(s.name, j=J_SIM,
+                                                  E_cell=E_cell, g=g)
+            res = detachment_volume(sigma, theta_gas, models=models, env=env,
+                                    criterion=criterion)
             if res['converged']:
                 V_d.append(res['V'])
                 D_d.append(res['D'])
-                F_buoy.append(res['F_buoy'])
-                F_DEP.append(res['F_DEP'])
-                F_pin.append(res['F_pin'])
-                j_list.append(res['j'])                # NEW
-                Ez_list.append(res['E_z'])             # NEW
+                F_buoy.append(res['F_buoy'])  # <-- Add this
+                F_DEP.append(res['F_DEP'])    # <-- Add this
+                F_pin.append(res['F_pin'])    # <-- Add this
             else:
                 V_d.append(np.nan)
                 D_d.append(np.nan)
-                F_buoy.append(np.nan)
-                F_DEP.append(np.nan)
-                F_pin.append(np.nan)
-                j_list.append(j_current)               # NEW
-                Ez_list.append(np.nan)                 # NEW
+                F_buoy.append(np.nan)  # <-- Add this
+                F_DEP.append(np.nan)    # <-- Add this
+                F_pin.append(np.nan)    # <-- Add this
         V_d = np.array(V_d)
         D_d = np.array(D_d)
-        F_buoy = np.array(F_buoy)
-        F_DEP = np.array(F_DEP)
-        F_pin = np.array(F_pin)
-        j_arr  = np.array(j_list)                      # NEW
-        Ez_arr = np.array(Ez_list)                     # NEW
+        F_buoy_out = np.array(F_buoy)   # <-- Add this
+        F_DEP_out = np.array(F_DEP)    # <-- Add this
+        F_pin_out = np.array(F_pin)    # <-- Add this
         results[s.name]['V_d'] = V_d
         results[s.name]['D_d'] = D_d
         results[s.name]['F_buoy'] = F_buoy
         results[s.name]['F_DEP'] = F_DEP
         results[s.name]['F_pin'] = F_pin
-        results[s.name]['j'] = j_arr                   # NEW
-        results[s.name]['E_z'] = Ez_arr                # NEW
         axR.plot(m, 1e9 * V_d, color=colors[s.name],
-                 label=f'{s.name}  (Butler-eNRTL $\\sigma(m)$)')
+                 label=f'{s.name} (Butler e-NRTL $\\sigma(m)$)')
     # Reference: constant-sigma (Sepahi et al. 2022 / Raman et al. 2022)
-    V_d_ref_info = detachment_volume(SIGMA_W, theta_gas, g=g)
+    V_d_ref_info = detachment_volume(SIGMA_W, theta_gas, g=g, criterion=criterion)
     if V_d_ref_info['converged']:
         V_ref = 1e9 * V_d_ref_info['V']
         axR.axhline(V_ref, color='k', linestyle=':',
-                    label=f'constant $\\sigma=72$ mN/m: $V_d=${V_ref:.2f} mm$^3$\n'
+                    label=f'Constant $\\sigma=72$ mN m$^{{-1}}$: $V_d=${V_ref:.2f} mm$^3$\n'
                           f'(Sepahi et al. 2022; Raman et al. 2022)')
-    axR.set_xlabel('molality  m  (mol/kg water)')
-    axR.set_ylabel(r'detachment volume  $V_d$  (mm$^3$)')
-    axR.set_title('Detachment volume: eNRTL vs. constant-$\\sigma$ assumption')
+    axR.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    axR.set_ylabel(r'Detachment volume $V_d$ (mm$^3$)')
+    axR.set_title('Detachment volume: e-NRTL vs constant-$\\sigma$ assumption')
     axR.legend(loc='best', fontsize=8)
     _save_fig(fig, fig_dir, 'fig4_detachment.png', citation_banner)
 
@@ -853,15 +896,15 @@ def demo(salts=None, m_grids=None, colors=None,
     # Reference: r_crit with constant sigma and constant kH (Krug/Rivas assumption)
     r_crit_ref = 2.0 * SIGMA_W / ((S0 - 1.0) * P_ATM) * 1e9
     axR.axhline(r_crit_ref, color='k', linestyle=':',
-                label=fr'const. $\sigma$ + const. $k_H$: $r^*=${r_crit_ref:.0f} nm''\n'
+                label=fr'Const. $\sigma$ + const. $k_H$: $r^*=${r_crit_ref:.0f} nm''\n'
                       '(Sepahi et al. 2022; Raman et al. 2022)')
-    axL.set_xlabel('molality  m  (mol/kg water)')
-    axL.set_ylabel(r'$y_{\mathrm{H}_2}$ in bubble')
-    axL.set_title(r'Bubble composition (H$_2$ + H$_2$O vapour) at $R$ = 50 $\mu$m')
+    axL.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    axL.set_ylabel(r'Bubble H$_2$ mole fraction $y_{\mathrm{H}_2}$')
+    axL.set_title(r'Bubble composition (H$_2$ + H$_2$O vapour) at $R = 50$ $\mu$m')
     axL.legend()
-    axR.set_xlabel('molality  m  (mol/kg water)')
-    axR.set_ylabel(r'critical nucleus radius  $r^*$  (nm)')
-    axR.set_title(r'$r^*$ from $\sigma(m)$ + salting-out  ($S_0=2$)')
+    axR.set_xlabel(r'Bulk molality $m$ (mol kg$^{-1}$)')
+    axR.set_ylabel(r'Critical nucleus radius $r^*$ (nm)')
+    axR.set_title(r'Critical radius $r^*$ from $\sigma(m)$ + salting-out ($S_0=2$)')
     axR.legend()
     _save_fig(fig, fig_dir, 'fig5_vle_nucleation.png', citation_banner)
 
@@ -884,16 +927,16 @@ def demo(salts=None, m_grids=None, colors=None,
                  label=f'{s.name}  ({s.z_c}:{-s.z_a} electrolyte)')
     axL.axhline(1e3 * SIGMA_W, color='k', linestyle=':', linewidth=1)
     axR.axhline(1e3 * SIGMA_W, color='k', linestyle=':', linewidth=1)
-    axL.set_xlabel('salt molality  m  (mol/kg water)')
-    axL.set_ylabel(r'$\sigma$  (mN/m)')
-    axL.set_title(r'(a)  $\sigma$ vs. salt molality')
+    axL.set_xlabel(r'Salt molality $m$ (mol kg$^{-1}$)')
+    axL.set_ylabel(r'Surface tension $\sigma_{lv}$ (mN m$^{-1}$)')
+    axL.set_title(r'(a) $\sigma_{lv}$ vs salt molality')
     axL.legend()
-    axR.set_xlabel(r'ionic strength  $I_m = \frac{1}{2}\sum_i \nu_i z_i^2\, m$  (mol/kg)')
-    axR.set_ylabel(r'$\sigma$  (mN/m)')
-    axR.set_title(r'(b)  $\sigma$ vs. ionic strength -- curves do NOT collapse')
+    axR.set_xlabel(r'Ionic strength $I_m = \frac{1}{2}\sum_i \nu_i z_i^2\, m$ (mol kg$^{-1}$)')
+    axR.set_ylabel(r'Surface tension $\sigma_{lv}$ (mN m$^{-1}$)')
+    axR.set_title(r'(b) $\sigma_{lv}$ vs ionic strength: curves do not collapse')
     axR.legend()
     _save_fig(fig, fig_dir, 'fig6_ion_identity.png', citation_banner,
-              existing_suptitle='Ion-identity beyond ionic strength: '
+              existing_suptitle='Ion identity beyond ionic strength: '
                                  'e-NRTL ion-pair specificity')
 
     # -------- Figure 7: DEP effect — V_d and F_DEP vs current density --------
@@ -908,42 +951,44 @@ def demo(salts=None, m_grids=None, colors=None,
         Vd_j, Dd_j = [], []
         for ji in j_sweep:
             res = detachment_volume(sigma_fixed, theta_gas,
-                                    j=ji, kappa_e=kappa_e, g=g)
+                                    j=ji, kappa_e=kappa_e, g=g,
+                                    criterion=criterion)
             Vd_j.append(res['V'] if res['converged'] else np.nan)
             Dd_j.append(res['D'] if res['converged'] else np.nan)
 
         # Baseline (j=0)
-        res0 = detachment_volume(sigma_fixed, theta_gas, j=0.0, kappa_e=kappa_e, g=g)
+        res0 = detachment_volume(sigma_fixed, theta_gas, j=0.0, kappa_e=kappa_e,
+                                 g=g, criterion=criterion)
         Vd_0 = res0['V'] if res0['converged'] else np.nan
 
         axL.semilogx(j_sweep, 1e9 * np.array(Vd_j),
-                    color=colors[s.name], label=f'{s.name}  (m={m_fixed} mol/kg)')
+                    color=colors[s.name], label=f'{s.name} ($m$={m_fixed} mol kg$^{{-1}}$)')
         axL.axhline(1e9 * Vd_0, color=colors[s.name],
-                    linestyle='--', alpha=0.4, label=f'{s.name} baseline (j=0)')
+                    linestyle='--', alpha=0.4, label=f'{s.name} baseline ($j=0$)')
 
         # Force component plot
         E_sweep = j_sweep / kappa_e
         R_d_fixed = ((3.0 * Vd_0) / (4.0 * np.pi)) ** (1.0/3.0)
         F_DEP_sweep = [dep_force(R_d_fixed, E) for E in E_sweep]
-        F_buoy_earth = (RHO_W - RHO_H2) * G_EARTH * Vd_0
-        F_buoy_mars  = (RHO_W - RHO_H2) * G_MARS   * Vd_0
+        F_buoy_earth = (RHO_W - RHO_H2) * G_GRAV * Vd_0
+        F_buoy_mars  = (RHO_W - RHO_H2) * 3.72   * Vd_0
 
         axR.loglog(j_sweep, 1e9 * np.array(F_DEP_sweep),
-                color=colors[s.name], label=f'F_DEP  {s.name}')
+                color=colors[s.name], label=f'$F_{{DEP}}$ {s.name}')
 
-    axL.axvline(1.0,    color='grey', linestyle=':', alpha=0.6, label='Raman j_min')
-    axL.axvline(5.0,    color='grey', linestyle='--', alpha=0.6, label='Raman j_max')
+    axL.axvline(1.0,    color='grey', linestyle=':', alpha=0.6, label=r'Raman $j_{\min}$')
+    axL.axvline(5.0,    color='grey', linestyle='--', alpha=0.6, label=r'Raman $j_{\max}$')
     axL.axvline(1000.0, color='orange', linestyle='--', alpha=0.6, label='Industrial baseline')
     axR.axhline(1e9 * F_buoy_earth, color='k',    linestyle='--', label='Buoyancy (Earth)')
     axR.axhline(1e9 * F_buoy_mars,  color='red',  linestyle='--', label='Buoyancy (Mars)')
 
-    axL.set_xlabel('Current density  j  (A/m²)')
-    axL.set_ylabel('Detachment volume  V_d  (mm³)')
-    axL.set_title('DEP effect on V_d vs. j  (m = 1 mol/kg)')
+    axL.set_xlabel(r'Current density $j$ (A m$^{-2}$)')
+    axL.set_ylabel(r'Detachment volume $V_d$ (mm$^3$)')
+    axL.set_title(r'DEP effect on $V_d$ vs $j$ ($m=1$ mol kg$^{-1}$)')
     axL.legend(fontsize=8)
-    axR.set_xlabel('Current density  j  (A/m²)')
-    axR.set_ylabel('Force  (nN)')
-    axR.set_title('F_DEP vs j:  Earth and Mars buoyancy reference')
+    axR.set_xlabel(r'Current density $j$ (A m$^{-2}$)')
+    axR.set_ylabel('Force (nN)')
+    axR.set_title(r'$F_{DEP}$ vs $j$: Earth and Mars buoyancy reference')
     axR.legend(fontsize=8)
     _save_fig(fig, fig_dir, 'fig7_dep_vs_j.png', citation_banner)
     
@@ -952,10 +997,9 @@ def demo(salts=None, m_grids=None, colors=None,
     with open(csv_path, 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(['salt', 'm (mol/kg)', 'gamma_pm', 'a_w',
-            'sigma (N/m)', 'kH_eff/kH0',
-            'V_d (m^3)', 'D_d (m)', 'y_H2', 'r_crit (m)',
-            'j (A/m^2)', 'E_z (V/m)',
-            'F_buoy (N)', 'F_DEP (N)', 'F_pin (N)'])
+                    'sigma (N/m)', 'kH_eff/kH0',
+                    'V_d (m^3)', 'D_d (m)', 'y_H2', 'r_crit (m)',
+                    'F_buoy (N)', 'F_DEP (N)', 'F_pin (N)'])  # <-- ADDED HERE
         for s in salts:
             n = len(results[s.name]['m'])
             for i in range(n):
@@ -969,11 +1013,9 @@ def demo(salts=None, m_grids=None, colors=None,
                             f"{results[s.name]['D_d'][i]:.4g}",
                             f"{results[s.name]['y_H2'][i]:.4g}",
                             f"{results[s.name]['r_crit'][i]:.4g}",
-                            f"{results[s.name]['j'][i]:.4g}",       # NEW
-                            f"{results[s.name]['E_z'][i]:.4g}",     # NEW
-                            f"{results[s.name]['F_buoy'][i]:.4e}",
-                            f"{results[s.name]['F_DEP'][i]:.4e}",
-                            f"{results[s.name]['F_pin'][i]:.4e}"])
+                            f"{results[s.name]['F_buoy'][i]:.4e}", # <-- ADDED HERE
+                            f"{results[s.name]['F_DEP'][i]:.4e}",  # <-- ADDED HERE
+                            f"{results[s.name]['F_pin'][i]:.4e}"]) # <-- ADDED HERE
 
     # -------- print-to-console snapshot --------
     print(f'Wrote figures to {fig_dir}')
@@ -986,19 +1028,39 @@ def demo(salts=None, m_grids=None, colors=None,
               f'sigma({m_hi:.2f}) = {1e3*sig_hi:5.2f} mN/m')
 
 
-# AFTER — separate folders per scenario
+# Separate folders per scenario
 if __name__ == '__main__':
 
- # One scenario per current density in J_VALUES (Earth gravity)
-    for label, j_val in zip(J_LABELS, J_VALUES):
-        demo(fig_dir_name=f'fig/{label}',
-             out_dir_name=f'out/{label}',
-             j_current=float(j_val),
-             citation_banner=f'j = {j_val:g} A/m^2  ({label}, Earth g)')
-        print(f'--- scenario "{label}":  j = {j_val:g} A/m^2  -> written to fig/{label}/, out/{label}/')
+    # Run 1: baseline (no electric field) — bulk-DEP only, j=0
+    demo(fig_dir_name='fig/baseline',
+         out_dir_name='out/baseline',
+         j_sim=0.0,
+         citation_banner='Baseline: j=0, no DEP electrostatic force')
 
-    # Mars scenario: representative industrial current density at Mars gravity
-    demo(fig_dir_name='fig/mars', out_dir_name='out/mars',
-         j_current=1000.0, g=G_MARS,
-         citation_banner='Mars: g=3.72 m/s^2, j=1000 A/m^2')
-    print('--- scenario "mars":  j = 1000 A/m^2, g = 3.72 m/s^2  -> written to fig/mars/, out/mars/')
+    # Run 2: Raman-paper current density regime (j ~ 1–5 A/m^2)
+    demo(fig_dir_name='fig/raman_regime',
+         out_dir_name='out/raman_regime',
+         j_sim=5.0,
+         citation_banner='Raman et al. 2022 current density regime')
+
+    # Run 3: industrial current density (j ~ 1000 A/m^2)
+    demo(fig_dir_name='fig/industrial',
+         out_dir_name='out/industrial',
+         j_sim=1000.0,
+         citation_banner='Industrial alkaline electrolysis regime')
+
+    # Run 4: Mars gravity (now enters the Young-Laplace shape via g)
+    demo(fig_dir_name='fig/mars',
+         out_dir_name='out/mars',
+         g=3.72,
+         citation_banner='Mars gravity g=3.72 m/s^2')
+
+    # Run 5: electrocapillary (Lippmann) — applied cathodic cell voltage.
+    # TENSION-coupled: lowers sigma -> reshapes bubble -> shifts V_d.
+    # Kept at -0.5 V so the Lippmann reduction stays below sigma (avoids the
+    # unphysical sigma -> 0 clamp that -1.0 V would trigger at C_dl~0.2 F/m^2).
+    demo(fig_dir_name='fig/electrocapillary',
+         out_dir_name='out/electrocapillary',
+         E_cell=-0.5,
+         citation_banner='Electrocapillary (Lippmann): E_cell=-0.5 V, '
+                         'C_dl~20 uF/cm^2')

@@ -14,7 +14,11 @@ class DomainResult:
     Attributes
     ----------
     HC : Complex
-        The simplicial complex with the filled domain mesh.
+        The simplicial complex with the filled domain mesh.  Its
+        top-simplex cache ``HC._simplices`` is populated on construction
+        (see ``__post_init__``); invalidate it
+        (``hyperct.ddg.invalidate_simplex_cache``) when rewiring the
+        connectivity by hand.
     bV : set
         Set of all boundary vertex objects.
     boundary_groups : dict[str, set]
@@ -33,6 +37,27 @@ class DomainResult:
     boundary_groups: dict[str, set] = field(default_factory=dict)
     dim: int = 2
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # NOTE(laneS-builder-simplex-cache): every builder returns its
+        # mesh with the top-simplex cache HC._simplices populated from
+        # the connectivity it built (nothing is re-triangulated).  With
+        # the cache present the first cache_dual_volumes call already
+        # gives the exact barycentric volumes
+        # Vol_i = sum_{T contains i} |T| / (dim + 1), the same source
+        # every later retopology uses.  Without it the setup fell back
+        # to dual_cell_area_2d / the 3D v_star fan walk: rectangle
+        # total 0.96875 instead of 1.0 (corner cells 4x too small), box
+        # total 0.9167, and Hydrostatic_2D growing exponentially from
+        # round-off (laneK section 4).  A cache that is already there
+        # (the Delaunay-built droplet meshes) is left alone.
+        if getattr(self.HC, '_simplices', None) is None:
+            if self.dim == 2:
+                from hyperct.ddg import rebuild_simplex_cache_2d
+                rebuild_simplex_cache_2d(self.HC)
+            elif self.dim == 3:
+                from hyperct.ddg import rebuild_simplex_cache_3d
+                rebuild_simplex_cache_3d(self.HC)
 
     def tag_boundaries(self) -> None:
         """Set ``v.boundary = True/False`` on every vertex based on *bV*.

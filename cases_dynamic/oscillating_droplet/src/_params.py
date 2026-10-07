@@ -67,6 +67,117 @@ c_s = max(10.0 * u_scale, 1.0)   # floor at 1 m/s
 K_d = rho_d * c_s**2             # bulk modulus (droplet)
 K_o = rho_o * c_s**2             # bulk modulus (outer)
 
+# Retopology policy for the 2D dynamic oscillation runner
+# (oscillating_droplet_2D.py).  Lane-5 dynamic configuration sweep
+# (2026-07-02, docs_temp/debug_session/lane5-dynamic-config-sweep.md)
+# on the full 1839-step run at identical parameters:
+#
+#   policy                     l2_error  tail_growth  KE_max [J]
+#   per-step Delaunay (old)    0.48992   1.72505      4.07e-02 (still growing)
+#   dual_only (new default)    0.17857   0.99925      8.32e-07 (physical decay)
+#
+# 'dual_only' keeps the interface-conforming builder connectivity for
+# the whole run (skip_triangulation=True in _retopologize_multiphase)
+# while still refreshing duals, per-phase splits, mass redistribution
+# and EOS pressures every step.  Per-step global Delaunay reconnection
+# on the moving mesh injects spurious KE ~5e4x the physical level and
+# is the dominant l2/tail error source; with dual_only the KE(t)
+# envelope quantitatively matches the analytical overdamped decay
+# (peak t 0.055 vs 0.060 s; tail decay rate 6.79 vs 7.18 1/s).
+# Displacement-gated Delaunay (eps in {0.01,0.05,0.2}*h_min) and
+# hybrid gate+dual-refresh policies were all worse than either
+# extreme; see the lane log for the full sweep table.
+#
+# DEFAULT FLIPPED 2026-07-29 (lane E adoption,
+# docs_temp/debug_session/laneE-adoption-defaults.md) to
+# 'delaunay_remap': per-step FULL Delaunay reconnection with the
+# lane-D conservative remap (retopo_remap='conservative' in
+# _retopologize_multiphase).  Same full 1839-step run:
+#
+#   policy                     l2_error  tail_growth  KE_max [J]
+#   per-step Delaunay          0.48992   1.72505      4.07e-02 (growing)
+#   dual_only (lane-5 default) 0.17857   0.99925      8.32e-07
+#   delaunay_remap (default)   0.17479   0.99990      8.3173e-07
+#
+# Rationale: scores at least as well as dual_only on every channel,
+# keeps retopology honestly ACTIVE every step (the library targets
+# complex/changing topologies — dual_only freezes connectivity and
+# cannot generalize to large-deformation cases), and long-run proofs
+# are clean: 2000-step static endurance (u=0, per-step Delaunay,
+# remap ON) holds the pinned 2.2717e-3 force floor with rel spread
+# 1.3e-15 and machine-precision mass; a 2x-horizon (3678-step)
+# dynamic run shows no late-time KE growth (late max / t=3/4 value
+# = 1.0) with mass drift 4.5e-14.  Cost: 1.61x wall vs dual_only
+# (205.8 s vs 127.5 s full run).  Known cosmetic caveat: the outer
+# phase's TaitMurnaghan pressure() saturates transiently on churned
+# corner/boundary dual cells during the pre-restore EOS evaluation
+# (clip_count ~5.7e4 over the full run; the conservative remap then
+# overwrites those values for persistent (vertex, phase) entries, and
+# every outcome channel above is clean).
+# The pinned floor tests (test_case_oscillating_droplet.py) keep
+# exercising the per-step Delaunay path via setup's default retopo_fn;
+# 'dual_only' remains supported here as an opt-in.
+#
+# laneH (2026-07-30, docs_temp/debug_session/laneH-2d-over-decay.md):
+# the residual l2 0.17479 is ATTRIBUTED — the every-call
+# pressure-preserving mass redistribution erases each step's local EOS
+# compression response (pressure STRUCTURE frozen, laneD §1.1), which
+# makes the l=2 amplitude decay 3-4x the analytical rate.  The opt-in
+# fix is `projection_every=N` in `_retopologize_multiphase` (bind via
+# partial into retopo_fn, exactly like retopo_remap): with
+# delaunay_remap + projection_every in {2,3,5,20} the same full run
+# scores l2 0.0380-0.0419 (vs 0.17479) and lands on the exact
+# two-fluid reference (laneC) to ~2% (l2_two_fluid 0.0219-0.0261,
+# KE-shape corr 0.994) with reconnection still active every step.
+# NOT adopted as default: tail_growth then reads 1.38-1.40 because the
+# genuine two-fluid KE peaks at t=0.1234 s, beyond t_end=0.1143 (the
+# analytic two-fluid tail on this horizon is 1.66) — the tail<=1.0
+# gate is calibrated on the single-fluid overdamped envelope and is
+# unattainable for a faithful run; the current default passes it only
+# because the every-call projection reshapes KE onto that envelope.
+# Recalibrate the score references before revisiting adoption.
+#
+# Policy strings map to solver-method presets in ddgclib.methods.PRESETS
+# (oscillating_droplet_2D.py:_POLICY_PRESETS); every method axis of each
+# preset, its status and evidence are tabulated in METHODS.md:
+#   'delaunay_remap'    -> 'oscillating_droplet_2D'              (default)
+#   'dual_only'         -> 'oscillating_droplet_2D_dual_only'
+#   'delaunay'          -> 'oscillating_droplet_2D_bare_delaunay' (measured worse)
+#   'delaunay_remap_p2' -> 'oscillating_droplet_2D_projection2'  (laneH opt-in)
+retopo_policy_2d = 'delaunay_remap'
+
+# Retopology policy for the 3D dynamic oscillation runner
+# (oscillating_droplet_3D.py).  First 3D A/B with the Tier 3B score
+# harness (2026-07-29, docs_temp/debug_session/laneB-3d-score-harness.md)
+# on the full 872-step run at identical parameters (refine 2/2):
+#
+#   policy                     l2_error  tail_growth  mass_drift
+#   per-step Delaunay (old)    1.52446   0.47067      3.87e-14
+#   dual_only (new default)    0.24811   0.08410      1.91e-14
+#
+# Lane-5's caveat (3D skip-triangulation has different boundary-volume
+# bookkeeping, batch_e_star zeroing) was verified BEFORE trusting the
+# score: step-granular probe shows identical boundary count (96),
+# identical |dV/V0| step-0 boundary-zeroing artefact (0.357050), exact
+# simplex volumes engaged in both paths, machine-precision mass; the
+# harness's dual_vol_*/n_interface_* fields confirm it on the full run
+# (interface 98 constant, no boundary saturation in either policy).
+# The pinned 3D floor tests keep exercising the per-step Delaunay path
+# via setup's default retopo_fn.
+# Lane-E adoption A/B (2026-07-29): 'delaunay_remap' (the new 2D
+# default) was measured in 3D and REJECTED — l2 1.87348 / tail 0.25327
+# vs dual_only's 0.24811 / 0.08410 (fails the better-l2-AND-tail flip
+# rule).  The remap does suppress the Delaunay KE pump (KE_max 6.14e-8
+# vs 1.74e-6 J) but amplifies the known droplet-inflation physics gap
+# (R_max_peak 0.011559 vs 0.010790), its dual-volume churn matches
+# plain Delaunay (drift_post 5.08e-3 vs 1.07e-4), and the lane-D
+# 3D-bookkeeping caveat is real (droplet vol_corr gauge reaches 0.9696
+# within 20 steps; outer-phase EOS pressure clips fire on the Delaunay
+# path).  Keep 'dual_only'; see laneE-adoption-defaults.md.
+# Presets (ddgclib.methods.PRESETS, METHODS.md): 'dual_only' ->
+# 'oscillating_droplet_3D', 'delaunay' -> 'oscillating_droplet_3D_delaunay'.
+retopo_policy_3d = 'dual_only'
+
 # Domain size (outer box should be ≥ 5× droplet radius)
 L_domain = 5.0 * R0
 

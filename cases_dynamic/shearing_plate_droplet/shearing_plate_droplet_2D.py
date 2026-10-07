@@ -39,8 +39,8 @@ from cases_dynamic.shearing_plate_droplet.src._analytical import (
 from cases_dynamic.shearing_plate_droplet.src._plot_helpers import (
     compute_diagnostics, plot_velocity_profile, plot_deformation_history,
 )
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid, plot_fluid
 
 _CASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,8 +61,13 @@ def main():
     D_taylor = taylor_deformation(Ca, visc_ratio)
     print(f"Taylor small-D prediction: D = {D_taylor:.4f}")
 
+    # Solver methods (METHODS.md): periodic ghost Delaunay + multiphase
+    # refresh + redistribution (library copy of the former case closure).
+    methods = PRESETS['shearing_plate_droplet_2D']
+    print(methods.describe())
+
     print("\nBuilding mesh...")
-    HC, bV, mps, bc_set, dudt_fn, retopo_fn, groups, params = \
+    HC, bV, mps, bc_set, dudt_fn, _setup_retopo_fn, groups, params = \
         setup_shearing_plate_droplet(
             dim=dim, R0=R0, L_x=L_x, L_y=L_y,
             U_wall=U_wall, rho_d=rho_d, rho_o=rho_o,
@@ -70,6 +75,7 @@ def main():
             K_d=K_d, K_o=K_o,
             refinement_outer=n_refine_outer,
             refinement_droplet=n_refine_droplet,
+            methods=methods,   # force + periodic retopology from the preset
         )
     n_verts = sum(1 for _ in HC.V)
     n_iface = sum(1 for v in HC.V if getattr(v, 'is_interface', False))
@@ -127,13 +133,20 @@ def main():
                       f"mass={d['total_mass']:.6e}")
 
     print("\nRunning simulation...")
-    t_final = symplectic_euler(
-        HC, bV, dudt_fn, dt=dt, n_steps=n_steps, dim=dim,
-        bc_set=bc_set, callback=callback, retopologize_fn=retopo_fn,
-        remesh_mode=params['remesh_mode'],
-        remesh_kwargs=params['remesh_kwargs'],
+    t_final = methods.integrate(
+        HC, bV, dudt_fn, dt=dt, n_steps=n_steps,
+        bc_set=bc_set, callback=callback, mps=mps,
+        domain_bounds=params['domain_bounds'],
     )
     record(t_final)
+    record_methods(
+        os.path.join(_RESULTS, 'methods_2D.json'), methods, HC,
+        extra={'dt': dt, 'n_steps': n_steps, 't_final': t_final,
+               'domain_bounds': params['domain_bounds'],
+               'refinement_outer': n_refine_outer,
+               'refinement_droplet': n_refine_droplet,
+               'box_shift': params['box_shift']},
+    )
 
     t_arr = np.array([d['t'] for d in diag_list])
     D_arr = np.array([d['D'] for d in diag_list])
