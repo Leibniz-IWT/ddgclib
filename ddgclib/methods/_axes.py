@@ -599,7 +599,52 @@ _AXES: list[MethodAxis] = [
                  'mass-conserving and does not merge m_phase', 'experimental',
                  'hyperct/_vertex.py:merge_all; ddgclib/multiphase.py:'
                  'mass_conserving_merge is the separate conserving path',
-                 'DO-NOT wire into multiphase without per-phase ledger (laneF)'),
+                 'DO-NOT wire into multiphase without per-phase ledger (laneF); '
+                 'merge_method=mass_conserving (laneV) is the ledger-aware '
+                 'merge of this distance'),
+        ),
+    ),
+    MethodAxis(
+        name='merge_method', title='How the pre-retopology merge lumps vertices',
+        group='connectivity', default='merge_all',
+        control='merge_method= in _retopologize (step 0, applied only when '
+                'merge_cdist > 0 and the connectivity is rebuilt); bound '
+                'into the retopology partial by SolverMethods.retopologize_fn()',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'Inert without merge_cdist (SolverMethods refuses a non-default '
+              'value without it).',
+        options=(
+            _opt('merge_all', 'HC.V.merge_all(cdist): one vertex of each close '
+                 'pair is dropped with its mass, momentum and phase masses',
+                 'validated',
+                 'hyperct/_vertex.py:merge_all',
+                 'the historic merge; no preset sets merge_cdist'),
+            _opt('mass_conserving', 'ddgclib.multiphase.mass_conserving_merge: '
+                 'the survivor takes the sum of the masses, of the per-phase '
+                 'ledger m_phase and of the momentum (u mass-weighted), p '
+                 'averaged; a member of bV is preferred as the survivor so a '
+                 'wall vertex is never merged away into a mobile one (laneL '
+                 'known limit 4); the phase label and p_phase of the survivor '
+                 'are left to the next refresh', 'opt-in',
+                 'ddgclib/multiphase.py:mass_conserving_merge',
+                 'laneV 2026-10-07 (diagnose_sliver_ejection.py --replace '
+                 'merge_cdist=... --replace merge_method=mass_conserving). '
+                 'Ledger exact: m, m_phase and momentum to 1e-14 '
+                 '(test_merge_method.py, 4; merge_all loses the merged mass). '
+                 'dam_break_2D refinement 4 (alpha 0.3, cdist 1.25e-3 = 0.1 '
+                 'wall spacing): the small-cell F/m spike of step 1725 is '
+                 'gone (|a|max 6.8e4 -> 8.4e3 m/s^2, |u|max 2.59 -> 0.50 m/s) '
+                 'but the run still ends at step 2763 with a vertex under '
+                 'the floor; with wall_clamp it completes the 3170 steps '
+                 '(541 of 545 vertices left, |u|max 0.51). Refinement 3 '
+                 '(cdist 2.5e-3): never fires at alpha 0.3 / 0.2 '
+                 '(bit-identical), one merge at alpha 0.1 (KE_liq end 5.15e-3 '
+                 'against 5.72e-3, front 0.06743 against 0.06750, '
+                 '0ee49ba2a4550aa7). Not a default: merge_cdist is a fixed '
+                 'length a preset cannot scale with the mesh, and the alpha '
+                 '0.1 pin would move for one merge. Applied on the Delaunay '
+                 '/ adaptive rebuild only (the periodic rebuild keeps '
+                 'merge_all)'),
         ),
     ),
     MethodAxis(
@@ -679,7 +724,72 @@ _AXES: list[MethodAxis] = [
                  'not implemented for delaunay_material and custom '
                  'retopology (SolverMethods raises), not needed for dual_only '
                  '/ dual_only_bare / frozen (their bV never changes). '
-                 'test_frozen_set.py (32)',
+                 'test_frozen_set.py (32). laneV 2026-10-07: impenetrability '
+                 'is the axis wall_clamp (HP2D 54 -> 0 outside, dam break '
+                 'refinement 4 completes); merge_method=mass_conserving '
+                 'prefers a member as the merge survivor',
+                 dims=(2, 3)),
+        ),
+    ),
+    MethodAxis(
+        name='wall_clamp', title='Impenetrability of flat walls',
+        group='connectivity', default=None,
+        control='SolverMethods.wall_clamp_bc(planes= | box=, exclude=bV, '
+                'min_gap=) returns the ddgclib._boundary_conditions.'
+                'WallClampBC the setup adds to its bc_set (None when the '
+                'axis is None); applied by the integrators after every move',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'Walls are vertices: a fluid vertex can step between two of '
+              'them (laneL known limit 1). The clamp is one-sided and the '
+              'identity wherever impenetrability holds, so it moves no pin '
+              'of a run in which no vertex leaves. The planes and the gap '
+              'are geometry (build-time arguments, recorded in extra); only '
+              'the policy is the axis. Curved walls (the 3D pipe) are not '
+              'covered.',
+        options=(
+            _opt(None, 'No clamp: a vertex that steps past a wall stays '
+                 'outside (under frozen_set=hull it also releases the wall)',
+                 'validated',
+                 'ddgclib/methods/_config.py:SolverMethods.wall_clamp_bc',
+                 'every pin until laneV 2026-10-07; reachable by '
+                 '.replace(wall_clamp=None) on the flipped presets. Measured '
+                 'laneV: dam_break_2D at refinement 4 (alpha 0.3, 3170 steps) '
+                 'ends at step 2892 with an air vertex of 2.35e-6 m^2 at '
+                 '(0.0653, -1.2e-6) under the floor; the pre-laneH HP2D '
+                 'configuration of laneL (L 15, dt 0.01, 3000 steps) has up '
+                 'to 54 vertices outside the wall lines from step 1248, '
+                 'profile l2 0.554 on the downstream half'),
+            _opt('project', 'Each step every non-excluded vertex past a plane '
+                 'is put back to level + direction * min_gap on that axis and '
+                 'its velocity component INTO the wall is zeroed (the '
+                 'component away from it is kept). The arithmetic of the '
+                 'case-local WallClampBC of the electrolysis case '
+                 '(2026-07), now the library class', 'validated',
+                 'ddgclib/_boundary_conditions.py:WallClampBC',
+                 'laneV 2026-10-07, DEFAULT of dam_break_2D, dam_break_3D and '
+                 'hagen_poiseuille_2D (the three electrolysis presets record '
+                 'the clamp their setups applied since 2026-07, bit-identical '
+                 'to the case-local class). One-sided and the identity '
+                 'wherever impenetrability holds: no pin moved (refinement 3 '
+                 'dam break at alpha 0.3 / 0.2 / 0.1 bit-identical with 0 '
+                 'put-backs, digests b69bcb3d7fce85df / cc2a87e93c46209b / '
+                 '1f7e46cb66f4fadb on the cloud machine; the HP2D developing '
+                 'pin l2 0.013084885355719682 equal; 3D dam break and '
+                 'electrolysis pins unchanged). dam_break_2D refinement 4 '
+                 '(alpha 0.3, 3170 steps): completes the horizon (0 outside) '
+                 'instead of ending at step 2892 with a vertex under the '
+                 'floor; HP2D laneL configuration: 54 -> 0 vertices outside, '
+                 'profile l2 0.554 -> 0.399, transverse velocity 0.556 -> '
+                 '8.4e-4, 109591 put-backs on 1849 of 3000 steps. GAP: the '
+                 'put-down distance is geometry (setup argument clamp_gap, '
+                 'default 0.1 of the wall vertex spacing, recorded in '
+                 'params); with gap 0 the vertex lands ON the wall line, '
+                 'becomes a hull vertex with a half cell open to the absolute '
+                 'pressure (633 N on 2.1e-6 kg, |a| 3e8 m/s^2 absorbed by the '
+                 'clamp every step at refinement 4): DO-NOT. Curved walls '
+                 '(the 3D pipe) have no clamp; the setup raises on a request '
+                 '(test_wall_clamp.py, 8; pin PIN_PUSHED_DIGEST '
+                 '39710661593753f5)',
                  dims=(2, 3)),
         ),
     ),
@@ -753,7 +863,73 @@ _AXES: list[MethodAxis] = [
                  'at 0.33 m/s by step 1341; released under volume). '
                  'dam_break_3D with the exact faces: as clean as '
                  'neighbour_count (adc368cdb99b3f4a, |u|max 0.057 against '
-                 '0.062, KE_liq peak 4.87e-6 against 4.08e-6 J)',
+                 '0.062, KE_liq peak 4.87e-6 against 4.08e-6 J). laneV '
+                 '2026-10-07: refinement 4 (alpha 0.3) ejects at step 1343 '
+                 'on an air sliver between two floor vertices (3.9e-6 m^2, '
+                 '0.62 N of viscous force on 4.8e-6 kg); the lone-vertex '
+                 'erasure is two whole-mass releases (0.110 kg at step 1182, '
+                 '0.050 kg at 1206, interface -> bulk air); the vote arm is '
+                 'simplex_vote=mass_fraction',
+                 dims=(2, 3), phases='multi'),
+        ),
+    ),
+    MethodAxis(
+        name='simplex_vote', title='Simplex relabelling vote after a rebuild',
+        group='thermodynamics', default='bulk_majority', applies_to='multi',
+        control='simplex_vote= in mps.refresh (setup) AND in the retopo '
+                'partial (_retopologize_multiphase / '
+                'retopologize_multiphase_periodic -> '
+                'multiphase_rebuild_with_ledger); the two must match',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'The vote derives the top-simplex labels (which define the '
+              'interface and, under split_method=simplex, the sub-volumes) '
+              'from the vertex state after every reconnection.',
+        options=(
+            _opt('bulk_majority', 'Majority among the bulk vertices of the '
+                 'simplex (interface vertices do not vote); a tie goes to '
+                 'the lower phase ID; a simplex of interface vertices only '
+                 'takes the lowest of their interface_phases', 'validated',
+                 'ddgclib/multiphase.py:MultiphaseSystem.'
+                 'assign_simplex_phases_from_vertices',
+                 'all pins. Erases a lone bulk vertex of the higher phase ID '
+                 'whose incident simplices are all ties (laneF: the simplex '
+                 'arm of the dam break, step 1182, 0.11 kg of liquid left '
+                 'on an air vertex)', phases='multi'),
+            _opt('mass_fraction', 'Every vertex votes with the weight of '
+                 'phase k = its volume-equivalent mass share (m_phase[k] / '
+                 'rho0_k, normalised over the phases); a vertex without a '
+                 'ledger votes by its label; tie to the lower phase ID. '
+                 'Reads the Lagrangian ledger instead of the stale '
+                 'neighbour count, so interface vertices that still carry '
+                 'liquid mass keep their liquid simplices', 'experimental',
+                 'ddgclib/multiphase.py:MultiphaseSystem.'
+                 'assign_simplex_phases_from_vertices',
+                 'laneV 2026-10-07 (diagnose_sliver_ejection.py --replace '
+                 'simplex_vote=mass_fraction ...), not adopted. With the '
+                 'preset split neighbour_count the dam break (refinement 3, '
+                 'alpha 0.2 and 0.1) EJECTS AT STEP 0 (|u| 250 m/s): the '
+                 'interface vertices carry exact half fractions, every '
+                 '(liquid, air, interface) triangle of the column face is a '
+                 'tie that the preloaded liquid density tips, so the setup '
+                 'final refresh relabels the face and p_liq hits the EOS clip '
+                 '(DO-NOT). With split_method=simplex the one-cell tongue '
+                 'survives (alpha 0.2: front 0.0760 against 0.0657, KE_liq '
+                 'peak 6.5e-3 against 3.75e-2 J, no whole-mass release '
+                 'against 0.160 kg) but a 9.1e-6 m^2 air cell at the floor '
+                 'ejects at step 1407 (|a| 6.7e4); with the merge '
+                 '(merge_cdist 2.5e-3, mass_conserving) it completes the '
+                 'horizon at alpha 0.2 (front 0.0772, KE_liq peak 4.19e-3, '
+                 '|u|max 0.49, 0.016 kg released, 73082212bde3fd2f) and at '
+                 'alpha 0.1 (front 0.0854 but |u|max 2.85 against 1.40, '
+                 '180 against 37 flip steps, 0.134 kg released, '
+                 'e91ed94b8f0c1dd6), and at refinement 4 with the clamp '
+                 '(front 0.0815, |u|max 0.43, 110 whole-mass events moving '
+                 '1.21 kg of the 2.5 kg of liquid through the pool). '
+                 'Electrolysis static bubble (3D 1/1, 2000 steps): '
+                 'bit-identical to the preset (7f61e7da0348ecf0); with the '
+                 'simplex split the setup relabels 8 of 35 gas cells and the '
+                 'bubble collapses (jump 101173 Pa against 144). '
+                 'test_simplex_vote.py (8)',
                  dims=(2, 3), phases='multi'),
         ),
     ),

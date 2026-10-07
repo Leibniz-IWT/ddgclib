@@ -64,7 +64,7 @@ from ddgclib._boundary_conditions import (
 from ddgclib.visualization import plot_fluid
 
 from cases_dynamic.electrolysis_bubble.src._setup import (
-    WallClampBC, electrolysis_dudt,
+    electrolysis_dudt,
 )
 
 from cases_dynamic.electrolysis_bubble.src._params import (
@@ -729,7 +729,7 @@ def setup_fritz_dynamics(HC, bV, mps, meta, methods=None):
     dim = 2
     axis = dim - 1
     if methods is None:
-        methods = SolverMethods(dim=dim, phases='multi')
+        methods = SolverMethods(dim=dim, phases='multi', wall_clamp='project')
     elif methods.dim != dim:
         raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
     L_dom = meta['L_domain']
@@ -739,16 +739,13 @@ def setup_fritz_dynamics(HC, bV, mps, meta, methods=None):
 
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), bV)
-    bc_set.add(
-        WallClampBC(axis=axis, level=wall_bottom, direction=+1,
-                    min_gap=0.02 * R_top, exclude=bV),
-        None,
-    )
-    bc_set.add(
-        WallClampBC(axis=axis, level=wall_top, direction=-1,
-                    min_gap=0.02 * R_top, exclude=bV),
-        None,
-    )
+    # laneV: the library clamp of the axis wall_clamp ('project' on the
+    # fritz preset; the case-local class until 2026-10-07)
+    clamp = methods.wall_clamp_bc(
+        planes=[(axis, wall_bottom, +1), (axis, wall_top, -1)],
+        min_gap=0.02 * R_top, exclude=bV)
+    if clamp is not None:
+        bc_set.add(clamp, None)
 
     eos_liq = mps.phases[0].eos
     eos_gas = mps.phases[1].eos

@@ -90,7 +90,7 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
                   pressure_model=None, redistribute_mass=False,
                   remesh_mode='delaunay', remesh_kwargs=None,
                   retopo_remap=None, frozen_set='hull',
-                  edge_area_source=None):
+                  edge_area_source=None, merge_method='merge_all'):
     """Retriangulate, recompute boundaries, and rebuild duals.
 
     Called at the start of every integrator time step to ensure that:
@@ -118,6 +118,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
         retriangulation.  Prevents accumulation of near-duplicate
         vertices (e.g. from periodic inlet injection at wall positions).
         A good default is ``0.5 * min_edge_length``.
+    merge_method : {'merge_all', 'mass_conserving'}
+        How that merge is done (method axis ``merge_method``, laneV
+        2026-10-07).  ``'merge_all'`` (default, previous behaviour):
+        ``HC.V.merge_all`` drops one vertex of each close pair with its
+        mass.  ``'mass_conserving'``:
+        :func:`ddgclib.multiphase.mass_conserving_merge` (mass, momentum
+        and the per-phase ledger ``m_phase`` summed onto the survivor, a
+        member of *bV* preferred as the survivor).
     periodic_axes : list[int] or None
         Axes along which the domain is periodic (e.g. ``[0]``).
         When set, delegates to :func:`retopologize_periodic`.
@@ -330,7 +338,13 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
     if not skip_triangulation:
         # 0. Merge close vertices before retriangulation
         if merge_cdist is not None and merge_cdist > 0:
-            HC.V.merge_all(cdist=merge_cdist)
+            if merge_method == 'mass_conserving':
+                from ddgclib.multiphase import mass_conserving_merge
+                mass_conserving_merge(HC, cdist=merge_cdist, prefer=bV)
+            elif merge_method == 'merge_all':
+                HC.V.merge_all(cdist=merge_cdist)
+            else:
+                raise ValueError(f"unknown merge_method {merge_method!r}")
             # Refresh vertex list and clean up stale bV references
             bV.intersection_update(set(HC.V))
             verts = list(HC.V)
@@ -725,7 +739,9 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                              projection_every=1,
                              frozen_set='hull',
                              edge_area_source=None,
-                             phase_ledger='volume'):
+                             phase_ledger='volume',
+                             simplex_vote='bulk_majority',
+                             merge_method='merge_all'):
     """Retriangulate with multiphase interface tracking.
 
     Performs standard Delaunay retopologization (or adaptive local
@@ -848,6 +864,13 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         phase is targeted at the local pressure and a lost phase
         releases its mass, inside the exact per-phase conservation;
         under the remap the restore keeps the adopted pressure.
+    simplex_vote : {'bulk_majority', 'mass_fraction'}
+        The vote that relabels the top simplices after the rebuild
+        (method axis ``simplex_vote``; ``vote=`` of
+        :meth:`MultiphaseSystem.assign_simplex_phases_from_vertices`,
+        laneV 2026-10-07).
+    merge_method : {'merge_all', 'mass_conserving'}
+        Forwarded to :func:`_retopologize` (the merge of *merge_cdist*).
         ``'adopt'``: the same for a new phase, a lost phase keeps its
         mass as inertia.
     """
@@ -917,13 +940,14 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
                       remesh_mode=remesh_mode,
                       remesh_kwargs=remesh_kwargs,
                       frozen_set=frozen_set,
-                      edge_area_source=edge_area_source)
+                      edge_area_source=edge_area_source,
+                      merge_method=merge_method)
 
     multiphase_rebuild_with_ledger(
         HC, bV, dim, mps, _rebuild, _refresh_old,
         split_method=split_method, redistribute_mass=redistribute_mass,
         remap_active=remap_active, project_now=project_now,
-        phase_ledger=phase_ledger)
+        phase_ledger=phase_ledger, simplex_vote=simplex_vote)
 
 
 def _recompute_duals(HC):

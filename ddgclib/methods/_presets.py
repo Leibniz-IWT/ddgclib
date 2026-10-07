@@ -172,8 +172,15 @@ PRESETS: dict[str, SolverMethods] = {
         dim=2, phases='multi', integrator='symplectic_euler',
         connectivity='delaunay', remap='conservative',
         frozen_set='membership', redistribute_mass=True,
+        wall_clamp='project',
         label=_DB + 'dam_break_2D.py',
-        notes='laneF: remap ON survives reconnection (plain Delaunay blows up '
+        notes='laneV 2026-10-07: wall_clamp="project" (the library WallClampBC '
+              'on the four tank walls, gap 0.1 of the wall spacing): identity '
+              'on every pinned run (no vertex leaves: refinement 3 at alpha '
+              '0.3 / 0.2 / 0.1 bit-identical, 0 put-backs), and refinement 4 '
+              'at alpha 0.3 completes its 3170 steps instead of ending with '
+              'an air vertex 1.2e-6 m under the floor at step 2892 '
+              '(diagnose_sliver_ejection.py --refine 4). laneF: remap ON survives reconnection (plain Delaunay blows up '
               'at the first flip, KE x28). Hydrostatic per-phase mass '
               'preload IC, alpha_art 0.3 baked into PhaseProperties.mu, '
               'gravity via the setup closure. Open blocker: air sliver-cell '
@@ -206,9 +213,10 @@ PRESETS: dict[str, SolverMethods] = {
     'dam_break_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
-        edge_area_source='p_ij_simplex',
+        edge_area_source='p_ij_simplex', wall_clamp='project',
         label=_DB + 'dam_break_3D.py',
-        notes='Frozen connectivity (was skip_triangulation=True at integrator '
+        notes='laneV 2026-10-07: wall_clamp="project" on the six box walls '
+              '(identity on the pinned run: no vertex leaves). Frozen connectivity (was skip_triangulation=True at integrator '
               'level). laneF 2026-10-05: edge_area_source="p_ij_simplex" '
               '(the exact dual faces of laneQ). On the batch_e_star fan cache '
               'the shipped run blew up at step 4 (laneQ: NaN after 17): its '
@@ -258,8 +266,11 @@ PRESETS: dict[str, SolverMethods] = {
     'electrolysis_bubble_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
+        wall_clamp='project',
         label=_EB + 'electrolysis_bubble_2D.py',
-        notes='laneG 2026-10-06: connectivity="dual_only" replaces the '
+        notes='laneV 2026-10-07: wall_clamp="project" records the clamp the '
+              'setup has applied since 2026-07 (top and bottom wall, gap 0.02 '
+              'R0; the library WallClampBC now, bit-identical). laneG 2026-10-06: connectivity="dual_only" replaces the '
               'per-step Delaunay without remap. Static bubble (g = 0, no '
               'injection; the preload is the analytical state, jump gamma / '
               'R0 = 72 Pa; diagnose_static_bubble.py --dim 2): refinement '
@@ -290,8 +301,10 @@ PRESETS: dict[str, SolverMethods] = {
     'electrolysis_bubble_3D': SolverMethods(
         dim=3, phases='multi', integrator='symplectic_euler',
         connectivity='dual_only', redistribute_mass=True,
+        wall_clamp='project',
         label=_EB + 'electrolysis_bubble_3D.py',
-        notes='laneG 2026-10-06: connectivity="dual_only" (the 3D droplet '
+        notes='laneV 2026-10-07: wall_clamp="project" records the clamp the '
+              'setup has applied since 2026-07 (bit-identical). laneG 2026-10-06: connectivity="dual_only" (the 3D droplet '
               'default) replaces the per-step Delaunay without remap. The '
               'audit\'s "gas phase lost by t~1.1e-4 s" does not reproduce on '
               'the library of lanes B and F: the shipped horizon (2292 steps, '
@@ -331,10 +344,13 @@ PRESETS: dict[str, SolverMethods] = {
     'electrolysis_bubble_fritz_2D': SolverMethods(
         dim=2, phases='multi', integrator='symplectic_euler',
         connectivity='delaunay', remap=None, redistribute_mass=False,
+        wall_clamp='project',
         label=_EB + 'electrolysis_bubble_fritz_2D.py (run_short_dynamics)',
         notes='80-step smoke on the Fritz-shaped bubble. redistribute_mass was '
               'left unbound in the case partial, so the integrator default '
-              '(False) applied; recorded explicitly here.',
+              '(False) applied; recorded explicitly here. laneV: '
+              'wall_clamp="project" records the two clamps of '
+              'setup_fritz_dynamics (the library class now).',
     ),
     # ------------------------------------------------------------------
     # shearing plate droplet (periodic multiphase)
@@ -392,9 +408,17 @@ PRESETS: dict[str, SolverMethods] = {
     'hagen_poiseuille_2D': SolverMethods(
         dim=2, phases='single', integrator='symplectic_euler',
         connectivity='delaunay', frozen_set='membership',
-        viscous_flux='simplex_gradient',
+        viscous_flux='simplex_gradient', wall_clamp='project',
         label=_HP + '/Hagen_Poiseuile_2D.py',
-        notes='Developing Lagrangian channel flow on src/_setup.py:'
+        notes='laneV 2026-10-07: wall_clamp="project" on the wall lines y = 0 '
+              'and y = D (gap 0.1 of the wall spacing): identity on the pinned '
+              'developing run (nothing leaves, l2 0.013084885355719682 in both '
+              'arms); on the pre-laneH configuration of laneL (hull inlet, '
+              'two-point flux, L 15, 3000 steps of 0.01) the vertices outside '
+              'the walls go from 54 to 0 and the profile l2 on the downstream '
+              'half from 0.554 to the value of the laneV log '
+              '(diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000). '
+              'Developing Lagrangian channel flow on src/_setup.py:'
               'setup_poiseuille_developing: pressure G (L - x) prescribed and '
               're-imposed every step (DirichletPressureBC over HC.V, nodal), '
               'OutletBufferedDeleteBC, PeriodicInletBufferedBC (upstream buffer '

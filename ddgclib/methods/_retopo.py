@@ -467,7 +467,8 @@ def retopologize_multiphase_periodic(HC, bV, dim, mps=None, periodic_axes=None,
                                      merge_cdist=None,
                                      edge_area_source=None,
                                      retopo_remap=None,
-                                     projection_every=1):
+                                     projection_every=1,
+                                     simplex_vote='bulk_majority'):
     """Periodic ghost-cell Delaunay + multiphase refresh (+ redistribution).
 
     Mirrors ``_retopologize_multiphase`` with :func:`retopologize_periodic`
@@ -535,14 +536,15 @@ def retopologize_multiphase_periodic(HC, bV, dim, mps=None, periodic_axes=None,
         HC, bV, dim, mps, _rebuild, _refresh_old,
         split_method=split_method, redistribute_mass=redistribute_mass,
         remap_active=remap_active, project_now=project_now,
-        phase_ledger=phase_ledger)
+        phase_ledger=phase_ledger, simplex_vote=simplex_vote)
 
 
 def multiphase_rebuild_with_ledger(HC, bV, dim, mps, rebuild, refresh_old, *,
                                    split_method='neighbour_count',
                                    redistribute_mass=False,
                                    remap_active=False, project_now=True,
-                                   phase_ledger='volume'):
+                                   phase_ledger='volume',
+                                   simplex_vote='bulk_majority'):
     """The multiphase ledger closure around one connectivity rebuild.
 
     The body of ``_retopologize_multiphase`` after its argument checks,
@@ -556,7 +558,8 @@ def multiphase_rebuild_with_ledger(HC, bV, dim, mps, rebuild, refresh_old, *,
     EOS pressures, and under the remap the volume gauge, the pressure
     restore and the level anchor.  *rebuild* and *refresh_old* are
     closures over the path's own retopology call.  ``mps is None``
-    rebuilds only.
+    rebuilds only.  *simplex_vote* is the vote of both ``mps.refresh``
+    calls (method axis ``simplex_vote``, laneV).
     """
     if mps is None:
         rebuild()
@@ -588,7 +591,8 @@ def multiphase_rebuild_with_ledger(HC, bV, dim, mps, rebuild, refresh_old, *,
         # positions do not move inside this call), which the level
         # anchor below folds into the per-phase volume targets.
         refresh_old()
-        mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+        mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                    simplex_vote=simplex_vote)
         _vol_mid = phase_volume_totals(HC, mps.n_phases)
         if not project_now:
             # NOTE(laneH): off-cadence remap call — advance the
@@ -611,7 +615,8 @@ def multiphase_rebuild_with_ledger(HC, bV, dim, mps, rebuild, refresh_old, *,
     # Refresh multiphase state: reset_mass=False preserves the
     # Lagrangian mass (v.m, v.m_phase); only the geometry
     # (dual_vol_phase) and the pressures are recomputed.
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=simplex_vote)
 
     # Per-phase mass redistribution (after dual_vol_phase is available)
     if redistribute_mass and _p_snap is not None:

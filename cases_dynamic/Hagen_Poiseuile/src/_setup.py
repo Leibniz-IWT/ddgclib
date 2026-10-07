@@ -111,6 +111,19 @@ def setup_poiseuille_2d(
     return HC, bV, ic, bc_set, params
 
 
+def _wall_clamp(methods, bV, L, D, clamp_gap):
+    """The ``WallClampBC`` of ``methods.wall_clamp`` on the 2D wall lines
+    ``y = 0`` and ``y = D`` (laneV), gap *clamp_gap* or 0.1 of the wall
+    vertex spacing; ``None`` when there is no clamp."""
+    if methods is None or methods.wall_clamp is None:
+        return None
+    from ddgclib._boundary_conditions import wall_vertex_spacing
+    if clamp_gap is None:
+        clamp_gap = 0.1 * wall_vertex_spacing(bV, axis=1, level=0.0, along=0)
+    return methods.wall_clamp_bc(box=[(0.0, L), (0.0, D)], axes=(1,),
+                                 min_gap=clamp_gap, exclude=bV)
+
+
 def setup_poiseuille_2d_lagrangian(
     L: float = 15.0,
     D: float = 1.0,
@@ -122,9 +135,17 @@ def setup_poiseuille_2d_lagrangian(
     buffer_width: float = 2.0,
     cdist: float = 1e-10,
     wall_tol: float = 1e-10,
+    methods=None,
+    clamp_gap: float | None = None,
 ) -> tuple:
     """Developing Lagrangian channel flow on [0, L] x [0, D]: the mesh,
     BCs and ICs of ``Hagen_Poiseuile_2D.py``.
+
+    *methods* (laneV, 2026-10-07): when given, its axis ``wall_clamp``
+    adds the library :class:`WallClampBC` on the wall lines ``y = 0``
+    and ``y = D`` (put-down gap *clamp_gap*, ``None`` = 0.1 of the wall
+    vertex spacing, the frozen walls excluded) after the wall BC.  Nothing else of the config is applied here (the
+    runner integrates through it).
 
     Mesh: unit square ``[0, 1] x [0, D]`` refined *n_refine* times and
     extruded to length *L*.  BCs, in this order:
@@ -198,6 +219,9 @@ def setup_poiseuille_2d_lagrangian(
         PositionalNoSlipWallBC(criterion_fn=wall_criterion, dim=dim, bV=bV),
         None,
     )
+    clamp = _wall_clamp(methods, bV, L, D, clamp_gap)
+    if clamp is not None:
+        bc_set.add(clamp, None)
 
     CompositeIC(
         UniformVelocity(u_vec=np.array([U_avg, 0.0])),
@@ -210,6 +234,7 @@ def setup_poiseuille_2d_lagrangian(
         'dim': dim, 'L': L, 'D': D, 'U_avg': U_avg, 'rho': rho, 'mu': mu,
         'G': G, 'n_refine': n_refine, 'buffer_width': buffer_width,
         'cdist': cdist, 'wall_tol': wall_tol,
+        'clamp_gap': clamp.min_gap if clamp is not None else None,
         'poiseuille_ic': PoiseuillePlanar(
             G=G, mu=mu, y_lb=0.0, y_ub=D, flow_axis=0, normal_axis=1,
             dim=dim),
@@ -229,8 +254,17 @@ def setup_poiseuille_developing(
     outlet_buffer: float = 1.0,
     cdist: float = 1e-10,
     wall_tol: float = 1e-8,
+    methods=None,
+    clamp_gap: float | None = None,
 ) -> tuple:
     """Developing Lagrangian Poiseuille flow, 2D channel or 3D pipe (laneH).
+
+    *methods* (laneV, 2026-10-07): when given, its axis ``wall_clamp``
+    adds the library :class:`WallClampBC` on the 2D wall lines ``y = 0``
+    and ``y = D`` after the wall BC (gap *clamp_gap*, ``None`` = 0.1 of
+    the wall vertex spacing, walls excluded);
+    the round 3D pipe wall is not a plane and gets no clamp (a request
+    for one raises).
 
     Plug flow ``U_avg`` enters at the plane 0 of the flow axis and develops
     under the prescribed pressure field ``P = G (L - x)`` between no-slip
@@ -388,6 +422,12 @@ def setup_poiseuille_developing(
         PositionalNoSlipWallBC(criterion_fn=wall_criterion, dim=dim, bV=bV),
         None,
     )
+    if methods is not None and methods.wall_clamp is not None and dim != 2:
+        raise ValueError("wall_clamp: the 3D pipe wall is round, not a "
+                         "plane (no clamp for dim=3)")
+    clamp = _wall_clamp(methods, bV, L, D, clamp_gap)
+    if clamp is not None:
+        bc_set.add(clamp, None)
     bc_set.add(DirichletPressureBC(pressure), HC.V)   # every vertex
     bc_set.apply_all(HC, bV, dt=0.0)
 
@@ -397,6 +437,7 @@ def setup_poiseuille_developing(
         'inlet_buffer': inlet_buffer, 'outlet_buffer': outlet_buffer,
         'flow_axis': axis, 'period': period, 'area': area,
         'fluid_fraction': fluid_fraction,
+        'clamp_gap': clamp.min_gap if clamp is not None else None,
         'poiseuille_ic': analytical, 'pressure': pressure,
         't_dev': rho * D ** 2 / (np.pi ** 2 * mu) if dim == 2
         else rho * R ** 2 / (2.4048 ** 2 * mu),

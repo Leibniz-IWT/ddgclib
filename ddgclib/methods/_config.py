@@ -52,7 +52,7 @@ __all__ = ['SolverMethods']
 # Fields that are only meaningful for the multiphase pipeline.  For a
 # single-phase config they must stay at their defaults.
 _MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path',
-               'phase_ledger', 'face_closure')
+               'phase_ledger', 'face_closure', 'simplex_vote')
 
 # Connectivity values whose retopology function runs the multiphase
 # redistribution block (so remap / projection_every can apply).
@@ -92,10 +92,12 @@ class SolverMethods:
     connectivity: str = 'delaunay'
     remap: str | None = None
     frozen_set: str = 'hull'
+    wall_clamp: str | None = None
     projection_every: int = 1
     redistribute_mass: bool = False
     split_method: str = 'neighbour_count'
     phase_ledger: str = 'volume'
+    simplex_vote: str = 'bulk_majority'
     curvature_path: str = 'integrated'
     face_closure: str = 'renormalise'
     pressure_flux: str = 'centred'
@@ -106,6 +108,7 @@ class SolverMethods:
     contact_line: str | None = None
     displacement_eps: float | None = None
     merge_cdist: float | None = None
+    merge_method: str = 'merge_all'
     remesh_kwargs: dict[str, Any] | None = None
     periodic_axes: tuple[int, ...] | None = None
     backend: str | None = None
@@ -124,7 +127,10 @@ class SolverMethods:
         self._check_choice('connectivity', self.connectivity)
         self._check_choice('remap', self.remap)
         self._check_choice('frozen_set', self.frozen_set)
+        self._check_choice('wall_clamp', self.wall_clamp)
+        self._check_choice('merge_method', self.merge_method)
         self._check_choice('split_method', self.split_method)
+        self._check_choice('simplex_vote', self.simplex_vote)
         self._check_choice('phase_ledger', self.phase_ledger)
         self._check_choice('curvature_path', self.curvature_path)
         self._check_choice('face_closure', self.face_closure)
@@ -221,6 +227,18 @@ class SolverMethods:
             raise ValueError("displacement_eps must be None or > 0")
         if self.merge_cdist is not None and not self.merge_cdist > 0:
             raise ValueError("merge_cdist must be None or > 0")
+        if self.merge_method != AXES['merge_method'].default:
+            # laneV: the merge runs in _retopologize step 0 only, i.e. when
+            # merge_cdist is set and the Delaunay / adaptive rebuild runs.
+            if self.merge_cdist is None:
+                raise ValueError(
+                    f"merge_method={self.merge_method!r} is the merge of "
+                    "merge_cdist: set merge_cdist > 0")
+            if self.connectivity not in ('delaunay', 'adaptive'):
+                raise ValueError(
+                    f"merge_method={self.merge_method!r} is applied by "
+                    "_retopologize before a Delaunay / adaptive rebuild "
+                    f"only, not under connectivity={self.connectivity!r}")
         if self.workers is not None and (
                 not isinstance(self.workers, int) or self.workers < 1):
             raise ValueError("workers must be None or an int >= 1")
@@ -476,7 +494,10 @@ class SolverMethods:
         ``partial(_retopologize, ...)``); the default ``'hull'`` binds
         nothing, so the objects above are unchanged.  Likewise a
         non-default ``phase_ledger`` adds ``phase_ledger=`` to the two
-        multiphase partials that redistribute.
+        multiphase partials that redistribute, a non-default
+        ``simplex_vote`` adds ``simplex_vote=`` to both multiphase
+        partials and a non-default ``merge_method`` adds
+        ``merge_method=`` to the Delaunay partials (laneV).
         """
         if self.connectivity == 'frozen':
             return False
@@ -499,8 +520,10 @@ class SolverMethods:
                            retopo_remap=self.remap)
         membership = self.frozen_set != AXES['frozen_set'].default
         ledger = self.phase_ledger != AXES['phase_ledger'].default
+        vote = self.simplex_vote != AXES['simplex_vote'].default
+        merge = self.merge_method != AXES['merge_method'].default
         if self.phases == 'single':
-            if self.remap is None and not membership:
+            if self.remap is None and not membership and not merge:
                 return None
             from ddgclib.dynamic_integrators._integrators_dynamic import (
                 _retopologize,
@@ -510,6 +533,8 @@ class SolverMethods:
                 kw_s['retopo_remap'] = self.remap
             if membership:
                 kw_s['frozen_set'] = self.frozen_set
+            if merge:
+                kw_s['merge_method'] = self.merge_method
             return partial(_retopologize, **kw_s)
         if mps is None:
             raise ValueError("multiphase configs need mps=MultiphaseSystem")
@@ -532,6 +557,8 @@ class SolverMethods:
                 kw_p['retopo_remap'] = self.remap
             if self.projection_every != 1:
                 kw_p['projection_every'] = self.projection_every
+            if vote:
+                kw_p['simplex_vote'] = self.simplex_vote
             return partial(retopologize_multiphase_periodic, **kw_p)
         from ddgclib.dynamic_integrators._integrators_dynamic import (
             _retopologize_multiphase,
@@ -551,7 +578,33 @@ class SolverMethods:
             kw['frozen_set'] = self.frozen_set
         if ledger:
             kw['phase_ledger'] = self.phase_ledger
+        if vote:
+            kw['simplex_vote'] = self.simplex_vote
+        if merge:
+            kw['merge_method'] = self.merge_method
         return partial(_retopologize_multiphase, **kw)
+
+    def wall_clamp_bc(self, planes=None, *, box=None, axes=None,
+                      min_gap: float = 0.0, exclude=None):
+        """The :class:`ddgclib._boundary_conditions.WallClampBC` of the
+        axis ``wall_clamp`` (laneV), or ``None`` when the axis is None
+        (the setup then adds nothing to its ``bc_set``).
+
+        *planes* is ``[(axis, level, direction), ...]``; *box* with
+        optional *axes* builds both faces of each axis of ``[(lo, hi),
+        ...]`` instead.  *exclude* is the frozen set (``bV``), *min_gap*
+        the put-down distance from the wall: geometry, not method, so the
+        setup records them in ``record_methods(extra=)``.
+        """
+        if self.wall_clamp is None:
+            return None
+        if (planes is None) == (box is None):
+            raise ValueError("wall_clamp_bc needs planes= or box=")
+        from ddgclib._boundary_conditions import WallClampBC
+        if box is not None:
+            return WallClampBC.box(box, axes=axes, min_gap=min_gap,
+                                   exclude=exclude)
+        return WallClampBC(planes, min_gap=min_gap, exclude=exclude)
 
     def integrator_kwargs(self, mps=None, custom: Callable | None = None,
                           boundary_filter: Callable | None = None,

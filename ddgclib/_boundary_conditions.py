@@ -337,6 +337,109 @@ class FreeSlipWallBC(BoundaryCondition):
         return count
 
 
+def wall_vertex_spacing(vertices, axis: int, level: float, along: int,
+                        tol: float = 1e-12) -> float:
+    """Smallest positive distance along coordinate *along* between the
+    vertices of *vertices* that lie on the plane ``x[axis] == level``: the
+    wall vertex spacing a setup scales its ``WallClampBC`` gap with
+    (laneV: a gap of 0.1 of it keeps a put-back vertex strictly inside, so
+    its dual cell stays closed; on the wall line it would be a hull vertex
+    with a half cell open to the absolute pressure)."""
+    xs = sorted(float(v.x_a[along]) for v in vertices
+                if abs(float(v.x_a[axis]) - level) <= tol)
+    gaps = [b - a for a, b in zip(xs, xs[1:]) if b - a > tol]
+    if not gaps:
+        raise ValueError("wall_vertex_spacing: fewer than two vertices on "
+                         f"the plane x[{axis}] = {level}")
+    return min(gaps)
+
+
+class WallClampBC(BoundaryCondition):
+    """Impenetrability of a flat wall for the vertices that are NOT frozen
+    on it (method axis ``wall_clamp='project'``, laneV 2026-10-07).
+
+    Walls are vertices; nothing stops a fluid vertex from stepping between
+    two of them (laneL known limit 1: HP2D, dam break refinement 4).  Each
+    step this BC puts every target vertex that is past one of its planes
+    back to ``level + direction * min_gap`` on that plane's axis and
+    discards the velocity component INTO the wall (the component away
+    from it is kept, so a vertex that is pushed off the wall leaves).
+    One-sided: a vertex on the fluid side is never touched, so the BC is
+    the identity wherever impenetrability holds and every pinned run is
+    unchanged by it (measured, laneV).
+
+    Built from ``SolverMethods.wall_clamp_bc`` normally (recorded as the
+    axis); the arithmetic is that of the case-local ``WallClampBC`` of the
+    electrolysis case (2026-07), which this class replaces.
+
+    Parameters
+    ----------
+    planes : iterable of (axis, level, direction)
+        ``direction = +1``: the wall is a lower bound of ``x[axis]``
+        (vertices with ``x[axis] < level + min_gap`` are put back);
+        ``-1``: an upper bound.
+    min_gap : float
+        Distance from the wall at which a vertex is put down (0 = on the
+        wall line between the wall vertices).
+    exclude : set or None
+        Vertices never clamped (the frozen walls, ``bV``; the set object
+        is held, so later membership changes are seen).
+    """
+
+    def __init__(self, planes, min_gap: float = 0.0, exclude=None):
+        planes = [(int(a), float(level), int(d)) for a, level, d in planes]
+        if not planes:
+            raise ValueError("WallClampBC needs at least one plane")
+        if any(d not in (-1, 1) for _, _, d in planes):
+            raise ValueError("direction must be +1 (lower bound) or -1")
+        super().__init__(axis=planes[0][0])
+        self.planes = planes
+        self.min_gap = float(min_gap)
+        self.exclude = exclude if exclude is not None else set()
+
+    @classmethod
+    def box(cls, bounds, axes=None, min_gap: float = 0.0, exclude=None):
+        """Both faces of every axis in *axes* (default: all) of the box
+        ``bounds = [(lo, hi), ...]``."""
+        axes = range(len(bounds)) if axes is None else axes
+        planes = []
+        for a in axes:
+            lo, hi = bounds[a]
+            planes.append((a, lo, +1))
+            planes.append((a, hi, -1))
+        return cls(planes, min_gap=min_gap, exclude=exclude)
+
+    def apply(self, mesh, dt, target_vertices=None):
+        # Every vertex of the complex is a candidate (the set's default
+        # target, bV, is exactly the excluded set): *target_vertices* is
+        # ignored, as the electrolysis clamp did.
+        count = 0
+        for v in list(mesh.V):
+            if v in self.exclude:
+                continue
+            for axis, level, dirn in self.planes:
+                y = v.x_a[axis]
+                if dirn > 0 and y < level + self.min_gap:
+                    pos = v.x_a.copy()
+                    pos[axis] = level + self.min_gap
+                    mesh.V.move(v, tuple(pos))
+                    u = v.u.copy()
+                    if u[axis] < 0.0:
+                        u[axis] = 0.0
+                    v.u = u
+                    count += 1
+                elif dirn < 0 and y > level - self.min_gap:
+                    pos = v.x_a.copy()
+                    pos[axis] = level - self.min_gap
+                    mesh.V.move(v, tuple(pos))
+                    u = v.u.copy()
+                    if u[axis] > 0.0:
+                        u[axis] = 0.0
+                    v.u = u
+                    count += 1
+        return count
+
+
 class AxialSlideBC(BoundaryCondition):
     """Vertex that slides along a straight line parallel to *axis*: a
     contact-line vertex on a slit wall (2D) or on an edge of a prismatic

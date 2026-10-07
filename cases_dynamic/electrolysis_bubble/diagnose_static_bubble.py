@@ -66,8 +66,9 @@ def build(dim, ro, rd, g, methods, box_shift='move_all', clamp=True):
         nucleation_frac=P.nucleation_frac, rho_liq=P.rho_liq,
         rho_gas=P.rho_gas, mu_liq=P.mu_liq, mu_gas=P.mu_gas, gamma=P.gamma,
         K_liq=P.K_liq, K_gas=P.K_gas, g=g, P0=P.P0, refinement_outer=ro,
-        refinement_droplet=rd, use_wall_clamp=clamp, box_shift=box_shift,
-        methods=methods)
+        refinement_droplet=rd, box_shift=box_shift,
+        # laneV: the clamp is the axis wall_clamp of the methods
+        methods=methods if clamp else methods.replace(wall_clamp=None))
 
 
 def time_step(HC, dim):

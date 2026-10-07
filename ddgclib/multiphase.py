@@ -245,7 +245,8 @@ class MultiphaseSystem:
                 criterion_fn(centroid)
             )
 
-    def assign_simplex_phases_from_vertices(self, HC, dim: int) -> None:
+    def assign_simplex_phases_from_vertices(self, HC, dim: int,
+                                            vote: str = 'bulk_majority') -> None:
         """Label each top-simplex by majority vote of its vertex phases.
 
         For runtime retopologization: vertex phases (``v.phase``)
@@ -254,13 +255,27 @@ class MultiphaseSystem:
         labels via majority rule among the bulk (non-interface) vertices
         of each simplex.
 
-        Rules per simplex:
+        Rules per simplex (``vote='bulk_majority'``, the default):
         - All bulk vertices in same phase → simplex gets that phase.
         - Mixed bulk phases → simplex gets the majority; if tied, the
           simplex is a cross-phase boundary → assigned to the lower
           phase ID (arbitrary but deterministic).
         - All vertices are interface (phase = -1) → use the first
           ``interface_phases`` entry as fallback.
+
+        ``vote='mass_fraction'`` (method axis ``simplex_vote``, laneV
+        2026-10-07): every vertex votes, with the weight of phase ``k``
+        equal to its volume-equivalent mass share ``(m_phase[k] /
+        rho0_k) / sum_j (m_phase[j] / rho0_j)`` (a bulk vertex with a
+        clean ledger votes 1 for its phase, an interface vertex votes
+        fractionally for the phases it carries mass of); the simplex goes
+        to the largest total, a tie to the lower phase ID.  The vote
+        reads the Lagrangian ledger, not the stale sub-volumes, so a
+        one-cell-thick liquid tongue whose vertices are all interface
+        vertices keeps its liquid simplices while they carry liquid mass,
+        and a lone bulk vertex is relabelled only when the mass around it
+        says so.  A vertex without ``m_phase`` (or with zero mass) votes
+        by its label as under ``'bulk_majority'``.
 
         Must be called AFTER retopologization (so that
         ``iter_top_simplices`` reflects the new connectivity) but
@@ -275,8 +290,36 @@ class MultiphaseSystem:
             coords = np.array([v.x_a[:3] for v in verts], dtype=float)
             connect_and_cache_simplices(HC, verts, 3, coords=coords)
 
+        if vote not in ('bulk_majority', 'mass_fraction'):
+            raise ValueError(f"unknown simplex vote {vote!r}")
+        n = self.n_phases
+        inv_rho0 = np.array([1.0 / float(ph.rho0) for ph in self.phases])
+
+        def _mass_weights(v):
+            mp = getattr(v, 'm_phase', None)
+            if mp is None or len(mp) != n:
+                return None
+            w = np.asarray(mp, dtype=float) * inv_rho0
+            total = float(w.sum())
+            if not total > 0.0:
+                return None
+            return w / total
+
         self.simplex_phase = {}
         for simplex in iter_top_simplices(HC, dim):
+            if vote == 'mass_fraction':
+                score = np.zeros(n)
+                for v in simplex:
+                    w = _mass_weights(v)
+                    if w is not None:
+                        score += w
+                    elif 0 <= v.phase < n:
+                        score[int(v.phase)] += 1.0
+                if score.any():
+                    # argmax returns the lowest index among equal maxima
+                    self.simplex_phase[_simplex_key(simplex)] = int(
+                        np.argmax(score))
+                    continue
             bulk_phases = [
                 int(v.phase) for v in simplex if v.phase >= 0
             ]
@@ -658,6 +701,7 @@ class MultiphaseSystem:
         reset_mass: bool = True,
         split_method: str = 'neighbour_count',
         criterion_fn: Callable[[np.ndarray], int] | None = None,
+        simplex_vote: str = 'bulk_majority',
     ) -> None:
         """One-call refresh of all multiphase state.
 
@@ -694,6 +738,9 @@ class MultiphaseSystem:
             Centroid-to-phase-ID mapping used to re-label top-simplices.
             If ``None``, the cached function from the most recent
             :meth:`assign_simplex_phases` call is used.
+        simplex_vote : {'bulk_majority', 'mass_fraction'}
+            The vote of :meth:`assign_simplex_phases_from_vertices` on a
+            runtime refresh (method axis ``simplex_vote``).
 
         Raises
         ------
@@ -711,7 +758,7 @@ class MultiphaseSystem:
             # the new simplex labels from vertex majority vote — this
             # tracks the moving interface rather than applying a stale
             # fixed-radius spatial test.
-            self.assign_simplex_phases_from_vertices(HC, dim)
+            self.assign_simplex_phases_from_vertices(HC, dim, vote=simplex_vote)
         if not self.simplex_phase:
             raise ValueError(
                 "MultiphaseSystem.refresh requires simplex_phase to be "
@@ -770,12 +817,17 @@ class MultiphaseSystem:
 # Utility: mass-conserving vertex merge
 # ---------------------------------------------------------------------------
 
-def mass_conserving_merge(HC, cdist: float = 1e-10) -> int:
+def mass_conserving_merge(HC, cdist: float = 1e-10, prefer=None) -> int:
     """Merge near-duplicate vertices while conserving total mass.
 
     For each pair of vertices within *cdist*, the surviving vertex
     receives the sum of both masses.  Other scalar fields (``p``) are
-    averaged; vector fields (``u``) are mass-weighted averaged.
+    averaged; vector fields (``u``) are mass-weighted averaged.  The
+    per-phase ledger ``m_phase`` is summed phase by phase when the
+    vertices carry it (laneV 2026-10-07: method axis
+    ``merge_method='mass_conserving'``); the phase label and the
+    per-phase pressures of the survivor are left to the next
+    ``MultiphaseSystem.refresh``.
 
     Parameters
     ----------
@@ -783,6 +835,11 @@ def mass_conserving_merge(HC, cdist: float = 1e-10) -> int:
         Simplicial complex (modified in-place).
     cdist : float
         Merge tolerance.
+    prefer : set or None
+        Vertices that must survive a merge when one is in the group (the
+        frozen walls, ``bV``): without it the survivor is whichever vertex
+        the group meets first (laneL known limit 4).  Membership is tested
+        by identity.
 
     Returns
     -------
@@ -818,10 +875,14 @@ def mass_conserving_merge(HC, cdist: float = 1e-10) -> int:
         r = find(i)
         groups.setdefault(r, []).append(i)
 
+    prefer_ids = {id(v) for v in prefer} if prefer else set()
     n_removed = 0
     for _root, members in groups.items():
         if len(members) < 2:
             continue
+        if prefer_ids:
+            members = sorted(members,
+                             key=lambda m: id(verts[m]) not in prefer_ids)
         survivor = verts[members[0]]
         to_remove = [verts[m] for m in members[1:]]
 
@@ -832,6 +893,10 @@ def mass_conserving_merge(HC, cdist: float = 1e-10) -> int:
             if hasattr(verts[m], 'u')
         )
         avg_p = np.mean([getattr(verts[m], 'p', 0.0) for m in members])
+        m_phase = [getattr(verts[m], 'm_phase', None) for m in members]
+        if all(mp is not None for mp in m_phase):
+            survivor.m_phase = np.sum(
+                [np.asarray(mp, dtype=float) for mp in m_phase], axis=0)
 
         survivor.m = total_mass
         if total_mass > 0 and hasattr(survivor, 'u'):

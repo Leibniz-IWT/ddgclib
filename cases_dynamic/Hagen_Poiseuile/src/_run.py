@@ -72,7 +72,7 @@ def run_developing(methods, *, dim: int, L: float, mu: float, n_refine: int,
     ``walls``).
     """
     HC, bV, bc_set, wall, params = setup_poiseuille_developing(
-        dim=dim, L=L, mu=mu, n_refine=n_refine, **setup_kw)
+        dim=dim, L=L, mu=mu, n_refine=n_refine, methods=methods, **setup_kw)
     if window is None:
         window = (0.5 * L, L)
     axis = params['flow_axis']
