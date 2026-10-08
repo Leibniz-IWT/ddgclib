@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Case 15: predictive Young-Laplace ddgclib bridge-film mesh evolution.
+
+This case keeps the h0=100 um Siekman geometry/material setup, but removes the
+Case 14 compact-neck power-law branch.  The sphere-attached bridge profile is
+computed every step by the reusable ddgclib Young-Laplace/free-energy bridge
+operator with contact-angle and film-rim slope boundary conditions taken from
+the current mesh.
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import replace
+from pathlib import Path
+import shutil
+
+from . import capillary_bridge_core as case13
+
+
+base = case13.base
+ROOT = Path(__file__).resolve().parent.parent
+CASE_STEM = Path(__file__).stem
+CASE_LABEL = "Case 15"
+OUTPUT_PREFIX = "case15"
+OUT_DIR = ROOT / CASE_STEM
+
+base.CASE_STEM = CASE_STEM
+base.CASE_LABEL = CASE_LABEL
+base.OUTPUT_PREFIX = OUTPUT_PREFIX
+base.OUT_DIR = OUT_DIR
+
+CONFIG = replace(
+    case13.CONFIG,
+    max_steps=1000,
+    wall_clock_limit_s=3600.0,
+    record_every_steps=100,
+    snapshot_times_s=(0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0),
+    attached_capillary_bridge_solver_enabled=True,
+    attached_capillary_bridge_enforce_contact_angle=True,
+    attached_capillary_bridge_match_film_slope=True,
+    attached_capillary_bridge_nodes=64,
+    full_bridge_mesh_bridge_nodes=64,
+    bridge_pressure_center_offset_mm=0.0,
+    bridge_pressure_center_transient_inset_mm=0.0,
+    attached_bridge_rim_offset_model="capillary_length",
+    attached_bridge_rim_offset_mm=0.0,
+    attached_bridge_rim_capillary_length_multiplier=0.80,
+    attached_reduced_driver_inner_pressure_boundary_enabled=False,
+    attached_reduced_driver_profile_projection_enabled=False,
+    attached_reduced_driver_profile_projection_relaxation=1.0,
+    attached_reduced_driver_bottleneck_enabled=True,
+    attached_reduced_driver_bottleneck_volume_ul=0.030,
+    attached_local_capture_enabled=True,
+    attached_film_radial_remesh_enabled=True,
+    attached_film_radial_remesh_exponent=1.15,
+    attached_volume_projection_weight_exponent=0.0,
+    attached_volume_projection_bridge_reservoir_enabled=True,
+    attached_volume_projection_bridge_reservoir_counts_as_missing=False,
+    attached_volume_projection_bridge_reservoir_weight=1.0,
+    attached_visible_feed_profile_constraint_enabled=False,
+    attached_visible_feed_partition_enabled=True,
+    attached_visible_feed_min_fraction=0.03,
+    attached_visible_feed_max_fraction=0.72,
+    attached_visible_feed_transition_progress=0.65,
+    attached_visible_feed_transition_width=0.06,
+    attached_visible_feed_scale_radius_mode="contact_blend",
+    attached_visible_feed_contact_blend_exponent=2.6,
+    attached_neck_boundary_layer_enabled=True,
+    attached_neck_boundary_layer_solver="coupled",
+    attached_neck_boundary_layer_min_width_um=2.0,
+    attached_neck_boundary_layer_max_width_capillary_lengths=0.40,
+    attached_neck_boundary_layer_relaxation=1.0,
+    attached_neck_boundary_layer_solve_rim_height=True,
+    attached_neck_adaptive_rings_enabled=True,
+    attached_neck_adaptive_rings_fraction=0.45,
+    attached_neck_adaptive_width_multiplier=5.0,
+    attached_neck_adaptive_min_window_um=180.0,
+    attached_neck_adaptive_max_window_mm=1.20,
+    attached_neck_adaptive_spacing_exponent=1.70,
+    attached_contact_line_bridge_radius_coupling_enabled=False,
+    attached_contact_line_allow_recede=False,
+    dynamic_contact_angle_max_deg=25.0,
+    attached_compact_neck_recovery_power=2.0,
+    attached_bridge_rim_transient_offset_mm=0.0,
+    attached_bridge_rim_transient_decay_time_s=18.0,
+    attached_bridge_rim_transient_decay_exponent=1.0,
+    attached_compact_neck_profile_enabled=False,
+    attached_compact_neck_bridge_branch_enabled=False,
+    min_height_um=0.25,
+)
+
+
+def seed_validation_assets() -> None:
+    """Reuse already-audited local Siekman digitization assets if available."""
+
+    source_dirs = (
+        ROOT / "Case_14_siekman2025_compact_neck_ddgclib_mesh_evolution",
+        ROOT / "Case_11_siekman2025_real_ddgclib_mesh_evolution",
+    )
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for source_dir in source_dirs:
+        if not source_dir.is_dir():
+            continue
+        for name in (
+            "case7_digitized_siekman2025_fig5a_h0_100.csv",
+            "case7_digitized_siekman2025_fig5a_h0_100_debug.png",
+            "siekman2025_fig5_source.jpeg",
+            "siekman2025_fig1c_crop.png",
+            "siekman2025_fig1c_digitization_debug.png",
+            "siekman2025_fig1c_user_exact.png",
+            "siekman2025_fig1c_pdf_digitized_manual_approx.csv",
+        ):
+            src = source_dir / name
+            dst = OUT_DIR / name
+            if src.is_file() and not dst.is_file():
+                shutil.copy2(src, dst)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--render-existing", action="store_true")
+    parser.add_argument("--max-steps", type=int, default=CONFIG.max_steps)
+    parser.add_argument("--wall-clock-limit-s", type=float, default=CONFIG.wall_clock_limit_s)
+    parser.add_argument("--dt", type=float, default=CONFIG.dt_s)
+    parser.add_argument("--profile-nodes", type=int, default=CONFIG.profile_nodes)
+    parser.add_argument("--azimuthal-nodes", type=int, default=CONFIG.azimuthal_nodes)
+    parser.add_argument("--record-every", type=int, default=CONFIG.record_every_steps)
+    parser.add_argument(
+        "--snapshot-every",
+        type=int,
+        default=0,
+        help="Save mesh snapshots every N solver steps; 0 uses CONFIG.snapshot_times_s.",
+    )
+    return parser.parse_args()
+
+
+def build_config(args: argparse.Namespace) -> base.RealMeshEvolutionConfig:
+    snapshot_times = CONFIG.snapshot_times_s
+    if int(args.snapshot_every) > 0:
+        snapshot_steps = range(0, int(args.max_steps) + 1, int(args.snapshot_every))
+        snapshot_times = tuple(float(step) * float(args.dt) for step in snapshot_steps)
+        final_time = float(args.max_steps) * float(args.dt)
+        if not snapshot_times or abs(snapshot_times[-1] - final_time) > 1.0e-12:
+            snapshot_times = (*snapshot_times, final_time)
+    return replace(
+        CONFIG,
+        dt_s=float(args.dt),
+        max_steps=int(args.max_steps),
+        wall_clock_limit_s=float(args.wall_clock_limit_s),
+        profile_nodes=int(args.profile_nodes),
+        azimuthal_nodes=int(args.azimuthal_nodes),
+        record_every_steps=int(args.record_every),
+        snapshot_times_s=snapshot_times,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    if args.render_existing:
+        seed_validation_assets()
+        config = base.config_from_summary(OUT_DIR, CONFIG)
+        summary = base.render_existing_case(config, OUT_DIR)
+        print(f"Rendered existing {CASE_LABEL} validation output in {OUT_DIR.resolve()}")
+        print(f"Validation PNG: {summary['outputs']['validation_set_png']}")
+        print(f"Truth status: {summary['truth_status']}")
+        return
+
+    config = build_config(args)
+    seed_validation_assets()
+    summary = base.run_case(config, OUT_DIR)
+    print(f"Wrote outputs to {OUT_DIR.resolve()}")
+    print(f"Validation PNG: {summary['outputs']['validation_set_png']}")
+    print(f"Truth status: {summary['truth_status']}")
+
+
+if __name__ == "__main__":
+    main()
