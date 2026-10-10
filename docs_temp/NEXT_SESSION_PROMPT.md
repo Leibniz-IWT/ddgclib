@@ -1,5 +1,11 @@
 # Prompt for the next session: continue the ddgclib dynamics campaign as one major workflow
 
+> Superseded for the STATE of the campaign by `docs_temp/HANDOFF_2026-10-07.md`
+> (cloud session: lanes F-review, G, I, X done, V unreviewed) and
+> `docs_temp/HANDOFF_2026-10-10.md` (cloud work merged on the dev PC; the
+> workstation runs lanes V-review and D with `workflows/ddgclib-lanes-5.js`).
+> The rules and the lane briefs below still apply.
+
 Written 2026-10-06 at the hand-off of the local session. Paste the section
 "PROMPT" into a fresh Claude Code session (cloud or local) after both
 repositories are cloned side by side and pushed to the commits named below.
