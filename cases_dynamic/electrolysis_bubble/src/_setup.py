@@ -217,7 +217,7 @@ def setup_electrolysis_bubble(
     refinement_droplet: int = 3,
     distr_law: str = "sinusoidal",
     apply_hydrostatic_ic: bool = True,
-    use_wall_clamp: bool = True,
+    use_wall_clamp: bool | None = None,
     nucleation_frac: float = 0.5,
     redistribute_mass: bool = True,
     box_shift: str = 'move_all',
@@ -251,14 +251,16 @@ def setup_electrolysis_bubble(
     apply_hydrostatic_ic : bool
         Pre-impose hydrostatic pressure in the liquid at t=0 so
         there is no startup pressure wave.  Strongly recommended.
-    use_wall_clamp : bool
+    use_wall_clamp : bool or None
         Add clamps on the TOP (destination wall) and BOTTOM
         (electrode) that prevent interior vertices from passing
         through walls.  Since laneV (2026-10-07) the clamp is the
         library :class:`ddgclib._boundary_conditions.WallClampBC` of
         the method axis ``wall_clamp`` (``'project'`` on the
-        electrolysis presets): when *methods* is given this flag is
-        ignored and the axis decides; ``None`` maps the flag onto it.
+        electrolysis presets).  ``None`` (default) lets the axis
+        decide (a ``methods=None`` build takes ``'project'``); an
+        explicit flag that contradicts ``methods.wall_clamp`` raises
+        (laneV review 2026-10-10: it used to be ignored silently).
     redistribute_mass : bool
         If True (default), per-phase mass is redistributed after each
         Delaunay reconnection so that the pre-retopo per-phase pressure
@@ -287,10 +289,17 @@ def setup_electrolysis_bubble(
     if methods is None:
         methods = SolverMethods(dim=dim, phases='multi',
                                 redistribute_mass=redistribute_mass,
-                                wall_clamp='project' if use_wall_clamp
-                                else None)
+                                wall_clamp=None if use_wall_clamp is False
+                                else 'project')
     elif methods.dim != dim:
         raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
+    elif use_wall_clamp is not None and (
+            use_wall_clamp != (methods.wall_clamp is not None)):
+        # laneV review 2026-10-10: the flag used to be ignored silently
+        raise ValueError(
+            f"use_wall_clamp={use_wall_clamp!r} conflicts with "
+            f"methods.wall_clamp={methods.wall_clamp!r}: the axis decides; "
+            "drop the flag or pass methods.replace(wall_clamp=...)")
     split_method = methods.split_method
     simplex_vote = methods.simplex_vote
     axis = dim - 1
@@ -476,6 +485,7 @@ def setup_electrolysis_bubble(
         'L_domain': L_domain,
         'nucleation_frac': nucleation_frac,
         'box_shift': box_shift,
+        'clamp_gap': clamp.min_gap if clamp is not None else None,
         'bubble_center': tuple(bubble_center),
         'wall_bottom': wall_bottom,
         'wall_top': wall_top,

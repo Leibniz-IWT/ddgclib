@@ -186,6 +186,14 @@ class TestWiring:
             k1, _ = labels['arm'][key]
             if not touches:
                 assert k0 == k1
+        # ... and the arm must differ where the interface is touched (the
+        # (liquid, air, interface) ties of the column face go to the
+        # liquid the preloaded density tips, laneV log section 2.2);
+        # without this the forwarding could be dropped unnoticed (review
+        # 2026-10-10).
+        assert any(k0 != labels['arm'][key][0]
+                   for key, (k0, touches) in labels['base'].items()
+                   if touches)
         m = PRESETS['dam_break_2D'].replace(split_method='simplex',
                                             simplex_vote='mass_fraction')
         HC, bV, mps, bc_set, dudt_fn, _r, params = build(m)
@@ -196,3 +204,63 @@ class TestWiring:
                         mps=mps)
         assert all(np.all(np.isfinite(v.u)) for v in HC.V)
         assert max(float(np.linalg.norm(v.u[:2])) for v in HC.V) < 1.0
+
+    def test_vote_needs_a_retopology_that_applies_it(self):
+        for conn in ('frozen', 'dual_only_bare'):
+            with pytest.raises(ValueError, match='simplex_vote'):
+                SolverMethods(dim=2, phases='multi', connectivity=conn,
+                              simplex_vote='mass_fraction')
+
+
+class TestForwarding:
+    """The two axes reach the mesh through the multiphase retopology
+    itself (``_retopologize_multiphase`` -> ``multiphase_rebuild_with_
+    ledger`` -> ``mps.refresh`` / ``_retopologize``), not only through
+    the partial's keywords (laneV review 2026-10-10: the wiring tests
+    above pass when either function drops the keyword)."""
+
+    @pytest.mark.parametrize('vote, tie_label', [('bulk_majority', 0),
+                                                 ('mass_fraction', 1)])
+    def test_vote_reaches_the_simplices(self, vote, tie_label):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
+        )
+        HC = _strip(0.6, lone=True)
+        bV = {v for v in HC.V if v.boundary}
+        mps = _mps()
+        mps.assign_simplex_phases_from_vertices(HC, 2)
+        ties = [s for s in iter_top_simplices(HC, 2)
+                if sorted(int(v.phase) for v in s) == [-1, 0, 1]]
+        assert ties
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            _retopologize_multiphase(HC, bV, 2, mps=mps,
+                                     skip_triangulation=True,
+                                     simplex_vote=vote)
+        assert all(mps.simplex_phase[_simplex_key(s)] == tie_label
+                   for s in ties)
+
+    @pytest.mark.parametrize('method, conserved', [('merge_all', False),
+                                                   ('mass_conserving', True)])
+    def test_merge_method_reaches_the_rebuild(self, method, conserved):
+        from ddgclib.dynamic_integrators._integrators_dynamic import (
+            _retopologize_multiphase,
+        )
+        HC = _strip(0.5)
+        bV = {v for v in HC.V if v.boundary}
+        mps = _mps()
+        mps.assign_simplex_phases_from_vertices(HC, 2)
+        air = [v for v in HC.V if v not in bV and v.phase == 0]
+        HC.V.move(air[0], tuple(np.asarray(air[1].x) + 1e-12))
+        mp0 = np.sum([v.m_phase for v in HC.V], axis=0)
+        n0 = sum(1 for _ in HC.V)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            _retopologize_multiphase(HC, bV, 2, mps=mps, merge_cdist=1e-9,
+                                     merge_method=method)
+        assert sum(1 for _ in HC.V) == n0 - 1
+        mp1 = np.sum([v.m_phase for v in HC.V], axis=0)
+        if conserved:
+            np.testing.assert_allclose(mp1, mp0, rtol=1e-14)
+        else:
+            assert mp1[0] < mp0[0] - 0.5      # the merged air mass is gone

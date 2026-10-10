@@ -140,7 +140,8 @@ def main():
         extra={'dt': dt, 'n_steps': n_steps, 't_end': t_end,
                't_final': t_final, 'n_refine': n_refine_2d,
                'alpha_art': alpha_art, 'cfl': cfl,
-               'body_force': dudt_fn.body_force.tolist()},
+               'body_force': dudt_fn.body_force.tolist(),
+               'clamp_gap': params['clamp_gap']},
     )
 
     # -- Static plots --

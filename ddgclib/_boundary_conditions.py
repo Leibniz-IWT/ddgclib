@@ -131,6 +131,10 @@ class BoundaryConditionSet:
         self._bcs.append((bc, vertices))
         return self
 
+    def has(self, bc_type: type) -> bool:
+        """Whether a BC of class *bc_type* (or a subclass) is registered."""
+        return any(isinstance(bc, bc_type) for bc, _ in self._bcs)
+
     def apply_all(self, mesh, bV: set, dt: float) -> dict:
         """Apply all BCs in order.
 
@@ -364,9 +368,15 @@ class WallClampBC(BoundaryCondition):
     back to ``level + direction * min_gap`` on that plane's axis and
     discards the velocity component INTO the wall (the component away
     from it is kept, so a vertex that is pushed off the wall leaves).
-    One-sided: a vertex on the fluid side is never touched, so the BC is
-    the identity wherever impenetrability holds and every pinned run is
-    unchanged by it (measured, laneV).
+    One-sided: a vertex farther than ``min_gap`` from every plane on the
+    fluid side is never touched, so the BC is the identity on a run in
+    which no non-excluded vertex comes within ``min_gap`` of a named
+    plane (0 put-backs measured on every pinned run, laneV).  Otherwise
+    it is an exclusion band of width ``min_gap``: a vertex inside the
+    band is held at the gap and slides along the wall with its inward
+    velocity discarded, whether or not it ever crossed the wall (laneV
+    log section 2.1: the refinement 4 dam break fires from step 1327
+    on, 1565 steps before the first crossing of the unclamped run).
 
     Built from ``SolverMethods.wall_clamp_bc`` normally (recorded as the
     axis); the arithmetic is that of the case-local ``WallClampBC`` of the

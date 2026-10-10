@@ -98,16 +98,21 @@ class TestSolverMethodsWiring:
     def test_axis_and_builder(self):
         m = SolverMethods(dim=2)
         assert m.wall_clamp is None
-        assert m.wall_clamp_bc(box=[(0, 1), (0, 1)]) is None
+        assert m.wall_clamp_bc(box=[(0, 1), (0, 1)], min_gap=0.1) is None
         m = SolverMethods(dim=2, wall_clamp='project')
         bc = m.wall_clamp_bc(box=[(0, 1), (0, 1)], axes=(1,), min_gap=0.1,
                              exclude=set())
         assert isinstance(bc, WallClampBC) and bc.planes == [(1, 0.0, 1),
                                                              (1, 1.0, -1)]
-        bc = m.wall_clamp_bc(planes=[(0, 2.0, -1)])
+        bc = m.wall_clamp_bc(planes=[(0, 2.0, -1)], min_gap=0.1)
         assert bc.planes == [(0, 2.0, -1)]
         with pytest.raises(ValueError, match='planes= or box='):
-            m.wall_clamp_bc()
+            m.wall_clamp_bc(min_gap=0.1)
+        # gap 0 is the measured DO-NOT (laneV 2.1); the builder refuses it
+        with pytest.raises(ValueError, match='min_gap'):
+            m.wall_clamp_bc(planes=[(0, 2.0, -1)], min_gap=0.0)
+        with pytest.raises(TypeError):
+            m.wall_clamp_bc(planes=[(0, 2.0, -1)])
         with pytest.raises(ValueError):
             SolverMethods(dim=2, wall_clamp='bogus')
         with pytest.raises(ValueError, match='not available in 1D'):

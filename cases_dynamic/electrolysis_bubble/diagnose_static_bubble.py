@@ -60,15 +60,15 @@ def _coerce(text):
     return {'None': None, 'True': True, 'False': False}.get(text, text)
 
 
-def build(dim, ro, rd, g, methods, box_shift='move_all', clamp=True):
+def build(dim, ro, rd, g, methods, box_shift='move_all'):
+    # laneV: the clamp is the axis wall_clamp of the methods (``--no-clamp``
+    # is applied to *methods* in main, so the record is the run)
     return setup_electrolysis_bubble(
         dim=dim, R0=P.R0, L_domain=P.L_domain,
         nucleation_frac=P.nucleation_frac, rho_liq=P.rho_liq,
         rho_gas=P.rho_gas, mu_liq=P.mu_liq, mu_gas=P.mu_gas, gamma=P.gamma,
         K_liq=P.K_liq, K_gas=P.K_gas, g=g, P0=P.P0, refinement_outer=ro,
-        refinement_droplet=rd, box_shift=box_shift,
-        # laneV: the clamp is the axis wall_clamp of the methods
-        methods=methods if clamp else methods.replace(wall_clamp=None))
+        refinement_droplet=rd, box_shift=box_shift, methods=methods)
 
 
 def time_step(HC, dim):
@@ -128,12 +128,14 @@ def main(argv=None):
     if args.replace:
         methods = methods.replace(**{k: _coerce(v) for k, v in
                                      (r.split('=', 1) for r in args.replace)})
+    if args.no_clamp:
+        methods = methods.replace(wall_clamp=None)
     print(methods.describe())
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         HC, bV, mps, bc_set, dudt_fn, retopo_fn, params = build(
             args.dim, args.ro, args.rd, args.g, methods,
-            box_shift=args.box_shift, clamp=not args.no_clamp)
+            box_shift=args.box_shift)
     dim = args.dim
     dt = time_step(HC, dim)
     dm_dt = P.dm_dt_3d if dim == 3 else P.dm_dt_2d

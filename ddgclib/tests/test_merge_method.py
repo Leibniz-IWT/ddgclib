@@ -60,15 +60,27 @@ class TestMassConservingMerge:
         np.testing.assert_allclose(mp1, mp0, rtol=1e-14)
         np.testing.assert_allclose(mom1, mom0, rtol=1e-13)
 
-    def test_prefer_keeps_the_wall_vertex(self):
+    @pytest.mark.parametrize('prefer_walls, wall_survives',
+                             [(False, False), (True, True)])
+    def test_prefer_keeps_the_wall_vertex(self, prefer_walls, wall_survives):
+        """The WALL vertex is moved onto a mobile one: hyperct re-keys a
+        moved vertex at the end of ``HC.V``, so the order-based survivor
+        is the mobile vertex and only ``prefer=bV`` keeps the wall (the
+        reverse scenario, where the mobile vertex is moved, has the wall
+        first in ``HC.V`` and cannot tell the two apart; laneV review
+        2026-10-10)."""
         HC, bV = _square()
         wall = next(iter(sorted(bV, key=lambda v: tuple(v.x))))
         mobile = next(v for v in HC.V if v not in bV)
-        HC.V.move(mobile, tuple(np.asarray(wall.x) + 1e-12))
-        # without the preference the survivor is whichever comes first in
-        # HC.V order; with it the wall vertex survives
-        assert mass_conserving_merge(HC, cdist=1e-9, prefer=bV) == 1
-        assert wall in HC.V and mobile not in HC.V
+        HC.V.move(wall, tuple(np.asarray(mobile.x) + 1e-12))
+        m0, mp0, mom0 = _totals(HC)
+        assert mass_conserving_merge(
+            HC, cdist=1e-9, prefer=bV if prefer_walls else None) == 1
+        assert (wall in HC.V) is wall_survives
+        assert (mobile in HC.V) is not wall_survives
+        m1, mp1, mom1 = _totals(HC)
+        np.testing.assert_allclose(m1, m0, rtol=1e-14)
+        np.testing.assert_allclose(mp1, mp0, rtol=1e-14)
 
     def test_retopologize_axis(self):
         res = {}

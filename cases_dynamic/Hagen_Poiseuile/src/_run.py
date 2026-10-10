@@ -264,6 +264,7 @@ def run_case(name: str, argv: list[str] | None = None) -> dict[str, Any]:
                        'dt', 'n_steps')}
                    | {'inlet_buffer': p['inlet_buffer'],
                       'outlet_buffer': p['outlet_buffer'],
+                      'clamp_gap': p['clamp_gap'],
                       'pressure': 'prescribed G (L - x), nodal, re-imposed '
                                   'every step (DirichletPressureBC)',
                       'mass': 'rho * dual volume of the periodic tiling',

@@ -416,7 +416,7 @@ PRESETS: dict[str, SolverMethods] = {
               'arms); on the pre-laneH configuration of laneL (hull inlet, '
               'two-point flux, L 15, 3000 steps of 0.01) the vertices outside '
               'the walls go from 54 to 0 and the profile l2 on the downstream '
-              'half from 0.554 to the value of the laneV log '
+              'half from 0.554 to 0.399 '
               '(diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000). '
               'Developing Lagrangian channel flow on src/_setup.py:'
               'setup_poiseuille_developing: pressure G (L - x) prescribed and '

@@ -271,6 +271,14 @@ def _retopologize(HC, bV, dim, boundary_filter=None, merge_cdist=None,
             f"retopo_remap must be None or 'conservative', "
             f"got {retopo_remap!r}"
         )
+    if merge_method not in ('merge_all', 'mass_conserving'):
+        raise ValueError(f"unknown merge_method {merge_method!r}")
+    if merge_method != 'merge_all' and periodic_axes:
+        # laneV review 2026-10-10: the periodic dispatch below runs before
+        # step 0, so a non-default merge would be dropped silently.
+        raise ValueError(
+            f"merge_method={merge_method!r} is not applied on the periodic "
+            "retopology path (retopologize_periodic keeps HC.V.merge_all)")
     if frozen_set not in ('hull', 'membership'):
         raise ValueError(
             f"frozen_set must be 'hull' or 'membership', got {frozen_set!r}"
@@ -864,6 +872,8 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         phase is targeted at the local pressure and a lost phase
         releases its mass, inside the exact per-phase conservation;
         under the remap the restore keeps the adopted pressure.
+        ``'adopt'``: the same for a new phase, a lost phase keeps its
+        mass as inertia.
     simplex_vote : {'bulk_majority', 'mass_fraction'}
         The vote that relabels the top simplices after the rebuild
         (method axis ``simplex_vote``; ``vote=`` of
@@ -871,8 +881,6 @@ def _retopologize_multiphase(HC, bV, dim, mps=None, boundary_filter=None,
         laneV 2026-10-07).
     merge_method : {'merge_all', 'mass_conserving'}
         Forwarded to :func:`_retopologize` (the merge of *merge_cdist*).
-        ``'adopt'``: the same for a new phase, a lost phase keeps its
-        mass as inertia.
     """
     if retopo_remap not in (None, 'conservative'):
         raise ValueError(

@@ -234,8 +234,12 @@ def setup_oscillating_droplet(
             v.m = float(np.sum(v.m_phase))
 
     # 5. Final refresh: recompute pressures from the adjusted densities.
-    #    reset_mass=False so the adjusted masses are preserved.
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    #    reset_mass=False so the adjusted masses are preserved.  This
+    #    runtime refresh labels the simplices by the vertex vote, so the
+    #    axis simplex_vote applies here as in the run (laneV review
+    #    2026-10-10; the default vote leaves every pin unchanged).
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=methods.simplex_vote)
 
     # -- Boundary conditions --
     bc_set = BoundaryConditionSet()

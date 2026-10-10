@@ -239,6 +239,17 @@ class SolverMethods:
                     f"merge_method={self.merge_method!r} is applied by "
                     "_retopologize before a Delaunay / adaptive rebuild "
                     f"only, not under connectivity={self.connectivity!r}")
+        if self.simplex_vote != AXES['simplex_vote'].default and (
+                self.connectivity in ('frozen', 'custom', 'dual_only_bare',
+                                      'delaunay_material')):
+            # laneV review 2026-10-10: the vote is applied by the two
+            # multiphase retopology functions only; these connectivities
+            # never call them, so the record would not be the run.
+            raise ValueError(
+                f"simplex_vote={self.simplex_vote!r} is applied by the "
+                "multiphase retopology (_retopologize_multiphase / "
+                "retopologize_multiphase_periodic), which connectivity="
+                f"{self.connectivity!r} does not run")
         if self.workers is not None and (
                 not isinstance(self.workers, int) or self.workers < 1):
             raise ValueError("workers must be None or an int >= 1")
@@ -585,7 +596,7 @@ class SolverMethods:
         return partial(_retopologize_multiphase, **kw)
 
     def wall_clamp_bc(self, planes=None, *, box=None, axes=None,
-                      min_gap: float = 0.0, exclude=None):
+                      min_gap: float, exclude=None):
         """The :class:`ddgclib._boundary_conditions.WallClampBC` of the
         axis ``wall_clamp`` (laneV), or ``None`` when the axis is None
         (the setup then adds nothing to its ``bc_set``).
@@ -593,11 +604,18 @@ class SolverMethods:
         *planes* is ``[(axis, level, direction), ...]``; *box* with
         optional *axes* builds both faces of each axis of ``[(lo, hi),
         ...]`` instead.  *exclude* is the frozen set (``bV``), *min_gap*
-        the put-down distance from the wall: geometry, not method, so the
-        setup records them in ``record_methods(extra=)``.
+        the put-down distance from the wall (required: 0 puts the vertex
+        ON the wall line, the measured DO-NOT of laneV 2.1; the setups use
+        0.1 of the wall vertex spacing): geometry, not method, so the
+        setup records them in ``record_methods(extra=)`` as ``clamp_gap``.
         """
         if self.wall_clamp is None:
             return None
+        if not min_gap > 0.0:
+            raise ValueError(
+                f"min_gap={min_gap!r}: the put-down gap must be > 0 (gap 0 "
+                "lands the vertex on the wall line as a hull vertex with an "
+                "open half cell, laneV log section 2.1)")
         if (planes is None) == (box is None):
             raise ValueError("wall_clamp_bc needs planes= or box=")
         from ddgclib._boundary_conditions import WallClampBC
@@ -777,6 +795,20 @@ class SolverMethods:
                                     pressure_model=pressure_model,
                                     domain_bounds=domain_bounds)
         kw.update(extra)
+        # laneV review 2026-10-10: the clamp is applied by the bc_set the
+        # setup built, not by this call, so the axis must match it or the
+        # methods.json record would not be the run.
+        from ddgclib._boundary_conditions import WallClampBC
+        has_clamp = bc_set is not None and bc_set.has(WallClampBC)
+        if (self.wall_clamp is not None) != has_clamp:
+            if has_clamp:
+                raise ValueError(
+                    "the bc_set carries a WallClampBC but wall_clamp is None: "
+                    "set wall_clamp='project' so the clamp is recorded")
+            raise ValueError(
+                f"wall_clamp={self.wall_clamp!r} but the bc_set has no "
+                "WallClampBC: the setup must add methods.wall_clamp_bc(...) "
+                "to it (or run the configuration .replace(wall_clamp=None))")
         if self.integrator == 'euler_adaptive':
             if t_end is None:
                 raise ValueError("euler_adaptive needs t_end=")

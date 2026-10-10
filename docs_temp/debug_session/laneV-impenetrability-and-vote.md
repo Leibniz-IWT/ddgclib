@@ -34,8 +34,13 @@ the analytical value, gas mass drift); adoption by the flip rule.
   together. The dynCA clamp of `capillary_rise` is untouched (section 7).
 - ADOPTED: `wall_clamp='project'` on `dam_break_2D`, `dam_break_3D`
   and `hagen_poiseuille_2D` (and recorded on the three electrolysis
-  presets whose setups already applied it). The clamp is one-sided and
-  the identity wherever impenetrability holds: no pin moves (refinement
+  presets whose setups already applied it). The clamp is one-sided: the
+  identity on a run in which no non-excluded vertex comes within the gap
+  of a named plane, otherwise an exclusion band of width `min_gap` that
+  holds the vertex at the gap whether or not it crossed the wall (the
+  refinement 4 run fires from step 1327, 1565 steps before the first
+  crossing; wording corrected by the review of 2026-10-10, section 11).
+  No pin moves (0 put-backs on every pinned run: refinement
   3 dam break at alpha 0.3 / 0.2 / 0.1 bit-identical with 0 put-backs,
   the HP2D developing pin equal to the digit, the 3D dam break and the
   electrolysis pins unchanged). The dam break at refinement 4 (alpha 0.3,
@@ -51,8 +56,11 @@ the analytical value, gas mass drift); adoption by the flip rule.
   strictly inside with a closed cell (section 2.1).
 - NOT adopted, registered with their evidence: `simplex_vote=
   'mass_fraction'` keeps the one-cell liquid tongue of the dam break
-  (front 0.0772 instead of 0.0654 at alpha 0.2, the toe kick gone, KE
-  peak 4.2e-3 instead of 2.8e-2 J) but only with `split_method=
+  (with the simplex split and the merge at alpha 0.2: front 0.0772
+  instead of the preset's 0.0654, the toe kick gone, KE_liq peak 4.2e-3
+  instead of the preset's 2.77e-2 J on the detector's 15-step sample,
+  section 8; against the simplex split alone: 0.0657 / 3.75e-2, table
+  2.2) but only with `split_method=
   'simplex'` AND the merge; with the preset's `neighbour_count` split it
   blows up at step 0 (the half-fractions of the neighbour count make
   every (liquid, air, interface) triangle a tie that the preloaded
@@ -348,7 +356,11 @@ suites; the session owner ran them on the final tree of this lane
 | hyperct | untouched by this lane; not re-run |
 
 Green by the session's definition (docs_temp/HANDOFF_2026-10-07.md).
-This lane has NOT been independently reviewed: see the hand-off.
+This lane has NOT been independently reviewed with its numbers
+re-measured: see the hand-off and section 11 (the static review of
+2026-10-10). On the owner's dev PC after the merge (2026-10-10, numpy
+2.4.2) the two failures reproduce with the identical values; their cause
+is in docs_temp/HANDOFF_2026-10-10.md section 2.
 
 ## 7. What the dynCA clamp would take
 
@@ -403,33 +415,130 @@ through the axis), `electrolysis_bubble_fritz_2D.py`,
 `diagnose_static_bubble.py` (`--no-clamp` = `.replace(wall_clamp=None)`).
 Tests: `test_wall_clamp.py`, `test_simplex_vote.py`,
 `test_merge_method.py` (new). Docs: `METHODS.md`, `debugging_plan.md`,
-this log. hyperct: untouched.
+this log. hyperct: untouched. Review of 2026-10-10 (section 11):
+`_config.py` (`integrate` refuses a `wall_clamp` / `bc_set` mismatch,
+`wall_clamp_bc(min_gap=)` required and > 0, `simplex_vote` refused under
+a connectivity that never votes), `_boundary_conditions.py`
+(`BoundaryConditionSet.has`, docstring), `_integrators_dynamic.py`
+(`merge_method` checked before the periodic dispatch, docstring),
+`_axes.py` and `_presets.py` (wording), the electrolysis setup
+(`use_wall_clamp=None`, a contradicting flag raises; `clamp_gap` in
+params), `diagnose_static_bubble.py` (`--no-clamp` applied to the
+recorded methods), the dam break, HP and electrolysis runners
+(`clamp_gap` in `methods.json`), the droplet and shearing-plate setups
+(`simplex_vote` forwarded at their final refresh), `test_frozen_set.py`
+(the laneL reproducer records `wall_clamp=None`), the three test files.
 
 ## 10. Reproduce
 
-    cd /home/user/ddgclib
-    PY="env PYTHONPATH=/home/user/ddgclib /usr/bin/python"
+Run from the ddgclib root with the interpreter of the `ddg` environment
+(`PY=python` with the editable installs; on the cloud machine it was
+`env PYTHONPATH=<root> /usr/bin/python`), outputs to a scratch directory
+`OUT` outside the repository:
+
     $PY -m pytest ddgclib/tests/test_wall_clamp.py ddgclib/tests/test_simplex_vote.py ddgclib/tests/test_merge_method.py -q -p no:cacheprovider
     # section 1 (the blockers; --replace wall_clamp=None is the pre-lane preset)
-    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --replace wall_clamp=None --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace wall_clamp=None --out /tmp/laneV     # 16 min
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace split_method=simplex --replace wall_clamp=None --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --out /tmp/laneV
+    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --replace wall_clamp=None --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace wall_clamp=None --out $OUT     # 16 min
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace split_method=simplex --replace wall_clamp=None --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --out $OUT
     # section 2.1 (the preset = the clamp with the default gap)
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --gap 0 --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace merge_cdist=1.25e-3 --replace merge_method=mass_conserving --out /tmp/laneV
-    for a in 0.3 0.2 0.1; do $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha $a --out /tmp/laneV; $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha $a --replace wall_clamp=None --out /tmp/laneV; done
-    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --out /tmp/laneV
-    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --gap 0 --out /tmp/laneV
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --gap 0 --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace merge_cdist=1.25e-3 --replace merge_method=mass_conserving --out $OUT
+    # the three rows of table 2.1 the registry quotes (added 2026-10-10)
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --gap 0 --replace merge_cdist=1.25e-3 --replace merge_method=mass_conserving --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --gap 1.25e-3 --replace merge_cdist=1.25e-3 --replace merge_method=mass_conserving --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.3 --refine 4 --replace split_method=simplex --replace simplex_vote=mass_fraction --replace merge_cdist=1.25e-3 --replace merge_method=mass_conserving --out $OUT
+    for a in 0.3 0.2 0.1; do $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha $a --out $OUT; $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha $a --replace wall_clamp=None --out $OUT; done
+    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --out $OUT
+    $PY cases_dynamic/Hagen_Poiseuile/diagnose_frozen_set.py hp2d --L 15 --dt 0.01 --steps 3000 --arm membership --gap 0 --out $OUT
     # section 2.2
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace simplex_vote=mass_fraction --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --replace simplex_vote=mass_fraction --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --replace simplex_vote=mass_fraction --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out /tmp/laneV
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.1 --replace split_method=simplex --replace simplex_vote=mass_fraction --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out /tmp/laneV
-    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --out /tmp/laneV
-    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --replace simplex_vote=mass_fraction --out /tmp/laneV
-    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --replace split_method=simplex --replace simplex_vote=mass_fraction --out /tmp/laneV
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace simplex_vote=mass_fraction --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --replace simplex_vote=mass_fraction --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.2 --replace split_method=simplex --replace simplex_vote=mass_fraction --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out $OUT
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.1 --replace split_method=simplex --replace simplex_vote=mass_fraction --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out $OUT
+    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --out $OUT
+    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --replace simplex_vote=mass_fraction --out $OUT
+    $PY cases_dynamic/electrolysis_bubble/diagnose_static_bubble.py --dim 3 --ro 1 --rd 1 --steps 2000 --replace split_method=simplex --replace simplex_vote=mass_fraction --out $OUT
     # section 2.3
-    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.1 --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out /tmp/laneV
+    $PY cases_dynamic/dam_break/diagnose_sliver_ejection.py --alpha 0.1 --replace merge_cdist=2.5e-3 --replace merge_method=mass_conserving --out $OUT
     # suites: rule 7 of the brief
+
+## 11. Static review (2026-10-10, merge session on the owner's dev PC)
+
+An independent reviewer read the commit `08979e1` without running a
+simulation (the owner forbade simulations on the busy dev PC): the code
+against the pre-lane sources, the new tests against behavioural mutants
+applied in memory, the registry, the presets and this log. Verdict on the
+static part: FAIL on three repairable findings, repaired at the cause in
+the same session (commit named in docs_temp/HANDOFF_2026-10-10.md); every
+measured claim of sections 1 to 3 stays UNVERIFIED until the workstation
+review re-measures it (the commands of section 10).
+
+Blocking, fixed:
+
+1. The headline "identity wherever impenetrability holds" was false by
+   the code (`apply` tests `y < level + min_gap`, so every vertex inside
+   the band is moved) and by this log's own table 2.1 (2457 put-backs
+   from step 1327, 1565 steps before the first crossing). Wording fixed
+   here, in the registry, the class docstring, the test docstring and the
+   status log: the identity holds on a run in which no non-excluded
+   vertex enters the band (0 put-backs on every pinned run); otherwise
+   the clamp is an exclusion band.
+2. The axis `wall_clamp` was applied only by the setups that call
+   `methods.wall_clamp_bc`; `SolverMethods.integrate` never read it, so a
+   configuration could record a clamp that never ran
+   (`diagnose_static_bubble.py --no-clamp` recorded `'project'`;
+   `test_frozen_set.py` integrated the HP2D preset on a setup without a
+   clamp; lane D's planned `.replace(wall_clamp='project')` arm on the
+   droplet would have confirmed nothing). Now `integrate` raises when
+   `wall_clamp` and the `bc_set` disagree (`BoundaryConditionSet.has`),
+   the diagnose script applies `--no-clamp` to the recorded methods and
+   the reproducer records `wall_clamp=None` (its numbers cannot move: no
+   clamp ever ran there).
+3. Two tests could not fail: `test_prefer_keeps_the_wall_vertex` moved
+   the mobile vertex onto the wall, which hyperct re-keys last, so the
+   wall was the order-based survivor anyway; the dam-break refresh test
+   compared only interface-free simplices, where both votes agree by
+   construction. The first now moves the wall vertex and checks both
+   `prefer` arms, the second asserts that an interface-touching label
+   differs, and `TestForwarding` runs `_retopologize_multiphase` on the
+   hand-labelled strip for the vote (tie labels 0 under the bulk
+   majority, 1 under the mass fraction) and for the merge (the air mass
+   total kept by `mass_conserving`, 1.0 of 6.5 lost by `merge_all`). The
+   reviewer's mutants `merge_ignores_prefer`, `refresh_drops_vote` and
+   `rebuild_drops_vote`, undetected before, now fail 1 / 2 / 1 tests.
+
+Non-blocking, fixed: the `'adopt'` sentence of the `phase_ledger`
+docstring had landed under `merge_method`; `wall_clamp_bc(min_gap=)` is
+required and refuses 0 (the measured DO-NOT); `_retopologize` checks
+`merge_method` before the periodic dispatch, which silently dropped a
+non-default value; `SolverMethods` refuses `simplex_vote='mass_fraction'`
+under `frozen`, `custom`, `dual_only_bare` and `delaunay_material`, which
+never vote; the electrolysis `use_wall_clamp` flag defaults to None and a
+contradicting flag raises instead of being ignored; `clamp_gap` is in
+the electrolysis params and in the `methods.json` of the dam break, HP
+and electrolysis runners; the droplet and shearing-plate setups forward
+`simplex_vote` at their final (vote-labelled) refresh, so lane D's arm
+applies at the setup state as in the run (the default vote leaves every
+pin unchanged, 254 targeted tests); the registry text of the merge
+(the completing r4 arm with the clamp is the gap-0 DO-NOT arm; with the
+preset gap it completes with 544 vertices and |u|max 3.663), the
+`merge_all` evidence and the HP preset note (0.399).
+
+Non-blocking, carried to the workstation review (not changed here): the
+case-local electrolysis clamp applied its two planes as two BCs
+(plane-major), the library class loops vertex-major, so `HC.V` order
+differs when both planes fire in one step (rule 8; positions and
+velocities equal; a plane-major loop would restore the old order);
+`mass_fraction` weighs by `rho0`, so a compressed phase votes more than
+its volume (the mechanism of the step-0 ejection; the snapshot `p_phase`
+density would give the true share); `mass_conserving_merge` now sums
+`m_phase` for every caller (the droplet, electrolysis and fritz setups
+call it at `cdist` 1e-12 / 1e-10: the reviewer counted 0 merges on the
+pinned setups, so no pin moves, but the function-level change is
+declared here); the exception `VertexCollisionError` when two vertices
+are clamped onto one key is the failure mode of a lost run (known limit
+8); the fritz runner does not record its gap (0.02 R_top, fixed in the
+setup).

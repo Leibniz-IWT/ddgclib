@@ -391,8 +391,12 @@ class TestHagenPoiseuille2D:
             setup_poiseuille_2d_lagrangian, wall_report, wall_snapshot,
         )
         HC, bV, bc_set, wall, params = setup_poiseuille_2d_lagrangian(L=2.0)
+        # the setup above is called without methods=, so it builds no
+        # clamp: the record says so (wall_clamp=None; the preset carries
+        # 'project' since laneV, and integrate refuses the mismatch)
         methods = PRESETS['hagen_poiseuille_2D'].replace(
-            frozen_set=frozen_set, viscous_flux='two_point', workers=None)
+            frozen_set=frozen_set, viscous_flux='two_point', workers=None,
+            wall_clamp=None)
         start = wall_snapshot(HC, wall)
         n_on_wall = []
 

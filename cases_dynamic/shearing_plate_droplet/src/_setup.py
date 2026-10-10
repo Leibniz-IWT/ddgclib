@@ -324,8 +324,11 @@ def setup_shearing_plate_droplet(
             v.m_phase[1] = rho_d_eq * vol_d
             v.m = float(np.sum(v.m_phase))
 
-    # 6. Recompute pressures from adjusted masses (no mass reset).
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    # 6. Recompute pressures from adjusted masses (no mass reset); the
+    #    runtime refresh votes the simplex labels, so the axis
+    #    simplex_vote applies here as in the run (laneV review 2026-10-10)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=methods.simplex_vote)
 
     # -- Initial wall velocities (so the first step sees the shear) --
     u_top = np.zeros(dim); u_top[0] = +U_wall

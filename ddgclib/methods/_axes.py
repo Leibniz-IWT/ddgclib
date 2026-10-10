@@ -618,7 +618,10 @@ _AXES: list[MethodAxis] = [
                  'pair is dropped with its mass, momentum and phase masses',
                  'validated',
                  'hyperct/_vertex.py:merge_all',
-                 'the historic merge; no preset sets merge_cdist'),
+                 'the historic merge, inert on every preset (none sets '
+                 'merge_cdist); with merge_cdist > 0 it is that axis\'s '
+                 'experimental path, which drops the merged vertex\'s mass, '
+                 'momentum and m_phase (DO-NOT wire into multiphase)'),
             _opt('mass_conserving', 'ddgclib.multiphase.mass_conserving_merge: '
                  'the survivor takes the sum of the masses, of the per-phase '
                  'ledger m_phase and of the momentum (u mass-weighted), p '
@@ -635,8 +638,11 @@ _AXES: list[MethodAxis] = [
                  'wall spacing): the small-cell F/m spike of step 1725 is '
                  'gone (|a|max 6.8e4 -> 8.4e3 m/s^2, |u|max 2.59 -> 0.50 m/s) '
                  'but the run still ends at step 2763 with a vertex under '
-                 'the floor; with wall_clamp it completes the 3170 steps '
-                 '(541 of 545 vertices left, |u|max 0.51). Refinement 3 '
+                 'the floor; with wall_clamp at gap 0 (the DO-NOT gap) it '
+                 'completes the 3170 steps (541 of 545 vertices, |u|max '
+                 '0.51), with the preset gap 1.25e-3 it completes with 544 '
+                 'vertices and |u|max 3.663 (the merge and the exclusion band '
+                 'interact at the toe, laneV 2.1). Refinement 3 '
                  '(cdist 2.5e-3): never fires at alpha 0.3 / 0.2 '
                  '(bit-identical), one merge at alpha 0.1 (KE_liq end 5.15e-3 '
                  'against 5.72e-3, front 0.06743 against 0.06750, '
@@ -740,12 +746,20 @@ _AXES: list[MethodAxis] = [
                 'axis is None); applied by the integrators after every move',
         notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
               'Walls are vertices: a fluid vertex can step between two of '
-              'them (laneL known limit 1). The clamp is one-sided and the '
-              'identity wherever impenetrability holds, so it moves no pin '
-              'of a run in which no vertex leaves. The planes and the gap '
-              'are geometry (build-time arguments, recorded in extra); only '
-              'the policy is the axis. Curved walls (the 3D pipe) are not '
-              'covered.',
+              'them (laneL known limit 1). The clamp is one-sided: the '
+              'identity on a run in which no non-excluded vertex comes '
+              'within min_gap of a named plane (0 put-backs on every pinned '
+              'run), otherwise an exclusion band of width min_gap that '
+              'holds the vertex at the gap and discards its inward velocity '
+              'whether or not it crossed the wall (laneV 2.1: the '
+              'refinement 4 dam break fires from step 1327, 1565 steps '
+              'before the first crossing of the unclamped run; review '
+              '2026-10-10). The planes and the gap are geometry (build-time '
+              'arguments, recorded in extra as clamp_gap); only the policy '
+              'is the axis. A preset that carries the axis must run on a '
+              'setup that builds the clamp: SolverMethods.integrate refuses '
+              'a bc_set without a WallClampBC (and one with it when the '
+              'axis is None). Curved walls (the 3D pipe) are not covered.',
         options=(
             _opt(None, 'No clamp: a vertex that steps past a wall stays '
                  'outside (under frozen_set=hull it also releases the wall)',
@@ -769,8 +783,8 @@ _AXES: list[MethodAxis] = [
                  'laneV 2026-10-07, DEFAULT of dam_break_2D, dam_break_3D and '
                  'hagen_poiseuille_2D (the three electrolysis presets record '
                  'the clamp their setups applied since 2026-07, bit-identical '
-                 'to the case-local class). One-sided and the identity '
-                 'wherever impenetrability holds: no pin moved (refinement 3 '
+                 'to the case-local class). One-sided, 0 put-backs on every '
+                 'pinned run, so no pin moved (refinement 3 '
                  'dam break at alpha 0.3 / 0.2 / 0.1 bit-identical with 0 '
                  'put-backs, digests b69bcb3d7fce85df / cc2a87e93c46209b / '
                  '1f7e46cb66f4fadb on the cloud machine; the HP2D developing '
@@ -780,7 +794,11 @@ _AXES: list[MethodAxis] = [
                  'instead of ending at step 2892 with a vertex under the '
                  'floor; HP2D laneL configuration: 54 -> 0 vertices outside, '
                  'profile l2 0.554 -> 0.399, transverse velocity 0.556 -> '
-                 '8.4e-4, 109591 put-backs on 1849 of 3000 steps. GAP: the '
+                 '8.4e-4, 109591 put-backs on 1849 of 3000 steps (an '
+                 'exclusion band, not a put-back at the crossing: the '
+                 'refinement 4 run fires from step 1327 and departs from the '
+                 'unclamped run before its crossing at 2892, KE_liq at 0.1 s '
+                 '3.5892e-3 against 3.6465e-3). GAP: the '
                  'put-down distance is geometry (setup argument clamp_gap, '
                  'default 0.1 of the wall vertex spacing, recorded in '
                  'params); with gap 0 the vertex lands ON the wall line, '
