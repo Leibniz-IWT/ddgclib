@@ -184,10 +184,36 @@ class TestWallReleaseMechanism:
         HC, bV = _channel('hull')
         with pytest.raises(ValueError, match='frozen_set'):
             _retopologize(HC, bV, 2, frozen_set='walls')
-        with pytest.raises(ValueError, match='periodic'):
-            _retopologize(HC, bV, 2, frozen_set='membership',
+        with pytest.raises(ValueError, match='frozen_set'):
+            _retopologize(HC, bV, 2, frozen_set='walls',
                           periodic_axes=[0],
                           domain_bounds=[(0.0, 2.0), (0.0, 1.0)])
+
+    def test_membership_on_the_periodic_path(self):
+        """laneG (2026-10-06): the periodic rebuild keeps the members
+        that survive the ub-face merge and adds no hull vertex.  Here
+        the bottom wall is the member set; after one interior vertex is
+        put below it (which releases that part of the wall under hull)
+        every member is still frozen."""
+        from ddgclib.geometry.domains import periodic_rectangle
+        res = periodic_rectangle(L=2.0, h=1.0, refinement=3,
+                                 periodic_axes=[0])
+        HC = res.HC
+        bottom = {v for v in HC.V if abs(v.x_a[1]) < TOL}
+        bV = set(bottom)
+        kw = dict(periodic_axes=[0], domain_bounds=[(0.0, 2.0), (0.0, 1.0)])
+        _retopologize(HC, bV, 2, frozen_set='membership', **kw)
+        n_members = len(bV)
+        assert bV <= set(HC.V) and n_members == len(
+            [v for v in bottom if HC.V.cache.get(v.x) is v])
+        assert not any(abs(v.x_a[1] - 1.0) < TOL for v in bV)  # top free
+        _step_past_bottom_wall(HC)
+        _retopologize(HC, bV, 2, frozen_set='membership', **kw)
+        assert len(bV) == n_members
+        assert all(abs(v.x_a[1]) < TOL for v in bV)
+        bV_hull = set(bV)
+        _retopologize(HC, bV_hull, 2, frozen_set='hull', **kw)
+        assert len([v for v in bV_hull if abs(v.x_a[1]) < TOL]) < n_members
 
     def test_adaptive_remesh_is_refused_before_anything_changes(self):
         """hyperct.remesh splits wall edges into vertices that are not
@@ -288,8 +314,6 @@ class TestSolverMethodsAxis:
         dict(dim=2, frozen_set='membership', connectivity='adaptive'),
         dict(dim=2, frozen_set='membership', connectivity='adaptive',
              phases='multi', remap='conservative', redistribute_mass=True),
-        dict(dim=2, frozen_set='membership', connectivity='periodic',
-             periodic_axes=(0,)),
         dict(dim=1, frozen_set='membership'),
         dict(dim=2, frozen_set='walls'),
     ])

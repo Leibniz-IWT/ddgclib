@@ -1,3 +1,13 @@
+"""RETIRED (laneX, 2026-10-06): superseded by ``bc_demo.py``.
+
+Earlier revision of the periodic-inlet / open-outlet kinematics demo with a
+case-local ``apply_bcs_measured`` (zero wall velocity, delete, inject, purge
+injected wall vertices) that duplicates the library boundary conditions, its
+own Delaunay edge extraction, and the same ``fig/bc_demo.gif`` output path as
+``bc_demo.py``.  It still runs (laneX: 120 steps, exit 0) but is not
+maintained; ``bc_demo.py`` runs the same kinematics through the ``bc_demo_2D``
+preset and the library BC classes.  The owner may delete it.
+"""
 """
 Boundary Condition Demo: Periodic Inlet + Open Outlet
 

@@ -1,3 +1,12 @@
+"""RETIRED (laneX, 2026-10-06): fails at import on the live library.
+
+The script installs a stub ``hyperct.ddg._dual_cell`` module (one function,
+``_angular_sort_3d``) into ``sys.modules`` before importing the droplet setup;
+``ddgclib.geometry`` imports ``dual_cell_area_2d`` from that module, so the stub
+shadows the real one and the import fails (ImportError, laneX).  The preview
+it rendered is the shipped ``oscillating_droplet/oscillating_droplet_3D.py``
+on the ``oscillating_droplet_3D`` preset.  The owner may delete it.
+"""
 from __future__ import annotations
 
 import argparse

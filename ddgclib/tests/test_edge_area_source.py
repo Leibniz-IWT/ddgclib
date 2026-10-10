@@ -227,7 +227,7 @@ class TestSolverMethodsAxis:
         dict(dim=3, connectivity='frozen', edge_area_source='p_ij_simplex'),
         dict(dim=3, connectivity='custom', edge_area_source='p_ij'),
         dict(dim=3, phases='multi', connectivity='periodic', periodic_axes=(0,),
-             edge_area_source='p_ij'),
+             edge_area_source='e_star_cache'),
         dict(dim=3, connectivity='dual_only_bare', edge_area_source='e_star_cache'),
         dict(dim=3, connectivity='delaunay_material', edge_area_source='e_star_cache'),
         dict(dim=3, edge_area_source='p_ij_simplex', backend='gpu'),
@@ -247,6 +247,8 @@ class TestSolverMethodsAxis:
                           edge_area_source='p_ij_simplex')
             SolverMethods(dim=3, connectivity='delaunay_material',
                           edge_area_source='p_ij')
+            SolverMethods(dim=3, connectivity='periodic', periodic_axes=(0,),
+                          edge_area_source='p_ij_simplex')   # laneG
             SolverMethods(dim=3, edge_area_source='e_star_cache', backend='gpu')
             SolverMethods(dim=2)        # None is fine in every dimension
         with pytest.warns(UserWarning, match="'broken'"):

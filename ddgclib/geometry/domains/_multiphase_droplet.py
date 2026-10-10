@@ -66,6 +66,59 @@ def _shift_outer_box(HC_outer, offset, box_shift: str = 'move_all'):
             HC_outer.V.move(v, pos, on_collision='evict')
 
 
+def rescale_droplet_box(HC, dim: int, L_build: float, extents, R_keep: float):
+    """Rescale the outer box of a droplet-in-box mesh anisotropically, in
+    one ``HC.V.move_all``, without touching the droplet and its shell.
+
+    The builders make a cube of half-side *L_build*; a channel wants a
+    box of half-extents *extents* (one per axis).  On every axis whose
+    extent differs the coordinate is mapped piecewise linearly: the band
+    ``|x_a| <= R_keep`` is the identity (it holds the droplet and the
+    outer shell ring at ``R + h``, whose spacing is what the interface
+    needs), ``[R_keep, L_build]`` is mapped linearly onto
+    ``[R_keep, extents[a]]``.  Each axis map is strictly monotone, so no
+    two vertices can land on one key, no moved vertex can land inside
+    the sphere of radius *R_keep* (it ends with ``|x_a| > R_keep`` on the
+    axis that moved it), and the box faces land exactly on the new
+    extents.  The uniform scale ``x_a * extents[a] / L_build`` that the
+    shearing-plate setup used until 2026-10-06 (laneG) mapped the outer
+    vertices at ``(0, +-0.0075)`` of the 2D case onto the droplet poles
+    at ``(0, +-0.005)`` (its ``on_collision='evict'`` loop then deleted
+    both interface poles) and put 8 of 52 (2D, refinement 2) and 11 of
+    the 3D outer vertices inside the shell, some inside the droplet.
+
+    Returns the number of vertices moved.  Raises ``ValueError`` when an
+    extent is not larger than *R_keep*.
+    """
+    extents = [float(e) for e in extents]
+    if len(extents) != dim:
+        raise ValueError(f"extents must have {dim} entries, got {extents!r}")
+    for a, L_a in enumerate(extents):
+        if L_a <= R_keep and L_a != L_build:
+            raise ValueError(
+                f"rescale_droplet_box: extent {L_a!r} on axis {a} is not "
+                f"larger than the kept radius {R_keep!r}")
+    moves = []
+    for v in list(HC.V):
+        pos = v.x_a.copy()
+        moved = False
+        for a, L_a in enumerate(extents):
+            if L_a == L_build:
+                continue
+            y = float(pos[a])
+            if abs(y) <= R_keep:
+                continue
+            y_new = math.copysign(
+                R_keep + (abs(y) - R_keep) * (L_a - R_keep) / (L_build - R_keep),
+                y)
+            pos[a] = round(y_new, 10)
+            moved = True
+        if moved:
+            moves.append((v, tuple(pos)))
+    HC.V.move_all(moves)
+    return len(moves)
+
+
 def _estimate_edge_length(HC, dim, stat: str = "median"):
     """Estimate a representative edge length across a mesh.
 
@@ -357,6 +410,7 @@ def droplet_in_box_2d(
             'interface_subcomplex': None,  # data lives on HC attributes
             'mps': mps,
             'box_shift': box_shift,
+            'shell_R': ring_R,
         },
     )
 
@@ -472,5 +526,6 @@ def droplet_in_box_3d(
             'interface_subcomplex': None,  # data lives on HC attributes
             'mps': mps,
             'box_shift': box_shift,
+            'shell_R': shell_R,
         },
     )

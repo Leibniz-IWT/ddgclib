@@ -15,8 +15,10 @@ Produces:
 
 Usage
 -----
-    python cases_dynamic/Cube2droplet/cube_to_droplet_2D.py
+    python cases_dynamic/cube2droplet/cube_to_droplet_2D.py [--n-steps N]
+        [--n-refine R] [--no-anim] [--arm {base,bare,dual_only}]
 """
+import argparse
 import os
 import sys
 
@@ -24,8 +26,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from cases_dynamic.Cube2droplet.src._setup import setup_cube_to_droplet
-from ddgclib.dynamic_integrators import symplectic_euler
+from cases_dynamic.cube2droplet.src._setup import setup_cube_to_droplet
+from ddgclib.analytical import integrated_phase_pressure_jump
+from ddgclib.methods import PRESETS, record_methods
 
 # =====================================================================
 # Parameters
@@ -107,7 +110,31 @@ def record_frame(HC, dim):
     }
 
 
-def main():
+# A/B arms of the shipped preset (laneX): 'bare' is the historic setup
+# configuration (per-step Delaunay + redistribution, no remap), which loses
+# the droplet by t = 0.4 s; 'dual_only' the fixed-connectivity refresh.
+ARMS = {
+    'base': PRESETS['cube_to_droplet_2D'],
+    'bare': PRESETS['cube_to_droplet_2D'].replace(remap=None),
+    'dual_only': PRESETS['cube_to_droplet_2D_dual_only'],
+}
+
+
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1]
+                                 if __doc__ else None)
+    ap.add_argument('--n-steps', type=int, default=N_STEPS)
+    ap.add_argument('--n-refine', type=int, default=N_REFINE)
+    ap.add_argument('--no-anim', action='store_true',
+                    help='skip the ffmpeg animation (smoke runs)')
+    ap.add_argument('--arm', choices=sorted(ARMS), default='base',
+                    help='configuration arm (A/B through the preset)')
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    n_steps, n_refine = args.n_steps, args.n_refine
     dim = 2
     print("=" * 60)
     print("2D Cube-to-Droplet Relaxation")
@@ -115,12 +142,15 @@ def main():
     print(f"R={R} m, L={L_DOMAIN} m, R_eq={R_EQ:.5f} m")
     print(f"gamma={GAMMA}, mu_d={MU_D}, K_d={K_D}")
 
-    # -- Setup --
-    HC, bV, mps, meos, bc_set, dudt_fn, retopo_fn, params = \
+    # -- Setup (the preset is the single source of truth for the run) --
+    methods = ARMS[args.arm]
+    print(f"arm={args.arm}: {methods.label}")
+    HC, bV, mps, meos, bc_set, dudt_fn, _, params = \
         setup_cube_to_droplet(
             dim=dim, R=R, L_domain=L_DOMAIN,
             rho_d=RHO_D, rho_o=RHO_O, mu_d=MU_D, mu_o=MU_O,
-            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=N_REFINE,
+            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=n_refine,
+            methods=methods,
         )
 
     n_verts = sum(1 for _ in HC.V)
@@ -161,14 +191,13 @@ def main():
                   f"dP={dp:+.2f} |u|={max_u:.3e}")
 
     # -- Run simulation --
-    print(f"\nRunning {N_STEPS} steps (dt={DT:.1e}, "
+    print(f"\nRunning {n_steps} steps (dt={DT:.1e}, "
           f"recording every {RECORD_EVERY})...")
 
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=DT, n_steps=N_STEPS, dim=dim,
-            bc_set=bc_set, retopologize_fn=retopo_fn,
-            callback=callback,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=DT, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         print(f"Simulation stopped: {e}")
@@ -199,7 +228,27 @@ def main():
     dp_final = pd_arr[-1] - po_arr[-1]
     print(f"Final P_drop - P_out: {dp_final:+.2f} Pa "
           f"(Laplace = {GAMMA / R_EQ:.3f} Pa)")
+    # Integrated (volume-weighted bulk) Laplace jump, the comparison the
+    # campaign uses (ddgclib.analytical); the nodal mean above is kept
+    # for the historic plots.
+    try:
+        dp_int = integrated_phase_pressure_jump(HC, 1, 0)
+        print(f"Integrated bulk jump:  {dp_int:+.4f} Pa "
+              f"(error {dp_int / (GAMMA / R_EQ) - 1:+.3%} of gamma / R_eq)")
+    except ValueError as e:      # the droplet lost its bulk (laneX: bare arm)
+        dp_int = float('nan')
+        print(f"Integrated bulk jump:  n/a ({e})")
     print(f"Recorded {len(frames)} movie frames")
+
+    results_dir = os.path.join(os.path.dirname(__file__), 'results')
+    record_methods(os.path.join(results_dir, 'methods.json'), methods, HC,
+                   extra={'arm': args.arm,
+                          'dt': DT, 'n_steps': n_steps, 'n_refine': n_refine,
+                          't_final': t_final,
+                          'circularity_final': float(circ_arr[-1]),
+                          'dp_nodal_final': float(dp_final),
+                          'dp_integrated_final': float(dp_int),
+                          'dp_laplace': GAMMA / R_EQ})
 
     # ---- Plotting ----
     try:
@@ -302,6 +351,10 @@ def main():
         plt.close(fig)
 
         # -- 5. Custom animation with interface markers --
+        if args.no_anim:
+            print(f"\nPlots saved to {fig_dir}/ (animation skipped)")
+            print("\nDone.")
+            return
         print("\nGenerating animation with interface markers...")
 
         # Pre-compute global pressure range for stable colorbar

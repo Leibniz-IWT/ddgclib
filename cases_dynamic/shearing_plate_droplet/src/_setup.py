@@ -34,7 +34,9 @@ from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet, ShearingPlateBC,
 )
-from ddgclib.geometry.domains import droplet_in_box_2d, droplet_in_box_3d
+from ddgclib.geometry.domains import (
+    droplet_in_box_2d, droplet_in_box_3d, rescale_droplet_box,
+)
 from ddgclib.methods import SolverMethods
 
 
@@ -45,8 +47,8 @@ def _classify_box_faces(HC, dim, L_x, L_y, L_z=None):
     """Identify and classify outer-box face vertices by position.
 
     Scans all vertices in ``HC.V`` (not a pre-built set, because the
-    anisotropic rescale above mutates vertex hashes via
-    ``HC.V.move`` — any set populated before the rescale is broken).
+    anisotropic rescale re-keys the vertex hashes: any set populated
+    before the rescale is broken).
 
     Returns
     -------
@@ -114,7 +116,8 @@ def setup_shearing_plate_droplet(
         Passed to ``droplet_in_box_2d`` / ``_3d`` (laneB, 2026-10-05).
         ``'evict'`` reproduces the pre-laneB outer mesh (2D shipped
         setup: 22 outer vertices lost in the shift).  The anisotropic
-        rescale below is a separate step with its own collision.
+        rescale to the channel extents is ``rescale_droplet_box`` (one
+        ``move_all``, the droplet and its shell untouched; laneG).
     methods : ddgclib.methods.SolverMethods or None
         The solver configuration (``PRESETS['shearing_plate_droplet_2D']``
         / ``['shearing_plate_droplet_3D']``, normally); it must have
@@ -220,26 +223,19 @@ def setup_shearing_plate_droplet(
 
     HC = result.HC
     bV = result.bV
-    # Rescale OUTER (non-droplet) vertices anisotropically.
-    # Droplet vertices keep their radial spacing; the outer shell
-    # ring/shell built just outside R is treated as outer (phase 0).
-    if not np.allclose(scale, 1.0):
-        moved = []
-        for v in list(HC.V):
-            r = float(np.linalg.norm(v.x_a[:dim]))
-            if r > R0 + 1e-12:
-                new_pos = v.x_a.copy()
-                new_pos[:dim] = v.x_a[:dim] * scale
-                moved.append((v, tuple(new_pos)))
-        # NOTE(laneL): the rescale can put an outer vertex on a key that
-        # another vertex still holds (shipped 2D setup: 1 collision here,
-        # 22 more in the droplet_in_box_2d shift; each loses a vertex).
-        # Old behaviour kept explicitly until the case is repaired.
-        for v, new_pos in moved:
-            HC.V.move(v, new_pos, on_collision='evict')
+    # Rescale the OUTER box anisotropically to the channel extents with
+    # one HC.V.move_all (laneG, 2026-10-06: rescale_droplet_box).  The
+    # band |x_a| <= shell_R on every rescaled axis is the identity, so
+    # the droplet and its outer shell ring keep their spacing; the
+    # uniform scale used before mapped the outer vertices at (0, +-L/2)
+    # onto the droplet poles and its evict loop deleted both interface
+    # poles (laneB), and put outer vertices inside the shell.
+    extents = [L_x, L_y] + ([L_z] if dim == 3 else [])
+    n_rescaled = rescale_droplet_box(
+        HC, dim, L_build, extents, result.metadata['shell_R'])
 
     # -- Classify walls into plates + periodic faces --
-    # Must be done *after* the rescale because HC.V.move mutates the
+    # Must be done *after* the rescale because a move re-keys the
     # coordinate-based vertex hash, which corrupts any set populated
     # before the move.  Scanning HC.V fresh avoids the issue.
     L_z_used = L_z if dim == 3 else None
@@ -282,8 +278,16 @@ def setup_shearing_plate_droplet(
     #    Running the Young-Laplace preload on the pre-periodic mesh
     #    leaves a tiny residual pressure imbalance because the
     #    first-step retopo changes dual_vol_phase (ub-face vertices
-    #    get merged into lb-face, shifting phase volumes).
-    retopo_fn(HC, bV, dim)
+    #    get merged into lb-face, shifting phase volumes).  This pass
+    #    runs without the conservative remap (laneG): the remap's level
+    #    anchor takes its reference from the first call, which would be
+    #    this unloaded state, and the first integrator step would then
+    #    anchor the droplet level back to 0 Pa, erasing the preload of
+    #    step 5 (measured: the jump 6 -> 0.000 Pa at step 1).  The
+    #    masses are reset after this pass anyway, so its redistribution
+    #    is immaterial.
+    methods.replace(remap=None, projection_every=1).retopologize_fn(
+        mps=mps, domain_bounds=domain_bounds)(HC, bV, dim)
 
     # 4. Re-identify plate vertices *after* the retopo (positions may
     #    have drifted by floating-point epsilon under the periodic
@@ -295,10 +299,20 @@ def setup_shearing_plate_droplet(
         v.boundary = v in bV
 
     # 5. Young-Laplace equilibrium preload on the periodic-final duals.
+    #    The masses are first reset to rho0 * dual_vol_phase on these
+    #    duals (laneG, 2026-10-06; compute_phase_masses, not a refresh
+    #    with reset_mass, which would relabel the seam simplices by the
+    #    builder's radial criterion on their unwrapped centroids): the
+    #    redistribution inside step 3 conserved the masses of the
+    #    pre-periodic mesh on the periodic duals, whose total differs
+    #    (the ub-face vertices are merged away), which left the outer
+    #    phase at a uniform -100 Pa and the measured jump at 106 Pa
+    #    against the 6 Pa of gamma / R.
     #    Setting rho_d = eos_drop.density(p_outer + gamma*kappa) makes
     #    the droplet-phase pressure equal (p_outer + gamma*kappa), so
     #    the interface pressure jump exactly balances the surface
     #    tension force F_st = gamma*kappa*n*dA at t=0.
+    mps.compute_phase_masses(HC)
     curvature = (dim - 1) / R0   # kappa = 1/R (2D), 2/R (3D)
     gamma_val = mps.get_gamma_pair(0, 1)
     delta_p = gamma_val * curvature
@@ -351,6 +365,8 @@ def setup_shearing_plate_droplet(
         'refinement_outer': refinement_outer,
         'refinement_droplet': refinement_droplet,
         'box_shift': box_shift,
+        'shell_R': result.metadata['shell_R'],
+        'n_rescaled': n_rescaled,
         'P0': P0, 'distr_law': distr_law,
         'periodic_axes': periodic_axes,
         'domain_bounds': domain_bounds,

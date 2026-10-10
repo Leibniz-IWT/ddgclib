@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+"""RETIRED (laneX, 2026-10-06): depends on an operator that is not in this tree.
+
+``_ddgclib_case_core.py`` (a 15 000-line local copy of the PR 35 Case 12 core)
+imports ``multiphase_sparse_compressible_eos_pressure_correction`` from
+``cases_dynamic/oscillating_droplet_p_ref/scripts/pr33_operators.py``; that
+function exists only on the unmerged branch
+``songyideng/liquid-bridge-separation-12cases`` (audit 2026-09-25).  The dense
+``multiphase_compressible_eos_pressure_correction`` that is in the tree is not
+a drop-in replacement (the core passes ``mobility_matrix``, ``stiffness_matrix``,
+``diagonal_regularization`` and ``pressure_delta_limit``, which the dense
+function does not take), so every entry point fails at import (laneX re-ran
+``case_1_finial.py``: ImportError).  The semi-implicit loop inside the core is
+case physics outside the library integrators (no preset, rule 7 of the
+reproducibility protocol).  Reviving the case means merging that branch or
+porting the sparse operator into ``pr33_operators.py``; until then the owner
+may delete this directory.
+"""
 """Case #4: Fig. 6 approach with smoother CL motion and late-gap lubrication scaling."""
 
 from __future__ import annotations

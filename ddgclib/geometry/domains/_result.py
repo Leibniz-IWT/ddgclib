@@ -51,13 +51,9 @@ class DomainResult:
         # total 0.9167, and Hydrostatic_2D growing exponentially from
         # round-off (laneK section 4).  A cache that is already there
         # (the Delaunay-built droplet meshes) is left alone.
-        if getattr(self.HC, '_simplices', None) is None:
-            if self.dim == 2:
-                from hyperct.ddg import rebuild_simplex_cache_2d
-                rebuild_simplex_cache_2d(self.HC)
-            elif self.dim == 3:
-                from hyperct.ddg import rebuild_simplex_cache_3d
-                rebuild_simplex_cache_3d(self.HC)
+        # (laneI: the same helper serves hand-built complexes.)
+        from ddgclib.geometry._retriangulation import ensure_simplex_cache
+        ensure_simplex_cache(self.HC, self.dim)
 
     def tag_boundaries(self) -> None:
         """Set ``v.boundary = True/False`` on every vertex based on *bV*.

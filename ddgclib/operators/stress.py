@@ -605,7 +605,16 @@ def cache_dual_volumes(HC, dim: int = 3) -> None:
         # preference — see the NOTE(lane3-dual-volume) in dual_volume
         # above.
         from hyperct.ddg import simplex_dual_volumes
-        vols = simplex_dual_volumes(HC, dim)
+        periods = None
+        periodic_axes = getattr(HC, '_periodic_axes', None)
+        if periodic_axes:
+            # NOTE(laneG): seam simplices measured with minimum-image
+            # coordinates (retopologize_periodic sets both attributes).
+            bounds = HC._periodic_bounds
+            periods = [0.0] * dim
+            for ax in periodic_axes:
+                periods[ax] = bounds[ax][1] - bounds[ax][0]
+        vols = simplex_dual_volumes(HC, dim, periods=periods)
         for v in HC.V:
             v.dual_vol = vols.get(v, 0.0)
         return

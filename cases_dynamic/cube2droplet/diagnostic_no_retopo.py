@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+"""RETIRED (laneX, 2026-10-06): superseded by the ``connectivity`` axis.
+
+2026-04 diagnostic that rebuilt the cube2droplet setup inline (a second copy of
+``src/_setup.py``) and ran it on a case-local dual-only closure that keeps the
+interface identity frozen.  The same question (reconnection versus fixed
+connectivity) is answered through the registry today:
+``cube_to_droplet_2D`` versus ``cube_to_droplet_2D_dual_only`` (the
+``no_retopo`` mode of ``cube_to_droplet_2D_mass_redist.py``), and
+``oscillating_droplet/diagnose_dual_only.py`` for the droplet.  The import
+path it used (``cases_dynamic.Cube2droplet``) never existed in this tree.  The
+owner may delete it.
+"""
 """Diagnostic: cube-to-droplet WITHOUT Delaunay retopologization.
 
 This test keeps the primary connectivity (edges/triangles) fixed at the

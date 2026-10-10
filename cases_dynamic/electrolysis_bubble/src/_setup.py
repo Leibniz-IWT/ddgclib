@@ -25,13 +25,15 @@ initialiser).
 Hydrostatic pressure is pre-imposed in the liquid (avoiding the
 startup pressure wave), gas pressure is stratified to roughly match
 (so no fast-scale mismatch at the interface), and the retopology is
-the preset's (``PRESETS['electrolysis_bubble_2D']`` / ``_3D``: per-step
-Delaunay + multiphase re-labeling, built by
-``methods.retopologize_fn``), because dual-only retopology on this
-problem is markedly less stable than the full Delaunay pass (contrary
-to the static_droplet_2D case, which has no gravity).  The force is
-``methods.dudt_fn(..., body_force=g)`` inside the case-physics guard
-:func:`electrolysis_dudt` (laneW, 2026-10-05).
+the preset's (``PRESETS['electrolysis_bubble_2D']``: per-step Delaunay
++ multiphase re-labeling; ``['electrolysis_bubble_3D']``: dual-only
+refresh on the setup connectivity since laneG, 2026-10-06, because the
+3D Delaunay flips of the near-cospherical bubble jolt the gas pressure
+by +-1500 Pa at every rebuild; both built by ``methods.retopologize_fn``).
+The force is ``methods.dudt_fn(..., body_force=g)`` inside the
+case-physics guard :func:`electrolysis_dudt` (laneW, 2026-10-05).  The
+gas injection of the runners is ``ddgclib.operators.mass_source.add_phase_mass``
+(``src/_reaction.py``).
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ from ddgclib.multiphase import (
 )
 from ddgclib.initial_conditions import ZeroVelocity
 from ddgclib._boundary_conditions import (
-    BoundaryConditionSet, NoSlipWallBC, BoundaryCondition,
+    BoundaryConditionSet, NoSlipWallBC,
 )
 from ddgclib.geometry.domains import droplet_in_box_2d, droplet_in_box_3d
 from ddgclib.geometry.domains._disks import disk
@@ -91,62 +93,11 @@ def electrolysis_dudt(methods, HC, mps, meos, gravity_vec):
 
 
 # =====================================================================
-# Wall-clamp BC
+# Wall-clamp BC: ddgclib._boundary_conditions.WallClampBC since laneV
+# (2026-10-07; the case-local class of the same arithmetic lived here
+# from 2026-07).  Built by ``methods.wall_clamp_bc`` below.
 # =====================================================================
-
-class WallClampBC(BoundaryCondition):
-    """Prevent interior vertices from crossing a flat wall plane.
-
-    Interior (non-``bV``) vertices advected past a wall produce a
-    bogus dual polygon on the other side, breaking mass / pressure
-    conservation.  This BC clips them back to ``level + min_gap`` and
-    zeroes the wall-normal velocity component.
-    """
-
-    def __init__(self, axis: int, level: float, direction: int = +1,
-                 min_gap: float = 0.0, exclude: set | None = None):
-        """
-        Parameters
-        ----------
-        direction : +1 or -1
-            ``+1`` = wall is a lower bound (clip vertices with
-            ``x_a[axis] < level + min_gap``).  ``-1`` = wall is an
-            upper bound (clip vertices with ``x_a[axis] > level -
-            min_gap``).
-        """
-        super().__init__(axis=axis)
-        self.level = float(level)
-        self.direction = int(direction)
-        self.min_gap = float(min_gap)
-        self.exclude = exclude if exclude is not None else set()
-
-    def apply(self, mesh, dt, target_vertices=None):
-        axis = self.axis
-        dirn = self.direction
-        count = 0
-        for v in list(mesh.V):
-            if v in self.exclude:
-                continue
-            y = v.x_a[axis]
-            if dirn > 0 and y < self.level + self.min_gap:
-                pos = v.x_a.copy()
-                pos[axis] = self.level + self.min_gap
-                mesh.V.move(v, tuple(pos))
-                u = v.u.copy()
-                if u[axis] < 0.0:
-                    u[axis] = 0.0
-                v.u = u
-                count += 1
-            elif dirn < 0 and y > self.level - self.min_gap:
-                pos = v.x_a.copy()
-                pos[axis] = self.level - self.min_gap
-                mesh.V.move(v, tuple(pos))
-                u = v.u.copy()
-                if u[axis] > 0.0:
-                    u[axis] = 0.0
-                v.u = u
-                count += 1
-        return count
+from ddgclib._boundary_conditions import WallClampBC  # noqa: E402,F401
 
 
 # =====================================================================
@@ -303,7 +254,11 @@ def setup_electrolysis_bubble(
     use_wall_clamp : bool
         Add clamps on the TOP (destination wall) and BOTTOM
         (electrode) that prevent interior vertices from passing
-        through walls.
+        through walls.  Since laneV (2026-10-07) the clamp is the
+        library :class:`ddgclib._boundary_conditions.WallClampBC` of
+        the method axis ``wall_clamp`` (``'project'`` on the
+        electrolysis presets): when *methods* is given this flag is
+        ignored and the axis decides; ``None`` maps the flag onto it.
     redistribute_mass : bool
         If True (default), per-phase mass is redistributed after each
         Delaunay reconnection so that the pre-retopo per-phase pressure
@@ -331,10 +286,13 @@ def setup_electrolysis_bubble(
     """
     if methods is None:
         methods = SolverMethods(dim=dim, phases='multi',
-                                redistribute_mass=redistribute_mass)
+                                redistribute_mass=redistribute_mass,
+                                wall_clamp='project' if use_wall_clamp
+                                else None)
     elif methods.dim != dim:
         raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
     split_method = methods.split_method
+    simplex_vote = methods.simplex_vote
     axis = dim - 1
     floor = -L_domain
     ceiling = +L_domain
@@ -490,23 +448,20 @@ def setup_electrolysis_bubble(
     )
 
     mass_conserving_merge(HC, cdist=1e-12)
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=simplex_vote)
 
     # -- Boundary conditions --
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), bV)
 
-    if use_wall_clamp:
-        bc_set.add(
-            WallClampBC(axis=axis, level=wall_bottom, direction=+1,
-                        min_gap=0.02 * R0, exclude=bV),
-            None,
-        )
-        bc_set.add(
-            WallClampBC(axis=axis, level=wall_top, direction=-1,
-                        min_gap=0.02 * R0, exclude=bV),
-            None,
-        )
+    # laneV: the clamp of the axis wall_clamp (bottom electrode, top
+    # wall), put-down gap 0.02 R0, the frozen walls excluded
+    clamp = methods.wall_clamp_bc(
+        planes=[(axis, wall_bottom, +1), (axis, wall_top, -1)],
+        min_gap=0.02 * R0, exclude=bV)
+    if clamp is not None:
+        bc_set.add(clamp, None)
 
     # -- Acceleration: stress + gravity (guarded) --
     meos = MultiphaseEOS([eos_liq, eos_gas])

@@ -1,3 +1,12 @@
+"""RETIRED (laneX, 2026-10-06): depends on helpers that were never shipped.
+
+Imports ``_rebuild_nn_from_delaunay``, ``_render_faces_from_simplex_verts``,
+``_render_edges_from_simplex_verts`` and ``_render_dual_from_vd`` from
+``ddgclib.visualization.unified``; none of them exists in any commit of this
+repository (``git log -S`` finds only this file), so the script fails at import
+(ImportError, audit 2026-09-25 and laneX).  The maintained kinematics demo is
+``bc_demo.py`` (``bc_demo_2D`` preset).  The owner may delete it.
+"""
 """
 Boundary Condition Demo: Periodic Inlet + Open Outlet
 

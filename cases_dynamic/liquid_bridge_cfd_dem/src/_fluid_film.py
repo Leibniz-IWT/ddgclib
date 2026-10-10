@@ -87,10 +87,13 @@ def retopologize_surface(
     bV.clear()
     bV.update(frozen)
 
-    # Recompute vertex masses from dual area
+    # Recompute vertex masses from dual area; a vertex the edge split
+    # created starts at rest (the remesh gives it no fields, laneX)
     for v in HC.V:
         C_i = dual_area_heron(v)
         v.m = rho_f * film_thickness * max(C_i, 1e-20)
+        if not hasattr(v, 'u'):
+            v.u = np.zeros(3)
 
 
 # ── Stokes integral (capillary force on particle) ───────────────────

@@ -1,3 +1,13 @@
+"""RETIRED (laneX, 2026-10-06): superseded by ``cases_dynamic/capillary_rise``.
+
+Legacy hand-rolled ``while t < t_final`` loop (dt 0.05) with a hard
+``import polyscope`` at module level (ModuleNotFoundError on a headless
+machine, laneX) and no library integrator, so no preset can describe it (rule
+7).  The capillary-rise physics is shipped in ``capillary_rise/capillary_rise_2D.py``
+/ ``_3D.py`` (``capillary_rise_static_2D`` / ``_3D`` presets, laneI) and the
+dynamic-contact-angle runners of the same directory.  The owner may delete this
+directory.
+"""
 """
 Note that the actual working init seems to be cube_to_tube and the older functions are possibly not needed
 """

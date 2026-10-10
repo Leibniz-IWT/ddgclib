@@ -50,7 +50,12 @@ def build_hp2d(args):
     from cases_dynamic.Hagen_Poiseuile.src._setup import (
         setup_poiseuille_2d_lagrangian,
     )
-    HC, bV, bc_set, wall, params = setup_poiseuille_2d_lagrangian(L=args.L)
+    # laneV: the preset's wall_clamp (and any --replace arm) is applied by
+    # the setup; the arm's frozen_set is set by run_arm on the same config
+    rep = dict(viscous_flux='two_point', **_replaces(args))
+    HC, bV, bc_set, wall, params = setup_poiseuille_2d_lagrangian(
+        L=args.L, methods=PRESETS['hagen_poiseuille_2D'].replace(**rep),
+        clamp_gap=args.gap)
     dt = args.dt if args.dt is not None else 0.05
     n_steps = args.steps if args.steps is not None else 300
     kw = dict(dt=dt, n_steps=n_steps, bc_set=bc_set, boundary_filter=wall)
@@ -59,9 +64,17 @@ def build_hp2d(args):
     # The reproducer is the configuration before laneH: this setup (hull
     # inlet, pressure advected with the vertices) with the two-point
     # viscous flux.  The preset is on 'simplex_gradient' since laneH.
+    from cases_dynamic.Hagen_Poiseuile.src._metrics import profile_error
+    # laneV: the velocity against the analytical profile on the downstream
+    # half of the channel at the end (dual-volume weighted l2, laneH's
+    # measure), so that a clamp arm is judged on the physics, not only on
+    # the count of vertices outside
     return ('hagen_poiseuille_2D', HC, bV, kw, box, None,
-            dict(mu=params['mu'], replace=dict(viscous_flux='two_point')),
-            f"_L{args.L:g}_dt{dt:g}_n{n_steps}")
+            dict(mu=params['mu'], replace=rep,
+                 profile=lambda HC_, bV_: profile_error(
+                     HC_, bV_, dict(params, flow_axis=0), 0.5 * args.L,
+                     args.L)),
+            f"_L{args.L:g}_dt{dt:g}_n{n_steps}" + _rep_label(args))
 
 
 def build_dam_break_2d(args):
@@ -128,6 +141,36 @@ def _build_electrolysis(args, dim):
             f"_n{n_steps}{_bs_label(args)}")
 
 
+def _parse_value(s: str):
+    if s in ('None', 'none'):
+        return None
+    if s in ('True', 'False'):
+        return s == 'True'
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        return s
+
+
+def _replaces(args) -> dict:
+    """``--replace axis=value`` arms (laneV), applied on top of the
+    case's preset."""
+    return {k: _parse_value(v) for k, v in
+            (s.split('=', 1) for s in getattr(args, 'replace', []))}
+
+
+def _rep_label(args) -> str:
+    rep = _replaces(args)
+    s = ''.join(f"_{k}-{v}" for k, v in sorted(rep.items()))
+    if getattr(args, 'gap', None) is not None:
+        s += f"_gap{args.gap:g}"
+    return s
+
+
 def _bs_label(args) -> str:
     """laneB: the outer box shift of the droplet builders is a setup
     choice; the lossy pre-laneB mesh (``--box-shift evict``) gets its own
@@ -191,11 +234,19 @@ def run_arm(case: str, arm: str, args) -> dict:
     walls: dict = {}
     series: list[dict] = []
     first = {'frozen_changed': None, 'outside': None, 'wall_moved': None}
+    clamp = {'n_events': 0, 'n_steps': 0, 'first': None}
     every = max(1, kw['n_steps'] // 60)
     n_done = [0]
 
     def callback(step, t, HC, bV=None, diagnostics=None):
         n_done[0] = step + 1
+        n_cl = sum(int(n) for k, n in (diagnostics or {}).items()
+                   if 'WallClampBC' in k)
+        if n_cl:                              # laneV: the wall clamp fired
+            clamp['n_events'] += n_cl
+            clamp['n_steps'] += 1
+            if clamp['first'] is None:
+                clamp['first'] = step
         if extra_cb is not None:
             extra_cb(step, t, HC, bV, diagnostics)
         if step == 0:
@@ -257,6 +308,9 @@ def run_arm(case: str, arm: str, args) -> dict:
         'n_outside_max': max((s['n_outside'] for s in series), default=0),
         'mass_total': float(sum(v.m for v in HC.V)),
         'state_sha256': hashlib.sha256(repr(state).encode()).hexdigest(),
+        'clamp': clamp,
+        'profile': (extra['profile'](HC, bV) if 'profile' in extra
+                    and abort is None else None),
         'series': series,
     }
     out_dir = args.out or _OUT
@@ -287,6 +341,11 @@ def main() -> None:
                     choices=['move_all', 'evict'],
                     help='droplet / electrolysis builders (laneB): evict = '
                          'the lossy pre-laneB outer mesh')
+    ap.add_argument('--replace', action='append', default=[],
+                    metavar='AXIS=VALUE',
+                    help='preset.replace(axis=value) arm (laneV; hp2d only)')
+    ap.add_argument('--gap', type=float, default=None,
+                    help='wall_clamp put-down gap of the hp2d setup (laneV)')
     ap.add_argument('--out', default=None,
                     help=f'output directory (default {_OUT})')
     args = ap.parse_args()
@@ -305,6 +364,13 @@ def main() -> None:
               f"|u|max {r['u_max_max']:.4e}  nV_end {f.get('n_vertices')}  "
               f"mass {r['mass_total']:.15e}  {r['wall_time_s']} s"
               + (f"\n    ABORT {r['abort']}" if r['abort'] else ''))
+        print(f"    wall clamp: {r['clamp']['n_events']} put-backs on "
+              f"{r['clamp']['n_steps']} steps (first {r['clamp']['first']})")
+        if r.get('profile'):
+            pr = r['profile']
+            print(f"    profile on x in [L/2, L]: l2 {pr['l2']:.6e}  u_max "
+                  f"{pr['u_max']:.6f}  u_cross {pr['u_cross']:.3e}  "
+                  f"({pr['n']} vertices)")
     if len(res) == 2:
         same = res['hull']['state_sha256'] == res['membership']['state_sha256']
         print(f"final states bit-identical: {same}")

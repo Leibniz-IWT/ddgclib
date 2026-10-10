@@ -26,7 +26,9 @@ from hyperct.ddg import compute_vd
 from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
 from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
 from ddgclib.initial_conditions import ZeroVelocity
-from ddgclib._boundary_conditions import BoundaryConditionSet, NoSlipWallBC
+from ddgclib._boundary_conditions import (
+    BoundaryConditionSet, NoSlipWallBC, wall_vertex_spacing,
+)
 from ddgclib.geometry.domains import rectangle, box
 from ddgclib.geometry.domains._boundary_groups import identify_face_groups
 from ddgclib.methods import SolverMethods
@@ -60,6 +62,7 @@ def setup_dam_break_multiphase(
     alpha_art: float = 0.0,
     redistribute_mass: bool = True,
     methods=None,
+    clamp_gap: float | None = None,
 ):
     """Build a rectangular tank (2D) or box (3D) filled with two phases.
 
@@ -90,6 +93,14 @@ def setup_dam_break_multiphase(
         redistribute_mass=...)`` from the explicit kwarg (per-step
         Delaunay, no remap, hull-frozen walls: the partial the setup
         used to build by hand, ``ddgclib/tests/test_methods.py``).
+    clamp_gap : float or None
+        Put-down distance from the tank walls of the clamp of
+        ``methods.wall_clamp`` (laneV, 2026-10-07; geometry, recorded in
+        ``params``).  ``None`` = 0.1 of the wall vertex spacing along the
+        floor (0.0125 m at refinement 4, so 1.25e-3; a vertex put down ON
+        the wall line is a hull vertex whose half cell is open to the
+        absolute pressure, measured laneV).  Nothing is added when the
+        axis is ``None``.
 
     Returns
     -------
@@ -101,6 +112,7 @@ def setup_dam_break_multiphase(
     elif methods.dim != dim:
         raise ValueError(f"methods.dim={methods.dim} != dim={dim}")
     split_method = methods.split_method
+    simplex_vote = methods.simplex_vote
 
     # -- Build the tank mesh (single-phase geometry) --
     if dim == 2:
@@ -206,7 +218,8 @@ def setup_dam_break_multiphase(
     # that run.  In 2D the vote reproduces the criterion labels, so the
     # setup state is bit-identical (digest 952d4544676ca366 of the
     # shipped run).
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=simplex_vote)
 
     # Hydrostatic targets (linear EOS n=1 -> exact closed-form density).
     # Gas: atmospheric column over the full tank height.  Liquid:
@@ -236,11 +249,21 @@ def setup_dam_break_multiphase(
 
     # Final refresh: recompute per-phase pressures from the preloaded
     # masses (reset_mass=False preserves them).
-    mps.refresh(HC, dim, reset_mass=False, split_method=split_method)
+    mps.refresh(HC, dim, reset_mass=False, split_method=split_method,
+                simplex_vote=simplex_vote)
 
     # -- Boundary conditions: all outer walls no-slip --
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), bV_walls)
+    # laneV: impenetrability of the tank walls (axis wall_clamp)
+    box_bounds = [(0.0, L), (0.0, H)] + ([(0.0, W)] if dim == 3 else [])
+    if clamp_gap is None and methods.wall_clamp is not None:
+        clamp_gap = 0.1 * wall_vertex_spacing(bV_walls, axis=gravity_axis,
+                                              level=0.0, along=0)
+    clamp = methods.wall_clamp_bc(box=box_bounds, min_gap=clamp_gap,
+                                  exclude=bV_walls)
+    if clamp is not None:
+        bc_set.add(clamp, None)
 
     # -- Acceleration (pressure + viscous + surface tension) + gravity --
     meos = MultiphaseEOS([eos_gas, eos_liq])
@@ -259,6 +282,7 @@ def setup_dam_break_multiphase(
         'gamma': gamma, 'K_l': K_l, 'K_g': K_g,
         'g': g, 'gravity_axis': gravity_axis, 'P_atm': P_atm,
         'n_refine': n_refine,
+        'clamp_gap': clamp.min_gap if clamp is not None else None,
     }
 
     return HC, bV_walls, mps, bc_set, dudt_fn, retopo_fn, params

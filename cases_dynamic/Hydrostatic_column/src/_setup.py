@@ -14,6 +14,8 @@ import numpy as np
 from hyperct import Complex
 from hyperct.ddg import compute_vd
 
+from ddgclib.geometry import ensure_simplex_cache
+
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet,
     NoSlipWallBC,
@@ -79,6 +81,8 @@ def setup_hydrostatic(
     HC.triangulate()
     for _ in range(n_refine):
         HC.refine_all()
+    # NOTE(laneI): exact simplex volumes for the hand-built complex
+    ensure_simplex_cache(HC, dim)
 
     # Identify boundary
     bV = identify_cube_boundaries(HC, 0.0, h, dim=dim)

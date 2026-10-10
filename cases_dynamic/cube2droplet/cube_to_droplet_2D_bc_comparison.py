@@ -37,25 +37,17 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from functools import partial
-
-from hyperct import Complex
-from hyperct.ddg import compute_vd
-
-from ddgclib.eos import TaitMurnaghan, MultiphaseEOS
-from ddgclib.multiphase import MultiphaseSystem, PhaseProperties
-from ddgclib.initial_conditions import ZeroVelocity, PhaseAssignment
 from ddgclib._boundary_conditions import (
     BoundaryConditionSet, NoSlipWallBC,
     PressureReservoirBC, AbsorbingPressureBC, ExpandingDomainBC,
 )
-from ddgclib.operators.multiphase_stress import multiphase_dudt_i
-from ddgclib.operators.stress import dual_volume, cache_dual_volumes
-from ddgclib.dynamic_integrators import symplectic_euler
 from ddgclib.data import StateHistory
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.visualization import dynamic_plot_fluid
 
-from cases_dynamic.Cube2droplet.src._setup import AtmosphericPressureBC
+from cases_dynamic.cube2droplet.src._setup import (
+    AtmosphericPressureBC, setup_cube_to_droplet,
+)
 
 # =====================================================================
 # Parameters (match main cube2droplet case)
@@ -86,78 +78,21 @@ _FIG = os.path.join(_CASE_DIR, 'fig')
 _RESULTS = os.path.join(_CASE_DIR, 'results')
 
 
-def dual_only_retopo_multiphase(HC, bV, dim, _mps=None):
-    """Fixed-topology retopo: recompute duals on existing connectivity."""
-    dV = HC.boundary()
-    for v in HC.V:
-        v.boundary = v in dV
-    compute_vd(HC, method="barycentric")
-    cache_dual_volumes(HC, dim)
-    if _mps is not None:
-        _mps.split_dual_volumes(HC, dim)
-        _mps.compute_phase_pressures(HC)
-    bV.clear()
-    bV.update(dV)
+# Fixed connectivity with per-step dual / phase-pressure refresh (laneX,
+# 2026-10-06: the preset replaces the case-local dual-only closure and the
+# second copy of the setup this runner carried).
+METHODS = PRESETS['cube_to_droplet_2D_dual_only']
 
 
-def build_case():
-    """Build a fresh cube2droplet mesh + physics (same as setup but
-    returns atm_verts instead of wiring the BC)."""
-    dim = 2
-    bounds = [(-L_DOMAIN, L_DOMAIN)] * dim
-    HC = Complex(dim, domain=bounds)
-    HC.triangulate()
-    for _ in range(N_REFINE):
-        HC.refine_all()
-
-    bV = HC.boundary()
-    for v in HC.V:
-        v.boundary = v in bV
-    compute_vd(HC, method="barycentric")
-
-    for v in HC.V:
-        try:
-            v.dual_vol = dual_volume(v, HC, dim)
-        except (ValueError, IndexError):
-            v.dual_vol = 0.0
-
-    PhaseAssignment(
-        lambda x: 1 if all(abs(x[i]) <= R for i in range(dim)) else 0
-    ).apply(HC, bV)
-
-    eos_outer = TaitMurnaghan(rho0=RHO_O, P0=0.0, K=K_O, n=1.0,
-                               rho_clip=(0.1, 10.0))
-    eos_drop = TaitMurnaghan(rho0=RHO_D, P0=0.0, K=K_D, n=1.0,
-                              rho_clip=(0.1, 10.0))
-
-    mps = MultiphaseSystem(
-        phases=[
-            PhaseProperties(eos=eos_outer, mu=MU_O, rho0=RHO_O, name="outer"),
-            PhaseProperties(eos=eos_drop, mu=MU_D, rho0=RHO_D, name="droplet"),
-        ],
-        gamma={(0, 1): GAMMA},
+def build_case(n_refine=N_REFINE):
+    """Fresh cube2droplet mesh + physics; the outer-phase BC is chosen by
+    the caller, so only ``atm_verts`` (its targets) is returned."""
+    HC, bV, mps, meos, _, dudt_fn, _, params = setup_cube_to_droplet(
+        dim=2, R=R, L_domain=L_DOMAIN, rho_d=RHO_D, rho_o=RHO_O,
+        mu_d=MU_D, mu_o=MU_O, gamma=GAMMA, K_d=K_D, K_o=K_O,
+        n_refine=n_refine, methods=METHODS,
     )
-    mps.refresh(
-        HC, dim, reset_mass=True,
-        criterion_fn=lambda c: 1 if all(abs(c[i]) <= R for i in range(dim)) else 0,
-    )
-
-    ZeroVelocity(dim=dim).apply(HC, bV)
-    for v in HC.V:
-        v.p = 0.0
-
-    # The gas-phase vertices adjacent to walls that outer-phase BCs target
-    atm_verts = set()
-    for v_wall in bV:
-        for nb in v_wall.nn:
-            if nb not in bV and nb.phase == 0:
-                atm_verts.add(nb)
-
-    meos = MultiphaseEOS([eos_outer, eos_drop])
-    dudt_fn = partial(
-        multiphase_dudt_i, dim=dim, mps=mps, HC=HC, pressure_model=meos,
-    )
-    return HC, bV, mps, meos, dudt_fn, atm_verts
+    return HC, bV, mps, meos, dudt_fn, params['atm_verts']
 
 
 def compute_diagnostics(HC, bV, dim=2):
@@ -230,11 +165,9 @@ def _make_outer_bc(mode):
     raise ValueError(f"Unknown mode: {mode}")
 
 
-def _run_simulation(label, bc_mode):
+def _run_simulation(label, bc_mode, n_steps=N_STEPS, n_refine=N_REFINE):
     dim = 2
-    HC, bV, mps, meos, dudt_fn, atm_verts = build_case()
-
-    retopo_fn = partial(dual_only_retopo_multiphase, _mps=mps)
+    HC, bV, mps, meos, dudt_fn, atm_verts = build_case(n_refine)
 
     bc_set = BoundaryConditionSet()
     bc_set.add(NoSlipWallBC(dim=dim), bV)
@@ -295,14 +228,18 @@ def _run_simulation(label, bc_mode):
 
     t0 = time.time()
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=DT, n_steps=N_STEPS, dim=dim,
-            bc_set=bc_set, retopologize_fn=retopo_fn, callback=callback,
+        t_final = METHODS.integrate(
+            HC, bV, dudt_fn, dt=DT, n_steps=n_steps,
+            bc_set=bc_set, callback=callback, mps=mps,
         )
     except Exception as e:
         print(f"[{label}] Simulation stopped: {e}")
         t_final = t_arr[-1] if t_arr else 0.0
     wall_time = time.time() - t0
+    record_methods(os.path.join(_RESULTS, f'methods_bc_{bc_mode}.json'),
+                   METHODS, HC,
+                   extra={'dt': DT, 'n_steps': n_steps, 'n_refine': n_refine,
+                          't_final': t_final, 'bc_mode': bc_mode})
 
     diag_final = compute_diagnostics(HC, bV, dim)
     t_arr.append(t_final)
@@ -345,7 +282,13 @@ def _style_for(mode):
     }[mode]
 
 
-def main():
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description='cube-to-droplet BC comparison')
+    ap.add_argument('--n-steps', type=int, default=N_STEPS)
+    ap.add_argument('--n-refine', type=int, default=N_REFINE)
+    ap.add_argument('--no-anim', action='store_true')
+    args = ap.parse_args(argv)
     print("=" * 60)
     print("2D Cube-to-Droplet — Boundary Condition Comparison")
     print("=" * 60)
@@ -362,7 +305,9 @@ def main():
         ('EXPANDING', 'expanding'),
     ]:
         print(f"\n--- {label} ---")
-        results[mode] = _run_simulation(label, bc_mode=mode)
+        results[mode] = _run_simulation(label, bc_mode=mode,
+                                        n_steps=args.n_steps,
+                                        n_refine=args.n_refine)
 
     # -- Comparison plots --
     os.makedirs(_FIG, exist_ok=True)
@@ -475,7 +420,7 @@ def main():
         print("matplotlib not available — skipping plots")
 
     # -- Animations for RESERVOIR and EXPANDING --
-    for mode in ('reservoir', 'expanding'):
+    for mode in () if args.no_anim else ('reservoir', 'expanding'):
         history = results[mode].get('history')
         if history is None or history.n_snapshots <= 1:
             continue

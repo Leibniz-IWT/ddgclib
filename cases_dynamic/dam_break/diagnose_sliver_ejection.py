@@ -83,12 +83,14 @@ def build(args):
         col_d=p.col_d, rho_l=p.rho_l, rho_g=p.rho_g, mu_l=p.mu_l,
         mu_g=p.mu_g, gamma=p.gamma, K_l=p.K_l, K_g=p.K_g, g=p.g,
         gravity_axis=p.gravity_axis, P_atm=p.P_atm, n_refine=refine,
-        alpha_art=alpha, methods=methods)
+        alpha_art=alpha, methods=methods, clamp_gap=args.gap)
     dt = cfl_timestep(HC, dim, float(np.sqrt(p.K_l / p.rho_l)), cfl=p.cfl)
     n_steps = args.steps if args.steps is not None else int(t_end / dt) + 1
     label = f"{dim}D_alpha{alpha:g}_r{refine}_n{n_steps}"
     if rep:
         label += '_' + '_'.join(f"{k}-{v}" for k, v in sorted(rep.items()))
+    if args.gap is not None:
+        label += f"_gap{args.gap:g}"
     box = [(0.0, p.L), (0.0, p.H)] + ([(0.0, p.W)] if dim == 3 else [])
     return dict(HC=HC, bV=bV, mps=mps, bc_set=bc_set, dudt_fn=dudt_fn,
                 dt=dt, n_steps=n_steps, methods=methods, label=label,
@@ -234,6 +236,10 @@ def run(args) -> dict:
              'u_max': 0.0}
     face_terms_prev: dict = {}
     eject: dict = {}
+    clamp: dict = {'n_events': 0, 'n_steps': 0, 'first': None}
+    relabel: dict = {'n': 0, 'first': None, 'events': [],
+                     'n_released': 0, 'm_released': [0.0] * n_phases,
+                     'released': []}
     holes_log: list[dict] = []     # steps at which a hole exists
     holes_first: dict = {}
     hole_steps = 0
@@ -250,6 +256,14 @@ def run(args) -> dict:
 
     def callback(step, t, HC_cb, bV_cb=None, diagnostics=None):
         nonlocal prev_edges, hole_steps
+        # laneV: how often the wall clamp (axis wall_clamp) put a vertex back
+        n_cl = sum(int(n) for k, n in (diagnostics or {}).items()
+                   if 'WallClampBC' in k)
+        if n_cl:
+            clamp['n_events'] += n_cl
+            clamp['n_steps'] += 1
+            if clamp['first'] is None:
+                clamp['first'] = step
         edges = {frozenset((id(v), id(w))) for v in HC_cb.V for w in v.nn}
         flipped = prev_edges is not None and edges != prev_edges
         if flipped:
@@ -278,11 +292,39 @@ def run(args) -> dict:
                                    x=[float(c) for c in byid[i].x_a[:dim]])
                               for i, k, m in stranded]))
         snap = {}
+        prev_snap = hist[-1]['snap'] if hist else {}
         for v in HC_cb.V:
             r = _vrec(v, cur.get(id(v)), dim)
             r['nn'] = sorted(id(w) for w in v.nn)
             r['frozen'] = v in bV_cb
             snap[id(v)] = r
+            # laneV census: a bulk vertex relabelled straight into the
+            # other bulk phase by the simplex vote (its whole mass of the
+            # old phase is stranded or released at once)
+            q = prev_snap.get(id(v))
+            if q is not None and q['m_phase'] and r['m_phase']:
+                # ... and the ledger side of it: a phase whose whole mass
+                # left the vertex in one step (released into the pool by
+                # the volume ledger, or stranded under the snapshot rule)
+                for k in range(n_phases):
+                    if q['m_phase'][k] > 1e-30 and r['m_phase'][k] <= 1e-30:
+                        relabel['n_released'] += 1
+                        relabel['m_released'][k] += q['m_phase'][k]
+                        if len(relabel['released']) < 200:
+                            relabel['released'].append(dict(
+                                step=step, k=k, x=r['x'], m=q['m_phase'][k],
+                                phase_before=q['phase'], phase_after=r['phase'],
+                                interface_before=q['is_interface']))
+            if (q is not None and q['phase'] >= 0 and r['phase'] >= 0
+                    and q['phase'] != r['phase']):
+                relabel['n'] += 1
+                if relabel['first'] is None:
+                    relabel['first'] = step
+                if len(relabel['events']) < 200:
+                    relabel['events'].append(dict(
+                        step=step, x=r['x'], old=q['phase'], new=r['phase'],
+                        m_phase_before=q['m_phase'],
+                        m_phase_after=r['m_phase']))
             a = r['a'] or 0.0
             if r['a'] is not None and a > worst['a_max']:
                 worst.update(a_max=a, a_max_step=step,
@@ -360,6 +402,7 @@ def run(args) -> dict:
         flips=flips, n_flip_steps=len(flips),
         holes_first=holes_first or None, n_hole_steps=hole_steps,
         holes_log=holes_log,
+        relabel=relabel, clamp=clamp,
         worst={k: (None if (isinstance(v, float) and not np.isfinite(v))
                    else v) for k, v in worst.items()},
         series=series, eject=eject or None, trace=None,
@@ -444,6 +487,23 @@ def report(out: dict) -> None:
     print(f"  (vertex, phase) holes (sub-volume without mass) or stranded "
           f"masses (mass without sub-volume) on {out['n_hole_steps']} steps; "
           f"first {out['holes_first']}")
+    print(f"  bulk vertices relabelled straight into the other bulk phase "
+          f"by the vote: {out['relabel']['n']} (first at step "
+          f"{out['relabel']['first']})")
+    for r in out['relabel']['events'][:6]:
+        print(f"    step {r['step']} x {np.round(r['x'], 4).tolist()} "
+              f"{r['old']} -> {r['new']} m_phase {r['m_phase_before']} -> "
+              f"{r['m_phase_after']}")
+    print(f"  wall clamp: {out['clamp']['n_events']} put-backs on "
+          f"{out['clamp']['n_steps']} steps (first at step {out['clamp']['first']})")
+    rl = out['relabel']
+    print(f"  (vertex, phase) masses that left a vertex whole in one step: "
+          f"{rl['n_released']} events, mass per phase {rl['m_released']}")
+    for r in rl['released'][:8]:
+        print(f"    step {r['step']} phase {r['k']} x "
+              f"{np.round(r['x'], 4).tolist()} m {r['m']:.3e} label "
+              f"{r['phase_before']}{'(if)' if r['interface_before'] else ''}"
+              f" -> {r['phase_after']}")
     for h in out['holes_log'][:8]:
         print(f"    step {h['step']} flip {h['flipped']}: holes "
               f"{[(r['k'], np.round(r['x'], 4).tolist(), 'if' if r['interface'] else 'bulk', 'dvp %.2e' % r['dvp'], 'p %.1f' % r['p_phase'], 'nn_k %d' % r['nn_bulk_k']) for r in h['holes']]} "
@@ -506,6 +566,8 @@ def main() -> None:
     ap.add_argument('--a-report', type=float, default=1e3, dest='a_report',
                     help='record the per-face terms at force time for every '
                          'vertex whose |a| exceeds this (m/s^2)')
+    ap.add_argument('--gap', type=float, default=None,
+                    help='wall_clamp put-down gap of the setup (laneV)')
     ap.add_argument('--out', default=None,
                     help=f'output directory (default {_OUT})')
     args = ap.parse_args()

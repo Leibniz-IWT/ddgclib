@@ -385,7 +385,11 @@ class HydrostaticEOSMass(InitialCondition):
         K = getattr(self.eos, 'K', None)
         if n is not None and K is not None and abs(n - 1.0) < 1e-12:
             alpha = self.rho0 * self.g / K
-            return self.P_ref + K * (np.exp(alpha * depth) - 1.0)
+            # rho = rho0 (1 + (P - P0) / K), so K + P - P0 grows like
+            # exp(alpha depth) from its value at h_ref (laneI: the factor
+            # K + P_ref - P0 is K when P_ref = P0, the earlier formula).
+            P0 = float(getattr(self.eos, 'P0', 0.0))
+            return self.P_ref + (K + self.P_ref - P0) * (np.exp(alpha * depth) - 1.0)
 
         # General EOS: integrate dP/dz = -rho(P)*g from h_ref downward
         from scipy.integrate import solve_ivp
@@ -398,18 +402,24 @@ class HydrostaticEOSMass(InitialCondition):
                         rtol=1e-12, atol=1e-12)
         return float(sol.y[0, -1])
 
+    def assign(self, v) -> None:
+        """Mass, density and pressure of the profile on one vertex at its
+        current ``dual_vol`` (also the per-step rule of
+        :class:`ddgclib._boundary_conditions.HydrostaticReservoirBC`)."""
+        y = v.x_a[self.gravity_axis]
+        P_target = self._compressible_pressure(y)
+        rho_eq = float(self.eos.density(P_target))
+        dual_vol = getattr(v, 'dual_vol', None)
+        if dual_vol is None or dual_vol < 1e-30:
+            v.m = rho_eq * 1e-30
+        else:
+            v.m = rho_eq * dual_vol
+        v.rho = rho_eq
+        v.p = P_target
+
     def apply(self, HC, bV: set) -> None:
         for v in HC.V:
-            y = v.x_a[self.gravity_axis]
-            P_target = self._compressible_pressure(y)
-            rho_eq = float(self.eos.density(P_target))
-            dual_vol = getattr(v, 'dual_vol', None)
-            if dual_vol is None or dual_vol < 1e-30:
-                v.m = rho_eq * 1e-30
-            else:
-                v.m = rho_eq * dual_vol
-            v.rho = rho_eq
-            v.p = P_target
+            self.assign(v)
 
 
 # Multiphase ICs

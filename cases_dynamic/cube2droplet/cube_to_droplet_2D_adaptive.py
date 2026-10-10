@@ -42,8 +42,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from cases_dynamic.Cube2droplet.src._setup import setup_cube_to_droplet
-from ddgclib.dynamic_integrators import symplectic_euler
+from cases_dynamic.cube2droplet.src._setup import setup_cube_to_droplet
+from ddgclib.methods import PRESETS, record_methods
 from hyperct.remesh import is_interface_edge
 
 
@@ -101,17 +101,28 @@ def _cross_phase_edge_set(HC) -> set:
     return s
 
 
-def main():
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description='cube-to-droplet, adaptive remesh')
+    ap.add_argument('--n-steps', type=int, default=N_STEPS)
+    ap.add_argument('--n-refine', type=int, default=N_REFINE)
+    args = ap.parse_args(argv)
+    n_steps, n_refine = args.n_steps, args.n_refine
     dim = 2
     print("=" * 60)
     print("2D Cube-to-Droplet — ADAPTIVE REMESH DEMO")
     print("=" * 60)
 
-    HC, bV, mps, meos, bc_set, dudt_fn, retopo_fn, params = \
+    # The setup builds its force from the base preset; the adaptive arm is
+    # the same preset on connectivity='adaptive' (laneX), built below once
+    # the mesh spacing is known.
+    base = PRESETS['cube_to_droplet_2D']
+    HC, bV, mps, meos, bc_set, dudt_fn, _, params = \
         setup_cube_to_droplet(
             dim=dim, R=R, L_domain=L_DOMAIN,
             rho_d=RHO_D, rho_o=RHO_O, mu_d=MU_D, mu_o=MU_O,
-            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=N_REFINE,
+            gamma=GAMMA, K_d=K_D, K_o=K_O, n_refine=n_refine,
+            methods=base,
         )
 
     n_verts_before = sum(1 for _ in HC.V)
@@ -147,19 +158,23 @@ def main():
     print(f"Adaptive remesh kwargs: L_min={remesh_kwargs['L_min']:.4e}, "
           f"L_max={remesh_kwargs['L_max']:.4e}")
 
-    print(f"\nRunning {N_STEPS} steps with remesh_mode='adaptive'...")
+    methods = base.replace(connectivity='adaptive',
+                           remesh_kwargs=remesh_kwargs)
+    print(f"\nRunning {n_steps} steps with connectivity='adaptive'...")
     try:
-        t_final = symplectic_euler(
-            HC, bV, dudt_fn, dt=DT, n_steps=N_STEPS, dim=dim,
-            bc_set=bc_set, retopologize_fn=retopo_fn,
-            remesh_mode='adaptive',
-            remesh_kwargs=remesh_kwargs,
+        t_final = methods.integrate(
+            HC, bV, dudt_fn, dt=DT, n_steps=n_steps,
+            bc_set=bc_set, mps=mps,
         )
     except Exception as e:
         print(f"Simulation stopped: {e}")
         import traceback
         traceback.print_exc()
         return 1
+    record_methods(os.path.join(os.path.dirname(__file__), 'results',
+                                'methods_adaptive.json'), methods, HC,
+                   extra={'dt': DT, 'n_steps': n_steps, 'n_refine': n_refine,
+                          't_final': t_final})
 
     n_verts_after = sum(1 for _ in HC.V)
     iface_set_after = _cross_phase_edge_set(HC)

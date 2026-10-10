@@ -168,6 +168,8 @@ def delaunay_with_ghosts(
     n_real: int,
     ghost_to_real: dict[int, int],
     dim: int,
+    periodic_axes: list[int] | None = None,
+    domain_bounds: list[tuple[float, float]] | None = None,
 ) -> list[tuple[int, ...]]:
     """Run Delaunay on real+ghost coords and resolve ghost indices.
 
@@ -179,16 +181,67 @@ def delaunay_with_ghosts(
     ghost_to_real : dict
         Maps ghost index -> real vertex index.
     dim : int
+    periodic_axes, domain_bounds : optional
+        When both are given, only the simplices whose centroid (in the
+        extended, unwrapped coordinates) lies inside the fundamental
+        domain on every periodic axis are kept (laneG, 2026-10-06).
+        Every periodic simplex has exactly one such image, so the
+        resolved list is a consistent periodic triangulation: no two
+        resolved simplices overlap and no facet has more than two
+        owners.  Without the filter every image of every simplex of the
+        padded point set is resolved and deduplicated by its real
+        vertex triple, which keeps the simplices at the outer edge of
+        the ghost band that are not images of a real simplex: on the
+        2D shearing-plate mesh (302 vertices) 8 facets had 3 owners,
+        the summed simplex measure exceeded the box by 2.3 % and 6 of
+        136 interior vertices of a unit square were tagged boundary
+        (laneP).
 
     Returns
     -------
     list of tuple[int, ...]
         Deduplicated simplex tuples with all indices in ``[0, n_real)``.
     """
-    tri = Delaunay(all_coords[:, :dim])
+    coords = all_coords[:, :dim]
+    if periodic_axes and domain_bounds is not None:
+        # Consistent tie-break (laneG): a cocircular / cospherical set
+        # that straddles a seam (the squares of a structured mesh) is
+        # triangulated by qhull with a diagonal that may differ between
+        # the real set and its ghost image, and the centroid filter then
+        # keeps one triangle of each: overlapping simplices, facets with
+        # three owners (unit square, refinement 3: 10 such facets, total
+        # dual volume 1.0195).  Each real vertex and all its ghosts get
+        # the same deterministic offset (1e-7 of the shortest period,
+        # along the periodic axes only, so that a wall row or plane
+        # stays collinear / coplanar and grows no sliver), so the padded
+        # set stays an exact periodic copy and the generic triangulation
+        # is the same on both sides.  The perturbed coordinates decide
+        # the connectivity only.
+        n_total = len(coords)
+        rng = np.random.default_rng(0)
+        offsets = np.zeros((n_real, dim))
+        for ax in periodic_axes:
+            offsets[:, ax] = rng.uniform(-1.0, 1.0, n_real)
+        eps = 1e-7 * min(domain_bounds[ax][1] - domain_bounds[ax][0]
+                         for ax in periodic_axes)
+        pert = np.empty((n_total, dim))
+        pert[:n_real] = offsets
+        for g in range(n_real, n_total):
+            pert[g] = offsets[ghost_to_real[g]]
+        coords = coords + eps * pert
+    tri = Delaunay(coords)
+
+    simplices = tri.simplices
+    if periodic_axes and domain_bounds is not None:
+        centroids = coords[simplices].mean(axis=1)
+        keep = np.ones(len(simplices), dtype=bool)
+        for ax in periodic_axes:
+            lb, ub = domain_bounds[ax]
+            keep &= (centroids[:, ax] >= lb) & (centroids[:, ax] < ub)
+        simplices = simplices[keep]
 
     resolved: set[tuple[int, ...]] = set()
-    for simplex in tri.simplices:
+    for simplex in simplices:
         # Replace ghost indices with their real counterparts
         mapped = []
         for idx in simplex:
@@ -351,6 +404,9 @@ def retopologize_periodic(
     merge_cdist: float | None = None,
     band_width: float | None = None,
     backend: str = "ghost",
+    frozen_set: str = 'hull',
+    edge_area_source: str | None = None,
+    skip_triangulation: bool = False,
 ) -> None:
     """Full periodic retriangulation — drop-in for ``_retopologize``.
 
@@ -372,7 +428,36 @@ def retopologize_periodic(
         Ghost buffer width.  ``None`` = auto (2x max edge length).
     backend : str
         ``"ghost"`` (default) or ``"cgal"`` (not yet implemented).
+    frozen_set : {'hull', 'membership'}
+        Method axis ``frozen_set`` (laneG, 2026-10-06, as in
+        ``_retopologize``).  ``'hull'``: *bV* is rebuilt from the
+        topological boundary of the new connectivity minus the periodic
+        faces, narrowed by *boundary_filter*.  ``'membership'``: *bV* is
+        persistent; this call keeps the members that are still in the
+        complex (the ub-face merge above can remove one) and pass
+        *boundary_filter*, never adds a hull vertex and never drops a
+        member that left the hull.  ``v.boundary`` follows the hull
+        under both values.
+    edge_area_source : str or None
+        3D method axis ``edge_area_source`` (laneQ) on this path:
+        ``None`` / ``'p_ij_ring'`` the legacy ring walk, ``'p_ij'`` the
+        exact polygon per edge, ``'p_ij_simplex'`` the exact polygons of
+        every edge cached from ``HC._simplices``; see
+        :func:`ddgclib.methods._retopo._set_edge_area_source`.  LIMIT of
+        every source here: the seam simplices are cached with raw
+        (unwrapped) coordinates, so the dual faces of edges that cross
+        a periodic seam are those of the unwrapped triangle / tetrahedron
+        (2D ``dual_area_vector`` rebuilds them with minimum-image
+        coordinates, 3D does not).
+    skip_triangulation : bool
+        Keep the connectivity (and ``HC._simplices``) and only wrap the
+        positions, retag the boundary and rebuild the duals and dual
+        volumes at the current positions: stage 1 of the conservative
+        remap on this path (laneG).
     """
+    if frozen_set not in ('hull', 'membership'):
+        raise ValueError(
+            f"frozen_set must be 'hull' or 'membership', got {frozen_set!r}")
     if backend == "cgal":
         raise NotImplementedError(
             "CGAL periodic Delaunay backend not yet implemented. "
@@ -391,6 +476,8 @@ def retopologize_periodic(
     wrap_positions(HC, periodic_axes, domain_bounds)
 
     # 2. Optional merge of close vertices
+    if skip_triangulation:
+        merge_cdist = None
     if merge_cdist is not None and merge_cdist > 0:
         HC.V.merge_all(cdist=merge_cdist)
         bV.intersection_update(set(HC.V))
@@ -399,12 +486,15 @@ def retopologize_periodic(
             return
 
     # 3. Disconnect all existing edges
-    for v in verts:
-        for nb in list(v.nn):
-            v.disconnect(nb)
+    if not skip_triangulation:
+        for v in verts:
+            for nb in list(v.nn):
+                v.disconnect(nb)
 
     # 4-6. Triangulate
-    if dim == 1:
+    if skip_triangulation:
+        pass
+    elif dim == 1:
         # 1D periodic: merge endpoint duplicates (x=lb and x=ub are
         # the same physical point), then connect as a ring.
         if 0 in periodic_axes:
@@ -462,6 +552,7 @@ def retopologize_periodic(
         )
         simplices = delaunay_with_ghosts(
             all_coords, len(real_verts), ghost_map, dim,
+            periodic_axes=periodic_axes, domain_bounds=domain_bounds,
         )
 
         # Connect real vertices per resolved simplices and cache the
@@ -507,15 +598,26 @@ def retopologize_periodic(
 
     # 10b. Store periodic info on HC for use by stress operators.
     # dual_area_vector uses this to apply minimum-image wrapping
-    # when computing dual face geometry across periodic boundaries.
+    # when computing dual face geometry across periodic boundaries,
+    # cache_dual_volumes to measure the seam simplices with
+    # minimum-image coordinates (laneG, 2026-10-06; before, the seam
+    # simplices were measured unwrapped: total dual volume 1.94 x the
+    # box on the 2D shearing-plate mesh, 2.488 x on a unit square).
     HC._periodic_axes = periodic_axes
     HC._periodic_bounds = domain_bounds
 
-    # 11. Cache dual volumes
+    # 11. Cache dual volumes (and the 3D dual face source of the axis
+    #     edge_area_source; this path builds no batch_e_star fan cache)
     cache_dual_volumes(HC, dim)
+    from ddgclib.methods._retopo import _set_edge_area_source
+    _set_edge_area_source(HC, dim, edge_area_source, 'retopologize_periodic')
 
-    # 12. Populate bV with non-periodic boundary vertices
-    non_periodic_boundary = dV - pure_periodic
+    # 12. Populate bV: the non-periodic boundary vertices (hull), or the
+    #     surviving members (membership; NOTE(laneL) in _retopologize)
+    if frozen_set == 'membership':
+        non_periodic_boundary = {v for v in bV if HC.V.cache.get(v.x) is v}
+    else:
+        non_periodic_boundary = dV - pure_periodic
     if boundary_filter is not None:
         non_periodic_boundary = {v for v in non_periodic_boundary
                                  if boundary_filter(v)}

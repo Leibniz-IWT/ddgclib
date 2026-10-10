@@ -35,10 +35,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ddgclib._curvatures import b_curvatures_hn_ij_c_ij, vectorise_vnn
-from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.operators.multiphase_stress import multiphase_stress_force
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.operators.surface_tension import dual_area_heron, surface_tension_force
-from ddgclib.operators.stress import dual_volume, stress_acceleration, stress_force
+from ddgclib.operators.stress import dual_volume, stress_force
+
+# laneX 2026-10-06: the volumetric hold runs on the single-phase frozen
+# configuration (volumetric stress force, duals frozen); the surface rows use
+# the film force (Case 1) instead of the volumetric stress_force on the
+# extracted surface complex, which has no dual mesh.
+METHODS = PRESETS['liquid_bridge_volume_3D']
 
 CASE_DIR = Path(__file__).resolve().parent
 OUT_DIR = CASE_DIR / "out" / "Case_5"
@@ -450,12 +455,14 @@ def _surface_tension_capillary_force_error(surface, bV_surface) -> float:
 
 
 def _surface_stress_force(v, surface, *, dim: int = 3, mu: float = 0.0, gamma: float = GAMMA) -> np.ndarray:
-    """Case-local stress path plus interface surface tension on the extracted surface."""
+    """Film force on the extracted surface (the Case 1 force; a surface
+    complex has no dual mesh for the volumetric stress operator)."""
 
-    F = stress_force(v, dim=dim, mu=mu, HC=surface)
+    if mu != 0.0:
+        raise ValueError("a film has no viscous flux (mu must be 0)")
     if gamma != 0.0 and getattr(v, "is_interface", False):
-        F = F + surface_tension_force(v, gamma=gamma, dim=dim)
-    return F
+        return surface_tension_force(v, gamma=gamma, dim=dim)
+    return np.zeros(dim)
 
 
 def _surface_stress_capillary_force_error(surface, bV_surface) -> float:
@@ -469,14 +476,10 @@ def _surface_stress_capillary_force_error(surface, bV_surface) -> float:
 
 
 def _surface_multiphase_stress_capillary_force_error(surface, bV_surface) -> float:
-    z_hat = np.array([0.0, 0.0, 1.0], dtype=float)
-    mps = _surface_multiphase_model()
-    contributions = [
-        float(np.dot(multiphase_stress_force(v, dim=3, mps=mps, HC=surface), z_hat))
-        for v in surface.V
-        if v not in bV_surface
-    ]
-    return float(math.fsum(contributions))
+    """Not defined on the extracted surface (no dual cells for the
+    volumetric multiphase operator; laneX 2026-10-06, kept as NaN)."""
+
+    return float("nan")
 
 
 def _extract_triangles(HC):
@@ -622,7 +625,14 @@ def compute_dynamic_case(
         n_steps = int(round(MAX_HOLD_TIME / dt))
 
     static_row = compute_static_case(refinement)
+    HC, bV_vol, outer_rings, _layer_rings, surface_edges, surface_boundary_indices = _build_structured_volumetric_catenoid(refinement)
+    methods = METHODS.replace(workers=workers if workers > 1 else None)
     if float(static_row["stress_max_local_force_norm"]) == 0.0:
+        # the static force is identically zero (p = 0, mu = 0, u = 0): the
+        # hold is inert, record the configuration with n_steps 0 (laneX)
+        record_methods(OUT_DIR / "methods.json", methods, HC,
+                       extra={"refinement": refinement, "dt": dt, "n_steps": 0,
+                              "inert": True})
         return {
             "refinement": refinement,
             "n_total": static_row["n_total"],
@@ -637,18 +647,11 @@ def compute_dynamic_case(
             "integration_error": static_row["integration_error"],
         }
 
-    HC, bV_vol, outer_rings, _layer_rings, surface_edges, surface_boundary_indices = _build_structured_volumetric_catenoid(refinement)
-    dudt_fn = partial(stress_acceleration, dim=3, mu=0.0, HC=HC)
-    symplectic_euler(
-        HC,
-        bV_vol,
-        dudt_fn,
-        dt=dt,
-        n_steps=n_steps,
-        dim=3,
-        workers=workers,
-        retopologize_fn=False,
-    )
+    dudt_fn = methods.dudt_fn(HC, mu=0.0)
+    methods.integrate(HC, bV_vol, dudt_fn, dt=dt, n_steps=n_steps)
+    record_methods(OUT_DIR / "methods.json", methods, HC,
+                   extra={"refinement": refinement, "dt": dt, "n_steps": n_steps,
+                          "inert": False})
     surface, surface_bV = _build_surface_complex_from_template(
         outer_rings,
         surface_edges,
@@ -687,23 +690,15 @@ def _dynamic_checkpoint_rows(
     """Advance the Case 5 volume once and sample metrics at requested steps."""
 
     HC, bV_vol, outer_rings, _layer_rings, surface_edges, surface_boundary_indices = _build_structured_volumetric_catenoid(refinement)
-    dudt_fn = partial(stress_acceleration, dim=3, mu=0.0, HC=HC)
+    methods = METHODS.replace(workers=workers if workers > 1 else None)
+    dudt_fn = methods.dudt_fn(HC, mu=0.0)
     rows: list[dict[str, float]] = []
     prev_steps = 0
 
     for step in schedule:
         delta_steps = step - prev_steps
         if delta_steps > 0:
-            symplectic_euler(
-                HC,
-                bV_vol,
-                dudt_fn,
-                dt=dt,
-                n_steps=delta_steps,
-                dim=3,
-                workers=workers,
-                retopologize_fn=False,
-            )
+            methods.integrate(HC, bV_vol, dudt_fn, dt=dt, n_steps=delta_steps)
         surface, surface_bV = _build_surface_complex_from_template(
             outer_rings,
             surface_edges,
@@ -822,8 +817,10 @@ def render_reproduced_static_dynamic_figure(
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     n_reference = np.array(ENDRES_2024_REFERENCE["n_boundary"], dtype=float)
-    n_static = n_reference * 0.97
-    n_dynamic = n_reference * 1.03
+    # live series on their own boundary counts (a subset of refinements
+    # may be run, laneX); the reference series keep the historic counts
+    n_static = np.array([row["n_boundary"] for row in static_rows], dtype=float) * 0.97
+    n_dynamic = np.array([row["n_boundary"] for row in dynamic_rows], dtype=float) * 1.03
     static_capillary = 100.0 * np.abs(
         np.array([row["stress_capillary_force_error"] for row in static_rows], dtype=float)
     )
@@ -1159,7 +1156,14 @@ def print_builtin_operator_capillary_force_summary(
         )
 
 
-def main() -> None:
+def main(argv=None) -> None:
+    global REFINEMENTS
+    import argparse
+    ap = argparse.ArgumentParser(description="volumetric catenoid benchmark")
+    ap.add_argument("--refinements", type=int, nargs="+", default=list(REFINEMENTS),
+                    help="mesh refinements (default %(default)s)")
+    args = ap.parse_args(argv)
+    REFINEMENTS = tuple(args.refinements)
     print("Case 5: volumetric stress-operator equilibrium benchmark")
     print("[1/4] Computing static volumetric stress rows...")
     static_rows = run_static_benchmark()
@@ -1172,7 +1176,7 @@ def main() -> None:
 
     print("[4/4] Rendering benchmark figures...")
     static_dynamic_path = render_reproduced_static_dynamic_figure(static_rows, dynamic_rows)
-    hold_time_path = render_hold_time_figure()
+    hold_time_path = render_hold_time_figure(refinements=REFINEMENTS)
     ddg_fd_companion_path = render_ddg_fd_companion_figure()
 
     print_builtin_operator_capillary_force_summary(

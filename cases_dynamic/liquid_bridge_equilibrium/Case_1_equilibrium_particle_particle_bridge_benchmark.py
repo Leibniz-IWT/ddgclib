@@ -36,13 +36,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ddgclib._curvatures import b_curvatures_hn_ij_c_ij, normalized, vectorise_vnn
-from ddgclib.dynamic_integrators import symplectic_euler
-from ddgclib.operators.multiphase_stress import multiphase_stress_force
-from ddgclib.operators.stress import stress_acceleration, stress_force
+from ddgclib.methods import PRESETS, record_methods
 from ddgclib.operators.surface_tension import (
     dual_area_heron,
     surface_tension_force,
 )
+
+# The film configuration of the dynamic hold (laneX, 2026-10-06): the Heron
+# surface-tension force on the frozen surface mesh.  Until laneX the case
+# called the volumetric ``stress_force`` on the surface complex, which has no
+# dual mesh (AttributeError 'vd'); with mu = 0 and p = 0 that term is
+# identically zero on a film, so the film force is the whole force.
+METHODS = PRESETS['liquid_bridge_film_3D']
 
 GAMMA = 0.0728
 RADIUS = 1.0
@@ -398,33 +403,20 @@ def _surface_tension_capillary_force_error(HC, bV) -> float:
 
 
 def _surface_stress_force(v, HC, *, dim: int = 3, mu: float = 0.0, gamma: float = GAMMA) -> np.ndarray:
-    """Benchmark-local stress path plus interface surface tension."""
+    """The film force of the ``liquid_bridge_film_3D`` configuration
+    (``METHODS.dudt_fn`` times the vertex mass): surface tension on the
+    interface vertices, no bulk stress on a surface mesh."""
 
-    F = stress_force(v, dim=dim, mu=mu, HC=HC)
+    if mu != 0.0:
+        raise ValueError("a film has no viscous flux (mu must be 0)")
     if gamma != 0.0 and getattr(v, "is_interface", False):
-        F = F + surface_tension_force(v, gamma=gamma, dim=dim)
-    return F
-
-
-def _surface_stress_acceleration(
-    v,
-    *,
-    dim: int = 3,
-    mu: float = 0.0,
-    HC=None,
-    gamma: float = GAMMA,
-    damping: float = 0.0,
-) -> np.ndarray:
-    F = _surface_stress_force(v, HC=HC, dim=dim, mu=mu, gamma=gamma)
-    if damping > 0.0:
-        F -= damping * v.u[:dim]
-    if v.m < 1.0e-30:
-        return np.zeros(dim)
-    return F / v.m
+        return surface_tension_force(v, gamma=gamma, dim=dim)
+    return np.zeros(dim)
 
 
 def _stress_capillary_force_error(HC, bV) -> float:
-    """Integrated axial capillary force from the built-in stress operator."""
+    """Integrated axial capillary force from the film force
+    (equal to the surface-tension row on a film)."""
 
     z_hat = np.array([0.0, 0.0, 1.0], dtype=float)
     contributions = [
@@ -436,16 +428,12 @@ def _stress_capillary_force_error(HC, bV) -> float:
 
 
 def _multiphase_stress_capillary_force_error(HC, bV) -> float:
-    """Integrated axial capillary force from the built-in multiphase operator."""
+    """Not defined on a film: the volumetric multiphase operator
+    (``multiphase_stress_force``) integrates over dual cells that a surface
+    mesh does not have (laneX, 2026-10-06; the row is kept as NaN so the
+    historic tables and figures keep their columns)."""
 
-    z_hat = np.array([0.0, 0.0, 1.0], dtype=float)
-    mps = _surface_multiphase_model()
-    contributions = [
-        float(np.dot(multiphase_stress_force(v, dim=3, mps=mps, HC=HC), z_hat))
-        for v in HC.V
-        if v not in bV
-    ]
-    return float(math.fsum(contributions))
+    return float("nan")
 
 
 def _fd_capillary_force_error(HC, bV) -> float:
@@ -532,17 +520,12 @@ def compute_dynamic_case(
 
     HC, bV = _build_live_endres_catenoid(refinement)
     _prepare_surface_benchmark_state(HC, bV)
-    dudt_fn = partial(_surface_stress_acceleration, mu=0.0, HC=HC, gamma=GAMMA, damping=damping)
+    dudt_fn = METHODS.dudt_fn(HC, gamma=GAMMA, damping=damping)
 
-    symplectic_euler(
-        HC,
-        bV,
-        dudt_fn,
-        dt=dt,
-        n_steps=n_steps,
-        dim=3,
-        retopologize_fn=False,
-    )
+    METHODS.integrate(HC, bV, dudt_fn, dt=dt, n_steps=n_steps)
+    record_methods(OUT_DIR / "methods.json", METHODS, HC,
+                   extra={"refinement": refinement, "dt": dt,
+                          "n_steps": n_steps, "damping": damping})
 
     return {
         "refinement": refinement,
@@ -1040,8 +1023,10 @@ def render_reproduced_static_dynamic_figure(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     n_reference = np.array(ENDRES_2024_REFERENCE["n_boundary"], dtype=float)
-    n_static = n_reference * 0.97
-    n_dynamic = n_reference * 1.03
+    # live series on their own boundary counts (a subset of refinements
+    # may be run, laneX); the reference series keep the historic counts
+    n_static = np.array([row["n_boundary"] for row in static_rows], dtype=float) * 0.97
+    n_dynamic = np.array([row["n_boundary"] for row in dynamic_rows], dtype=float) * 1.03
 
     static_capillary = 100.0 * np.abs(
         np.array([row["ddg_capillary_force_error"] for row in static_rows], dtype=float)
@@ -1223,17 +1208,23 @@ def _cleanup_obsolete_benchmark_figures() -> None:
             pass
 
 
-def main() -> None:
+def main(argv=None) -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description="catenoid bridge benchmark")
+    ap.add_argument("--refinements", type=int, nargs="+", default=list(REFINEMENTS),
+                    help="mesh refinements (default %(default)s)")
+    args = ap.parse_args(argv)
+    refinements = tuple(args.refinements)
     _progress("Equilibrium particle-particle bridge benchmark")
     _progress("[1/5] Computing live static benchmark rows...")
     rows = []
-    for refinement in REFINEMENTS:
+    for refinement in refinements:
         _progress(f"  - static refinement {refinement}")
         rows.append(compute_static_case(refinement))
 
     _progress("[2/5] Computing damped dynamic relaxation rows...")
     dynamic_rows = []
-    for refinement in REFINEMENTS:
+    for refinement in refinements:
         _progress(f"  - dynamic refinement {refinement}")
         dynamic_rows.append(compute_dynamic_case(refinement))
 
@@ -1249,7 +1240,7 @@ def main() -> None:
 
     _progress("[5/5] Rendering benchmark figures...")
     reproduced_path = render_reproduced_static_dynamic_figure(rows, dynamic_rows)
-    hold_time_path = render_dynamic_hold_time_figure(verbose=True)
+    hold_time_path = render_dynamic_hold_time_figure(refinements=refinements, verbose=True)
     print_builtin_operator_capillary_force_summary(
         rows,
         case_label="Case 1",

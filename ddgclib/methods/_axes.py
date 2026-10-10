@@ -189,6 +189,28 @@ _AXES: list[MethodAxis] = [
                  '(test_methods.py::TestSetupsBuildFromMethods; every pin, both '
                  'droplet baselines and the lane L / B smoke digests '
                  'bit-identical)'),
+            _opt('film', 'Thin-film SURFACE mesh (a 2-manifold in 3D, no bulk): '
+                 'force = -gamma HNdA_i (Heron cotangent mean curvature) '
+                 'with optional velocity damping; no pressure, no viscous '
+                 'flux, no dual mesh (compute_vd does not apply), so the '
+                 'connectivity must be frozen or a surface-aware custom '
+                 'callable', 'experimental',
+                 'ddgclib/operators/surface_tension.py:surface_tension_acceleration',
+                 'laneX 2026-10-06: the liquid_bridge_equilibrium Case 1 '
+                 'catenoid hold and the liquid_bridge_cfd_dem film run through '
+                 'dudt_fn(HC, gamma=, damping=) on the liquid_bridge_film_3D / '
+                 '_cfd_dem_3D presets (until then both called the volumetric '
+                 'stress_force on the surface mesh and crashed on the missing '
+                 'v.vd); a catenoid is a minimal surface, so the integrated '
+                 'axial force of the interior vertices is the error '
+                 '(measurements: laneX log). laneX fix 1: on every interior '
+                 'vertex of the Case 1 catenoid grid the force equals the '
+                 'discrete area gradient -gamma dA/dx_i to 3.5e-10 / 1.0e-9 '
+                 'of the largest vertex force (refinements 2 / 3, central '
+                 'differences of the one-ring areas), pinned by '
+                 'test_case_runners_smoke.py; the non-vanishing local '
+                 'curvature there is the area gradient of the degree-{4,8} '
+                 'grid itself, not an operator error', dims=(3,)),
         ),
     ),
     # ------------------------------------------------------------------
@@ -338,7 +360,16 @@ _AXES: list[MethodAxis] = [
                  'of every frozen vertex, so wall cells read P0: hydrostatic 3D '
                  'column max|u| 3.9e-2 m/s and integrated L2 1.5e4 Pa (1.5 '
                  'rho g H) at 100 t_ac even from the equilibrium masses; use '
-                 'dual_only_bare',
+                 'dual_only_bare. laneG 2026-10-06: electrolysis_bubble_3D '
+                 'preset (static bubble, g = 0, refinement 1/1, 2000 steps: '
+                 'Laplace jump 224.1 Pa against 144 and KE_max 4.2e-9 J, '
+                 'where the Delaunay rebuild without remap swings -7675 to '
+                 '+1893 Pa with KE_max 7.8e-7; see the preset notes) and '
+                 'electrolysis_bubble_2D (refinement 2/3, 1500 steps: 72.83 Pa '
+                 'against gamma / R0 = 72, KE_max 3.5e-9 J, where the Delaunay '
+                 'rebuild reaches 8065.6 Pa and |u| 2.47 m/s; refinement 1/2: '
+                 '75.84, bit-identical to the Delaunay rebuild, which does not '
+                 'flip on that mesh in the window)',
                  dims=(2, 3)),
             _opt('dual_only_bare', 'Frozen connectivity, boundary retagged from '
                  'HC.boundary(), compute_vd + cache_dual_volumes (half-cell '
@@ -388,13 +419,40 @@ _AXES: list[MethodAxis] = [
                  'redistribution + EOS (no remap, no cadence)', 'experimental',
                  'ddgclib/geometry/periodic.py:retopologize_periodic; '
                  'ddgclib/methods/_retopo.py:retopologize_multiphase_periodic',
-                 'periodic path ignores skip_triangulation/remesh/backend; '
+                 'laneG 2026-10-06: the periodic rebuild keeps one image per '
+                 'simplex (centroid in the fundamental domain, ties of '
+                 'cocircular seam squares broken by a deterministic offset '
+                 'shared by a vertex and its ghosts) and measures the seam '
+                 'simplices with minimum-image coordinates '
+                 '(simplex_dual_volumes(periods=)): unit square refinement 3 '
+                 'after one rebuild 256 simplices (261 before), total dual '
+                 'volume 1.0 to round-off (2.488 at laneP, 1.0195 with the '
+                 'centroid filter alone), every facet 1 or 2 owners, 0 '
+                 'interior vertices tagged boundary (6 before); refinement 4 '
+                 'and the periodic box (refinement 2) likewise exact; the 2D '
+                 'shearing-plate mesh 0.0006 = the box (1.94 x before, 8 '
+                 'facets with 3 owners). frozen_set, edge_area_source, remap '
+                 'and projection_every are applied on this path since laneG '
+                 '(retopologize_multiphase_periodic runs '
+                 'multiphase_rebuild_with_ledger, the closure of '
+                 '_retopologize_multiphase); skip_triangulation / remesh / '
+                 'backend are still ignored. LIMIT: the 3D dual faces of seam '
+                 'edges are built from unwrapped coordinates (the '
+                 'minimum-image rebuild of dual_area_vector is 2D only), so '
+                 'the 3D shearing case is a setup + smoke pin. With the '
+                 'shearing-plate presets on remap=conservative the 2D short '
+                 'window (refinement 3/3, 1649 steps to t = 0.05 s) completes '
+                 'with its 32 interface vertices, jump 6.018 Pa (gamma / R = '
+                 '6), droplet volume ratio 0.983992 against 0.984008 at setup; '
+                 'remap=None goes unstable at t = 0.042 s in the row next to '
+                 'the plates (|u| 2.4 U_wall at t = 0.05 s) '
+                 '(test_case_shearing_plate.py). '
                  'laneT: the 3D rebuild is the same in every interpreter since '
                  '2026-10-02 (5 steps of the shearing-plate 3D short setup: 2 '
                  'final states in 6 interpreters before, KE 6.258e-6 or '
                  '6.276e-6); '
-                 'shearing_plate_droplet 2D is unstable (interface lost by '
-                 't=0.044 s), 3D crashes in setup; domain_bounds is a build-time '
+                 'before laneG shearing_plate_droplet 2D was unstable (interface '
+                 'lost by t=0.044 s) and 3D crashed in setup; domain_bounds is a build-time '
                  'argument (geometry), periodic_axes the method field. laneP, '
                  'single phase + EOS: not usable. After ONE retopologize_periodic '
                  'of periodic_rectangle (unit square, refinement 3) the total '
@@ -417,8 +475,10 @@ _AXES: list[MethodAxis] = [
     MethodAxis(
         name='remap', title='Conservative retopology remap', group='connectivity',
         default=None,
-        control='retopo_remap= in _retopologize_multiphase (multiphase partial) '
-                'or in _retopologize (single-phase partial built by '
+        control='retopo_remap= in _retopologize_multiphase and '
+                'retopologize_multiphase_periodic (multiphase partials; both '
+                'run multiphase_rebuild_with_ledger since laneG) or in '
+                '_retopologize (single-phase partial built by '
                 'SolverMethods.retopologize_fn)',
         notes='Same axis, two implementations. Multiphase: projection of the '
               'PRE-call field (cadence on projection_every). Single-phase: '
@@ -428,7 +488,14 @@ _AXES: list[MethodAxis] = [
             _opt(None, 'No remap: reconnection changes dual volumes, EOS reads '
                  'them as compression', 'validated',
                  'ddgclib/dynamic_integrators/_integrators_dynamic.py:_retopologize_multiphase',
-                 'required value under dual_only (remap is a silent no-op there)'),
+                 'required value under dual_only (remap is a silent no-op there). '
+                 'laneX 2026-10-07: on the cube2droplet square droplet (Delaunay '
+                 '+ per-phase redistribution, refinement 4) this value erodes '
+                 'the droplet to no bulk vertex by t = 0.4 s of the 1 s run '
+                 '(the phase-1 bulk count 41 -> 25 -> 21 -> 13 over the first '
+                 '20 steps, pressure 25 to 249 Pa against 0.89), so the '
+                 'cube_to_droplet presets carry conservative; reachable as '
+                 'the runner arm bare = preset.replace(remap=None)'),
             _opt('conservative', 'Pressure field invariant across the rebuild. '
                  'MULTIPHASE: stage-1 dual refresh on OLD connectivity, rebuild, '
                  'per-phase redistribution, vol_corr gauge, '
@@ -457,14 +524,39 @@ _AXES: list[MethodAxis] = [
                  'rescale reaches 111.7 m/s), and once the hull fill is removed '
                  '(connectivity=delaunay_material) the offset stays below 1 Pa '
                  '(convex arm: up to 2.7e3 Pa per rebuild) and the run with and '
-                 'without the rescale agree to 3 digits. No gauge was added',
+                 'without the rescale agree to 3 digits. No gauge was added. '
+                 'laneG 2026-10-06, PERIODIC path: the shearing-plate presets '
+                 'carry it (2D short window completes with the 32 interface '
+                 'vertices, jump 6.018 Pa against 6, volume ratio 0.983992 '
+                 'against 0.984008 at setup; remap=None blows up at t = 0.042 '
+                 's, |u| 2.4 U_wall, jump 12.4 Pa); a mass SOURCE must scale '
+                 'the anchor reference (add_phase_mass does: without it the '
+                 'anchored level is a function of the volume only and the 3D '
+                 'electrolysis bubble did not grow while its EOS pressure '
+                 'climbed to 4807 Pa); the first remap call fixes the '
+                 'reference, so a setup must not run the remap before its '
+                 'pressure preload (the shearing setup applies its one-time '
+                 'periodic pass with remap=None). 3D electrolysis static '
+                 'bubble (g = 0, refinement 1/1, 2000 steps): jump 241.9 Pa '
+                 'against 144 (dual_only 224.1, no remap -4872 with the jump '
+                 'swinging +-5000 Pa at every flip), KE_max 4.6e-9 J against '
+                 '7.8e-7; see the electrolysis presets. laneX 2026-10-07, '
+                 'cube2droplet (square droplet, Delaunay + per-phase '
+                 'redistribution, refinement 4, 5000 steps of 2e-4 s): the '
+                 'cube_to_droplet_2D preset carries it, integrated bulk jump '
+                 '+0.9481 Pa against gamma / R_eq = 0.8862 (+6.99 %), '
+                 'circularity 0.9079; remap=None (the historic setup, runner '
+                 'arm bare) erodes the droplet to no bulk vertex by t = 0.4 s '
+                 '(circularity 0); dual_only -2.2761 Pa (-357 %). 3D (cube, '
+                 'refinement 2, 2000 steps of 5e-5 s): see the laneX log',
                  dims=(2, 3)),
         ),
     ),
     MethodAxis(
         name='projection_every', title='Pressure-projection cadence',
         group='connectivity', default=1, kind='int', applies_to='multi',
-        control='projection_every= in _retopologize_multiphase (partial); '
+        control='projection_every= in _retopologize_multiphase and '
+                'retopologize_multiphase_periodic (partials, laneG); '
                 'counter on mps._projection_call_idx',
         options=(
             _opt(1, 'Every call: per-phase masses re-targeted to the PRE-call '
@@ -507,7 +599,52 @@ _AXES: list[MethodAxis] = [
                  'mass-conserving and does not merge m_phase', 'experimental',
                  'hyperct/_vertex.py:merge_all; ddgclib/multiphase.py:'
                  'mass_conserving_merge is the separate conserving path',
-                 'DO-NOT wire into multiphase without per-phase ledger (laneF)'),
+                 'DO-NOT wire into multiphase without per-phase ledger (laneF); '
+                 'merge_method=mass_conserving (laneV) is the ledger-aware '
+                 'merge of this distance'),
+        ),
+    ),
+    MethodAxis(
+        name='merge_method', title='How the pre-retopology merge lumps vertices',
+        group='connectivity', default='merge_all',
+        control='merge_method= in _retopologize (step 0, applied only when '
+                'merge_cdist > 0 and the connectivity is rebuilt); bound '
+                'into the retopology partial by SolverMethods.retopologize_fn()',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'Inert without merge_cdist (SolverMethods refuses a non-default '
+              'value without it).',
+        options=(
+            _opt('merge_all', 'HC.V.merge_all(cdist): one vertex of each close '
+                 'pair is dropped with its mass, momentum and phase masses',
+                 'validated',
+                 'hyperct/_vertex.py:merge_all',
+                 'the historic merge; no preset sets merge_cdist'),
+            _opt('mass_conserving', 'ddgclib.multiphase.mass_conserving_merge: '
+                 'the survivor takes the sum of the masses, of the per-phase '
+                 'ledger m_phase and of the momentum (u mass-weighted), p '
+                 'averaged; a member of bV is preferred as the survivor so a '
+                 'wall vertex is never merged away into a mobile one (laneL '
+                 'known limit 4); the phase label and p_phase of the survivor '
+                 'are left to the next refresh', 'opt-in',
+                 'ddgclib/multiphase.py:mass_conserving_merge',
+                 'laneV 2026-10-07 (diagnose_sliver_ejection.py --replace '
+                 'merge_cdist=... --replace merge_method=mass_conserving). '
+                 'Ledger exact: m, m_phase and momentum to 1e-14 '
+                 '(test_merge_method.py, 4; merge_all loses the merged mass). '
+                 'dam_break_2D refinement 4 (alpha 0.3, cdist 1.25e-3 = 0.1 '
+                 'wall spacing): the small-cell F/m spike of step 1725 is '
+                 'gone (|a|max 6.8e4 -> 8.4e3 m/s^2, |u|max 2.59 -> 0.50 m/s) '
+                 'but the run still ends at step 2763 with a vertex under '
+                 'the floor; with wall_clamp it completes the 3170 steps '
+                 '(541 of 545 vertices left, |u|max 0.51). Refinement 3 '
+                 '(cdist 2.5e-3): never fires at alpha 0.3 / 0.2 '
+                 '(bit-identical), one merge at alpha 0.1 (KE_liq end 5.15e-3 '
+                 'against 5.72e-3, front 0.06743 against 0.06750, '
+                 '0ee49ba2a4550aa7). Not a default: merge_cdist is a fixed '
+                 'length a preset cannot scale with the mesh, and the alpha '
+                 '0.1 pin would move for one merge. Applied on the Delaunay '
+                 '/ adaptive rebuild only (the periodic rebuild keeps '
+                 'merge_all)'),
         ),
     ),
     MethodAxis(
@@ -579,11 +716,80 @@ _AXES: list[MethodAxis] = [
                  '(under hull the next retopology captured it); 3D: a vertex '
                  'whose dual fan fails is tagged and zero-volumed but not '
                  'frozen (0 occurrences in a jittered box and a 3D droplet); '
-                 'merge_cdist can merge a member into a mobile vertex; not '
-                 'implemented for periodic, delaunay_material and custom '
+                 'merge_cdist can merge a member into a mobile vertex; '
+                 'implemented for periodic since laneG 2026-10-06 '
+                 '(retopologize_periodic(frozen_set=): the members that '
+                 'survive the ub-face merge stay frozen, a hull vertex is not '
+                 'added; test_frozen_set.py::test_membership_on_the_periodic_path), '
+                 'not implemented for delaunay_material and custom '
                  'retopology (SolverMethods raises), not needed for dual_only '
                  '/ dual_only_bare / frozen (their bV never changes). '
-                 'test_frozen_set.py (31)',
+                 'test_frozen_set.py (32). laneV 2026-10-07: impenetrability '
+                 'is the axis wall_clamp (HP2D 54 -> 0 outside, dam break '
+                 'refinement 4 completes); merge_method=mass_conserving '
+                 'prefers a member as the merge survivor',
+                 dims=(2, 3)),
+        ),
+    ),
+    MethodAxis(
+        name='wall_clamp', title='Impenetrability of flat walls',
+        group='connectivity', default=None,
+        control='SolverMethods.wall_clamp_bc(planes= | box=, exclude=bV, '
+                'min_gap=) returns the ddgclib._boundary_conditions.'
+                'WallClampBC the setup adds to its bc_set (None when the '
+                'axis is None); applied by the integrators after every move',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'Walls are vertices: a fluid vertex can step between two of '
+              'them (laneL known limit 1). The clamp is one-sided and the '
+              'identity wherever impenetrability holds, so it moves no pin '
+              'of a run in which no vertex leaves. The planes and the gap '
+              'are geometry (build-time arguments, recorded in extra); only '
+              'the policy is the axis. Curved walls (the 3D pipe) are not '
+              'covered.',
+        options=(
+            _opt(None, 'No clamp: a vertex that steps past a wall stays '
+                 'outside (under frozen_set=hull it also releases the wall)',
+                 'validated',
+                 'ddgclib/methods/_config.py:SolverMethods.wall_clamp_bc',
+                 'every pin until laneV 2026-10-07; reachable by '
+                 '.replace(wall_clamp=None) on the flipped presets. Measured '
+                 'laneV: dam_break_2D at refinement 4 (alpha 0.3, 3170 steps) '
+                 'ends at step 2892 with an air vertex of 2.35e-6 m^2 at '
+                 '(0.0653, -1.2e-6) under the floor; the pre-laneH HP2D '
+                 'configuration of laneL (L 15, dt 0.01, 3000 steps) has up '
+                 'to 54 vertices outside the wall lines from step 1248, '
+                 'profile l2 0.554 on the downstream half'),
+            _opt('project', 'Each step every non-excluded vertex past a plane '
+                 'is put back to level + direction * min_gap on that axis and '
+                 'its velocity component INTO the wall is zeroed (the '
+                 'component away from it is kept). The arithmetic of the '
+                 'case-local WallClampBC of the electrolysis case '
+                 '(2026-07), now the library class', 'validated',
+                 'ddgclib/_boundary_conditions.py:WallClampBC',
+                 'laneV 2026-10-07, DEFAULT of dam_break_2D, dam_break_3D and '
+                 'hagen_poiseuille_2D (the three electrolysis presets record '
+                 'the clamp their setups applied since 2026-07, bit-identical '
+                 'to the case-local class). One-sided and the identity '
+                 'wherever impenetrability holds: no pin moved (refinement 3 '
+                 'dam break at alpha 0.3 / 0.2 / 0.1 bit-identical with 0 '
+                 'put-backs, digests b69bcb3d7fce85df / cc2a87e93c46209b / '
+                 '1f7e46cb66f4fadb on the cloud machine; the HP2D developing '
+                 'pin l2 0.013084885355719682 equal; 3D dam break and '
+                 'electrolysis pins unchanged). dam_break_2D refinement 4 '
+                 '(alpha 0.3, 3170 steps): completes the horizon (0 outside) '
+                 'instead of ending at step 2892 with a vertex under the '
+                 'floor; HP2D laneL configuration: 54 -> 0 vertices outside, '
+                 'profile l2 0.554 -> 0.399, transverse velocity 0.556 -> '
+                 '8.4e-4, 109591 put-backs on 1849 of 3000 steps. GAP: the '
+                 'put-down distance is geometry (setup argument clamp_gap, '
+                 'default 0.1 of the wall vertex spacing, recorded in '
+                 'params); with gap 0 the vertex lands ON the wall line, '
+                 'becomes a hull vertex with a half cell open to the absolute '
+                 'pressure (633 N on 2.1e-6 kg, |a| 3e8 m/s^2 absorbed by the '
+                 'clamp every step at refinement 4): DO-NOT. Curved walls '
+                 '(the 3D pipe) have no clamp; the setup raises on a request '
+                 '(test_wall_clamp.py, 8; pin PIN_PUSHED_DIGEST '
+                 '39710661593753f5)',
                  dims=(2, 3)),
         ),
     ),
@@ -657,7 +863,73 @@ _AXES: list[MethodAxis] = [
                  'at 0.33 m/s by step 1341; released under volume). '
                  'dam_break_3D with the exact faces: as clean as '
                  'neighbour_count (adc368cdb99b3f4a, |u|max 0.057 against '
-                 '0.062, KE_liq peak 4.87e-6 against 4.08e-6 J)',
+                 '0.062, KE_liq peak 4.87e-6 against 4.08e-6 J). laneV '
+                 '2026-10-07: refinement 4 (alpha 0.3) ejects at step 1343 '
+                 'on an air sliver between two floor vertices (3.9e-6 m^2, '
+                 '0.62 N of viscous force on 4.8e-6 kg); the lone-vertex '
+                 'erasure is two whole-mass releases (0.110 kg at step 1182, '
+                 '0.050 kg at 1206, interface -> bulk air); the vote arm is '
+                 'simplex_vote=mass_fraction',
+                 dims=(2, 3), phases='multi'),
+        ),
+    ),
+    MethodAxis(
+        name='simplex_vote', title='Simplex relabelling vote after a rebuild',
+        group='thermodynamics', default='bulk_majority', applies_to='multi',
+        control='simplex_vote= in mps.refresh (setup) AND in the retopo '
+                'partial (_retopologize_multiphase / '
+                'retopologize_multiphase_periodic -> '
+                'multiphase_rebuild_with_ledger); the two must match',
+        notes='laneV 2026-10-07 (' + _LANE + 'laneV-impenetrability-and-vote.md). '
+              'The vote derives the top-simplex labels (which define the '
+              'interface and, under split_method=simplex, the sub-volumes) '
+              'from the vertex state after every reconnection.',
+        options=(
+            _opt('bulk_majority', 'Majority among the bulk vertices of the '
+                 'simplex (interface vertices do not vote); a tie goes to '
+                 'the lower phase ID; a simplex of interface vertices only '
+                 'takes the lowest of their interface_phases', 'validated',
+                 'ddgclib/multiphase.py:MultiphaseSystem.'
+                 'assign_simplex_phases_from_vertices',
+                 'all pins. Erases a lone bulk vertex of the higher phase ID '
+                 'whose incident simplices are all ties (laneF: the simplex '
+                 'arm of the dam break, step 1182, 0.11 kg of liquid left '
+                 'on an air vertex)', phases='multi'),
+            _opt('mass_fraction', 'Every vertex votes with the weight of '
+                 'phase k = its volume-equivalent mass share (m_phase[k] / '
+                 'rho0_k, normalised over the phases); a vertex without a '
+                 'ledger votes by its label; tie to the lower phase ID. '
+                 'Reads the Lagrangian ledger instead of the stale '
+                 'neighbour count, so interface vertices that still carry '
+                 'liquid mass keep their liquid simplices', 'experimental',
+                 'ddgclib/multiphase.py:MultiphaseSystem.'
+                 'assign_simplex_phases_from_vertices',
+                 'laneV 2026-10-07 (diagnose_sliver_ejection.py --replace '
+                 'simplex_vote=mass_fraction ...), not adopted. With the '
+                 'preset split neighbour_count the dam break (refinement 3, '
+                 'alpha 0.2 and 0.1) EJECTS AT STEP 0 (|u| 250 m/s): the '
+                 'interface vertices carry exact half fractions, every '
+                 '(liquid, air, interface) triangle of the column face is a '
+                 'tie that the preloaded liquid density tips, so the setup '
+                 'final refresh relabels the face and p_liq hits the EOS clip '
+                 '(DO-NOT). With split_method=simplex the one-cell tongue '
+                 'survives (alpha 0.2: front 0.0760 against 0.0657, KE_liq '
+                 'peak 6.5e-3 against 3.75e-2 J, no whole-mass release '
+                 'against 0.160 kg) but a 9.1e-6 m^2 air cell at the floor '
+                 'ejects at step 1407 (|a| 6.7e4); with the merge '
+                 '(merge_cdist 2.5e-3, mass_conserving) it completes the '
+                 'horizon at alpha 0.2 (front 0.0772, KE_liq peak 4.19e-3, '
+                 '|u|max 0.49, 0.016 kg released, 73082212bde3fd2f) and at '
+                 'alpha 0.1 (front 0.0854 but |u|max 2.85 against 1.40, '
+                 '180 against 37 flip steps, 0.134 kg released, '
+                 'e91ed94b8f0c1dd6), and at refinement 4 with the clamp '
+                 '(front 0.0815, |u|max 0.43, 110 whole-mass events moving '
+                 '1.21 kg of the 2.5 kg of liquid through the pool). '
+                 'Electrolysis static bubble (3D 1/1, 2000 steps): '
+                 'bit-identical to the preset (7f61e7da0348ecf0); with the '
+                 'simplex split the setup relabels 8 of 35 gas cells and the '
+                 'bubble collapses (jump 101173 Pa against 144). '
+                 'test_simplex_vote.py (8)',
                  dims=(2, 3), phases='multi'),
         ),
     ),
@@ -1112,6 +1384,66 @@ _AXES: list[MethodAxis] = [
         ),
     ),
     MethodAxis(
+        name='contact_line', title='Free-surface tension and contact-angle force',
+        group='forces', default=None, applies_to='single',
+        control='free_surface= on SolverMethods.dudt_fn (a '
+                'ddgclib.operators.free_surface.FreeSurface built by the '
+                'setup from gamma, theta and the wall / free / contact vertex '
+                'sets); added to the stress acceleration as F / m like '
+                'body_force',
+        notes='laneI 2026-10-06 (' + _LANE + 'laneI-static-capillary-rise.md). '
+              'The single-phase mesh has no second phase to carry a '
+              'curvature stencil; surface tension and wall adhesion enter as '
+              'the gradient of the capillary energy of the boundary facets '
+              'of the simplex cache. The wall-normal part on a contact '
+              'vertex is the wall reaction, discarded by AxialSlideBC.',
+        options=(
+            _opt(None, 'No free-surface tension: the free surface carries '
+                 'the pressure of its open dual fan only (hydrostatic '
+                 'column, dam break)', 'validated',
+                 'ddgclib/methods/_config.py:SolverMethods.dudt_fn',
+                 'every single-phase pin', phases='single'),
+            _opt('energy_gradient', 'F_i = -d/dx_i [gamma A_free - gamma '
+                 'cos(theta) A_wet] over the boundary facets: gamma '
+                 '(t_next - t_prev) on a 2D surface vertex (the integrated '
+                 'curvature normal), the cotangent mean-curvature normal in '
+                 '3D, plus gamma cos(theta) per unit contact-line length '
+                 'along the wall on a contact vertex (Young). Facets are '
+                 'reread when the simplex cache changes', 'experimental',
+                 'ddgclib/operators/free_surface.py:FreeSurface',
+                 'laneI 2026-10-06, static capillary rise (water, r = 2 mm, '
+                 'presets capillary_rise_static_2D / _3D, dual_only / '
+                 'dual_only_bare). The force is the exact negative gradient '
+                 'of the capillary energy to 1e-11 in 2D and 3D '
+                 '(test_free_surface.py). 2D slit, refinement 2 (113 '
+                 'vertices, 5 surface vertices), 300 t_ac, alpha_art 0.05: '
+                 'from the flat meniscus the volume-averaged height settles '
+                 'at +1.1e-4 of the compressible Young-Laplace reference '
+                 '(max|u| 2.3e-6 m/s, max|a| 6.9e-8), from the pre-shaped '
+                 'meniscus it creeps to +2.9e-3 (contact-line creep, max|u| '
+                 '1.1e-4 still falling); refinement 3: laneI log section 4. '
+                 'The discrete meniscus has its contact point 6 % below the '
+                 'continuum one at refinement 2 (the first polyline edge '
+                 'carries the whole contact angle). 3D octagonal tube '
+                 '(refinement 1, 87 vertices), 100 t_ac: -1.1e-2 against the '
+                 'force balance of the discrete cross-section (+7.1e-2 '
+                 'against the round tube: the octagon has 8 % more '
+                 'perimeter per area). Reconnecting arm (delaunay_material '
+                 '+ conservative remap, 2D refinement 2, 300 t_ac): settles '
+                 'in 40 t_ac without creep but 5.1e-2 too high (the '
+                 'reconnection changes the mass budget of the band; '
+                 'measured-worse for this case). Known limit: on a fixed '
+                 'connectivity the slow circulation of the creeping '
+                 'meniscus squeezes the cell under the apex (2D refinement '
+                 '2, alpha 0.05: the interior vertex 9 um under the apex '
+                 'at 250 t_ac, bursts of max|u| 1.5e-2 that die out; at refinement 3 '
+                 'the same drift squeezes two interior cells and the run '
+                 'blows up at 177 t_ac, while the flat start settles to '
+                 '+3.0e-5 with max|a| 5.4e-8)',
+                 dims=(2, 3), phases='single'),
+        ),
+    ),
+    MethodAxis(
         name='density_diffusion', title='Gradient-corrected density diffusion',
         group='thermodynamics', default=None, kind='float', applies_to='single',
         control='density_diffusion= integrator kwarg (euler, symplectic_euler); '
@@ -1246,7 +1578,9 @@ _AXES: list[MethodAxis] = [
         group='dual geometry', default=None,
         control='edge_area_source= integrator kwarg, forwarded by name to '
                 '_retopologize / _retopologize_multiphase / bare_dual_refresh / '
-                'retopologize_material_delaunay, which fill HC._edge_area_cache '
+                'retopologize_material_delaunay / retopologize_periodic (laneG; '
+                'no fan cache there, so e_star_cache raises, and the seam '
+                'simplices are cached unwrapped), which fill HC._edge_area_cache '
                 'from the chosen source and record the value on '
                 'HC._edge_area_source; every reader of a dual face (stress_force, '
                 'multiphase_stress_force, velocity_difference_tensor, '
@@ -1443,7 +1777,16 @@ _AXES: list[MethodAxis] = [
                  'segments (the common neighbours are min-imaged about x_i, so '
                  'the two sides can pick different periodic images) and 2 '
                  'return a zero vector from one side only '
-                 '(test_area_orientation.py::TestPeriodicBranch)', dims=(2,)),
+                 '(test_area_orientation.py::TestPeriodicBranch). laneG '
+                 '2026-10-06 re-attributed: those 64 pairs are the triangles '
+                 'of that test mesh that span more than half the period (a '
+                 'jittered corner vertex sits below the wall row and qhull '
+                 'closes the hull with slivers from it to wall vertices up to '
+                 '0.5 away), which no minimum image can represent; picking '
+                 'the apexes from the simplex cache instead of v_i.nn & v_j.nn '
+                 'changes nothing there (64 = 64) and the 2D shearing-plate '
+                 'mesh has 0 asymmetric pairs of 1792 directed edges, so the '
+                 'rule was left as it is', dims=(2,)),
         ),
     ),
     MethodAxis(

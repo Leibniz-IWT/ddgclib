@@ -52,25 +52,26 @@ __all__ = ['SolverMethods']
 # Fields that are only meaningful for the multiphase pipeline.  For a
 # single-phase config they must stay at their defaults.
 _MULTI_ONLY = ('projection_every', 'split_method', 'curvature_path',
-               'phase_ledger', 'face_closure')
+               'phase_ledger', 'face_closure', 'simplex_vote')
 
 # Connectivity values whose retopology function runs the multiphase
 # redistribution block (so remap / projection_every can apply).
-_RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material')
+_RECONNECTING = ('delaunay', 'adaptive', 'delaunay_material', 'periodic')
 
 # Connectivity values for which frozen_set='membership' is implemented:
 # bV is rebuilt from the hull of a NEW connectivity inside _retopologize
-# and nothing else creates, moves or removes wall vertices.  'adaptive'
-# also rebuilds the hull but is excluded: hyperct.remesh splits wall edges
-# into vertices that are not members and collapses / smooths members that
-# are off the hull (measured, laneL fix round 1).
-_HULL_REBUILDING = ('delaunay',)
+# (or retopologize_periodic, laneG) and nothing else creates, moves or
+# removes wall vertices.  'adaptive' also rebuilds the hull but is
+# excluded: hyperct.remesh splits wall edges into vertices that are not
+# members and collapses / smooths members that are off the hull
+# (measured, laneL fix round 1).
+_HULL_REBUILDING = ('delaunay', 'periodic')
 
 # Connectivity values whose retopology function applies the 3D axis
-# edge_area_source (laneQ), and the subset that builds the batch_e_star
-# fan cache ('e_star_cache').
+# edge_area_source (laneQ; 'periodic' since laneG), and the subset that
+# builds the batch_e_star fan cache ('e_star_cache').
 _EDGE_AREA_CONNECTIVITIES = ('delaunay', 'dual_only', 'dual_only_bare',
-                             'delaunay_material')
+                             'delaunay_material', 'periodic')
 _FAN_CACHE_CONNECTIVITIES = ('delaunay', 'dual_only')
 
 
@@ -91,10 +92,12 @@ class SolverMethods:
     connectivity: str = 'delaunay'
     remap: str | None = None
     frozen_set: str = 'hull'
+    wall_clamp: str | None = None
     projection_every: int = 1
     redistribute_mass: bool = False
     split_method: str = 'neighbour_count'
     phase_ledger: str = 'volume'
+    simplex_vote: str = 'bulk_majority'
     curvature_path: str = 'integrated'
     face_closure: str = 'renormalise'
     pressure_flux: str = 'centred'
@@ -102,8 +105,10 @@ class SolverMethods:
     area_orientation: str = 'primal_edge'
     edge_area_source: str | None = None
     density_diffusion: float | None = None
+    contact_line: str | None = None
     displacement_eps: float | None = None
     merge_cdist: float | None = None
+    merge_method: str = 'merge_all'
     remesh_kwargs: dict[str, Any] | None = None
     periodic_axes: tuple[int, ...] | None = None
     backend: str | None = None
@@ -122,7 +127,10 @@ class SolverMethods:
         self._check_choice('connectivity', self.connectivity)
         self._check_choice('remap', self.remap)
         self._check_choice('frozen_set', self.frozen_set)
+        self._check_choice('wall_clamp', self.wall_clamp)
+        self._check_choice('merge_method', self.merge_method)
         self._check_choice('split_method', self.split_method)
+        self._check_choice('simplex_vote', self.simplex_vote)
         self._check_choice('phase_ledger', self.phase_ledger)
         self._check_choice('curvature_path', self.curvature_path)
         self._check_choice('face_closure', self.face_closure)
@@ -143,8 +151,8 @@ class SolverMethods:
                 raise ValueError(
                     f"edge_area_source is not applied by connectivity="
                     f"{self.connectivity!r} ('frozen' never rebuilds the "
-                    "duals, 'periodic' and 'custom' do not forward it, "
-                    "'adaptive' is 2D only); it "
+                    "duals, 'custom' does not forward it, 'adaptive' is "
+                    "2D only); it "
                     f"is implemented for {_EDGE_AREA_CONNECTIVITIES}")
             if (self.edge_area_source == 'e_star_cache'
                     and self.connectivity not in _FAN_CACHE_CONNECTIVITIES):
@@ -162,6 +170,34 @@ class SolverMethods:
 
         if self.density_diffusion is not None and not self.density_diffusion > 0:
             raise ValueError("density_diffusion must be None or > 0")
+        if self.contact_line is not None:
+            # laneI: the free-surface energy gradient is a single-phase
+            # operator on the boundary facets of the simplex cache.
+            if self.phases != 'single':
+                raise ValueError("contact_line applies to phases='single' "
+                                 "only (the multiphase force carries its "
+                                 "own curvature_path)")
+            self._check_choice('contact_line', self.contact_line)
+        if self.phases == 'film':
+            # laneX: a surface mesh has no dual mesh, so only the two
+            # connectivity values that never call compute_vd apply, and
+            # none of the bulk-only axes.
+            if self.connectivity not in ('frozen', 'custom'):
+                raise ValueError(
+                    "phases='film' (a surface mesh) needs connectivity="
+                    "'frozen' or 'custom' (every other retopology runs "
+                    "Delaunay / compute_vd on a volumetric complex)")
+            if self.redistribute_mass:
+                raise ValueError("phases='film' has no dual volumes to "
+                                 "redistribute mass over")
+            for name in ('pressure_flux', 'viscous_flux'):
+                if getattr(self, name) != AXES[name].default:
+                    raise ValueError(f"{name} applies to phases='single' only "
+                                     "(the film force has no bulk flux)")
+            if self.density_diffusion is not None:
+                raise ValueError("density_diffusion applies to phases='single' only")
+            if self.contact_line is not None:
+                raise ValueError("contact_line applies to phases='single' only")
         if self.phases == 'multi':
             if self.pressure_flux != AXES['pressure_flux'].default:
                 raise ValueError("pressure_flux applies to phases='single' only "
@@ -191,6 +227,18 @@ class SolverMethods:
             raise ValueError("displacement_eps must be None or > 0")
         if self.merge_cdist is not None and not self.merge_cdist > 0:
             raise ValueError("merge_cdist must be None or > 0")
+        if self.merge_method != AXES['merge_method'].default:
+            # laneV: the merge runs in _retopologize step 0 only, i.e. when
+            # merge_cdist is set and the Delaunay / adaptive rebuild runs.
+            if self.merge_cdist is None:
+                raise ValueError(
+                    f"merge_method={self.merge_method!r} is the merge of "
+                    "merge_cdist: set merge_cdist > 0")
+            if self.connectivity not in ('delaunay', 'adaptive'):
+                raise ValueError(
+                    f"merge_method={self.merge_method!r} is applied by "
+                    "_retopologize before a Delaunay / adaptive rebuild "
+                    f"only, not under connectivity={self.connectivity!r}")
         if self.workers is not None and (
                 not isinstance(self.workers, int) or self.workers < 1):
             raise ValueError("workers must be None or an int >= 1")
@@ -256,7 +304,7 @@ class SolverMethods:
             raise ValueError(
                 f"frozen_set='membership' is not applied under "
                 f"connectivity={self.connectivity!r}: it is implemented for "
-                f"{', '.join(_HULL_REBUILDING)} only. 'dual_only', "
+                f"{' and '.join(_HULL_REBUILDING)} only. 'dual_only', "
                 f"'dual_only_bare' and 'frozen' never rebuild the hull, so "
                 f"their bV is persistent already; 'adaptive' creates wall "
                 f"vertices that are not members and remeshes members that "
@@ -273,6 +321,12 @@ class SolverMethods:
             if not self.redistribute_mass:
                 raise ValueError("remap='conservative' requires "
                                  "redistribute_mass=True")
+            if self.connectivity == 'periodic' and not multi:
+                raise ValueError(
+                    "remap='conservative' on connectivity='periodic' is "
+                    "implemented for phases='multi' only "
+                    "(retopologize_multiphase_periodic, laneG); the "
+                    "single-phase periodic rebuild has no remap")
             if self.connectivity not in _RECONNECTING:
                 raise ValueError(
                     f"remap='conservative' is a silent no-op under "
@@ -425,7 +479,9 @@ class SolverMethods:
         - ``'delaunay_material'``-> ``retopologize_material_delaunay`` (a
           partial binding ``retopo_remap`` when the remap is on)
         - ``'periodic'`` + multi-> ``partial(retopologize_multiphase_periodic, ...)``
-          (*domain_bounds* required)
+          (*domain_bounds* required; ``retopo_remap`` / ``projection_every``
+          / ``frozen_set`` / ``phase_ledger`` bound like the Delaunay
+          partial when not the default, laneG)
         - single-phase + remap  -> ``partial(_retopologize, retopo_remap=...)``
           (the integrator forwards its retopology kwargs to it by name)
         - other single-phase    -> ``None`` (library default ``_retopologize``;
@@ -438,7 +494,10 @@ class SolverMethods:
         ``partial(_retopologize, ...)``); the default ``'hull'`` binds
         nothing, so the objects above are unchanged.  Likewise a
         non-default ``phase_ledger`` adds ``phase_ledger=`` to the two
-        multiphase partials that redistribute.
+        multiphase partials that redistribute, a non-default
+        ``simplex_vote`` adds ``simplex_vote=`` to both multiphase
+        partials and a non-default ``merge_method`` adds
+        ``merge_method=`` to the Delaunay partials (laneV).
         """
         if self.connectivity == 'frozen':
             return False
@@ -461,8 +520,10 @@ class SolverMethods:
                            retopo_remap=self.remap)
         membership = self.frozen_set != AXES['frozen_set'].default
         ledger = self.phase_ledger != AXES['phase_ledger'].default
+        vote = self.simplex_vote != AXES['simplex_vote'].default
+        merge = self.merge_method != AXES['merge_method'].default
         if self.phases == 'single':
-            if self.remap is None and not membership:
+            if self.remap is None and not membership and not merge:
                 return None
             from ddgclib.dynamic_integrators._integrators_dynamic import (
                 _retopologize,
@@ -472,6 +533,8 @@ class SolverMethods:
                 kw_s['retopo_remap'] = self.remap
             if membership:
                 kw_s['frozen_set'] = self.frozen_set
+            if merge:
+                kw_s['merge_method'] = self.merge_method
             return partial(_retopologize, **kw_s)
         if mps is None:
             raise ValueError("multiphase configs need mps=MultiphaseSystem")
@@ -488,6 +551,14 @@ class SolverMethods:
             )
             if ledger:
                 kw_p['phase_ledger'] = self.phase_ledger
+            if membership:
+                kw_p['frozen_set'] = self.frozen_set
+            if self.remap is not None:
+                kw_p['retopo_remap'] = self.remap
+            if self.projection_every != 1:
+                kw_p['projection_every'] = self.projection_every
+            if vote:
+                kw_p['simplex_vote'] = self.simplex_vote
             return partial(retopologize_multiphase_periodic, **kw_p)
         from ddgclib.dynamic_integrators._integrators_dynamic import (
             _retopologize_multiphase,
@@ -507,7 +578,33 @@ class SolverMethods:
             kw['frozen_set'] = self.frozen_set
         if ledger:
             kw['phase_ledger'] = self.phase_ledger
+        if vote:
+            kw['simplex_vote'] = self.simplex_vote
+        if merge:
+            kw['merge_method'] = self.merge_method
         return partial(_retopologize_multiphase, **kw)
+
+    def wall_clamp_bc(self, planes=None, *, box=None, axes=None,
+                      min_gap: float = 0.0, exclude=None):
+        """The :class:`ddgclib._boundary_conditions.WallClampBC` of the
+        axis ``wall_clamp`` (laneV), or ``None`` when the axis is None
+        (the setup then adds nothing to its ``bc_set``).
+
+        *planes* is ``[(axis, level, direction), ...]``; *box* with
+        optional *axes* builds both faces of each axis of ``[(lo, hi),
+        ...]`` instead.  *exclude* is the frozen set (``bV``), *min_gap*
+        the put-down distance from the wall: geometry, not method, so the
+        setup records them in ``record_methods(extra=)``.
+        """
+        if self.wall_clamp is None:
+            return None
+        if (planes is None) == (box is None):
+            raise ValueError("wall_clamp_bc needs planes= or box=")
+        from ddgclib._boundary_conditions import WallClampBC
+        if box is not None:
+            return WallClampBC.box(box, axes=axes, min_gap=min_gap,
+                                   exclude=exclude)
+        return WallClampBC(planes, min_gap=min_gap, exclude=exclude)
 
     def integrator_kwargs(self, mps=None, custom: Callable | None = None,
                           boundary_filter: Callable | None = None,
@@ -556,7 +653,9 @@ class SolverMethods:
 
     def dudt_fn(self, HC, *, mu: float | None = None, mps=None,
                 pressure_model=None,
-                body_force: Any = None) -> Callable:
+                body_force: Any = None, free_surface=None,
+                gamma: float | None = None,
+                damping: float = 0.0) -> Callable:
         """Acceleration function bound the canonical way.
 
         single-phase: ``partial(dudt_i, dim, mu, HC, pressure_model
@@ -564,11 +663,40 @@ class SolverMethods:
         multiphase:   ``partial(multiphase_dudt_i, dim, mps, HC,
         pressure_model[, curvature_path][, area_orientation]
         [, face_closure])``
+        film:         ``partial(surface_tension_acceleration, gamma,
+        damping, dim, HC)`` (laneX; *gamma* required, the velocity
+        damping is the film's only dissipation)
 
         *body_force* (per unit mass, e.g. ``[0, -9.81]``) wraps the
         result as ``a + g`` exactly like the dam-break setup does.
+        *free_surface* (a :class:`ddgclib.operators.free_surface
+        .FreeSurface`, required by and only by
+        ``contact_line='energy_gradient'``) adds its force as
+        ``F / m`` (laneI).
         """
-        if self.phases == 'single':
+        if (self.contact_line is not None) != (free_surface is not None):
+            raise ValueError(
+                "contact_line='energy_gradient' needs free_surface=FreeSurface"
+                if free_surface is None else
+                "free_surface given but contact_line is None: set "
+                "contact_line='energy_gradient' so the force is recorded")
+        if self.phases != 'film' and gamma is not None:
+            raise ValueError("gamma= is the film force's coefficient "
+                             "(phases='film'); the bulk models carry gamma "
+                             "in mps / the FreeSurface")
+        if self.phases == 'film':
+            if gamma is None:
+                raise ValueError("film dudt_fn needs gamma=")
+            if mu is not None or mps is not None or pressure_model is not None:
+                raise ValueError("phases='film' has no viscous flux, "
+                                 "MultiphaseSystem or EOS: pass gamma= and "
+                                 "damping= only")
+            from ddgclib.operators.surface_tension import (
+                surface_tension_acceleration,
+            )
+            fn: Callable = partial(surface_tension_acceleration, gamma=gamma,
+                                   damping=damping, dim=self.dim, HC=HC)
+        elif self.phases == 'single':
             if mu is None:
                 raise ValueError("single-phase dudt_fn needs mu=")
             if pressure_model is not None:
@@ -586,7 +714,7 @@ class SolverMethods:
                 kw_s['viscous_flux'] = self.viscous_flux
             if self.area_orientation != AXES['area_orientation'].default:
                 kw_s['area_orientation'] = self.area_orientation
-            fn: Callable = partial(dudt_i, **kw_s)
+            fn = partial(dudt_i, **kw_s)
         else:
             if mps is None:
                 raise ValueError("multiphase dudt_fn needs mps=")
@@ -600,19 +728,32 @@ class SolverMethods:
             if self.face_closure != AXES['face_closure'].default:
                 kw['face_closure'] = self.face_closure
             fn = partial(multiphase_dudt_i, **kw)
-        if body_force is None:
+        if body_force is None and free_surface is None:
             return fn
+        _stress_fn = fn
+        if free_surface is not None:
+            _surface = free_surface.force
+
+            def fn(v):
+                return _stress_fn(v) + _surface(v) / v.m
+
+            fn.stress_fn = _stress_fn            # type: ignore[attr-defined]
+            fn.free_surface = free_surface       # type: ignore[attr-defined]
+            if body_force is None:
+                return fn
         g_vec = np.asarray(body_force, dtype=float)
         if g_vec.shape != (self.dim,):
             raise ValueError(f"body_force must have exactly {self.dim} "
                              f"components, got shape {g_vec.shape}")
-        _stress_fn = fn
+        _inner = fn
 
         def dudt_with_body_force(v):
-            return _stress_fn(v) + g_vec
+            return _inner(v) + g_vec
 
         dudt_with_body_force.stress_fn = _stress_fn  # type: ignore[attr-defined]
         dudt_with_body_force.body_force = g_vec     # type: ignore[attr-defined]
+        if free_surface is not None:
+            dudt_with_body_force.free_surface = free_surface  # type: ignore[attr-defined]
         return dudt_with_body_force
 
     def integrate(self, HC, bV, dudt_fn, *, dt: float,
